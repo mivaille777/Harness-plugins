@@ -4,6 +4,7 @@ coverage/
 .test-dsh-home/
 native/dist/
 native/src-tauri/target/
+native/src-tauri/gen/
 *.tgz
 *.log
 .DS_Store
