@@ -64,6 +64,15 @@ describe('SelectionSnapshot validation', () => {
       .toThrow(SelectionSnapshotValidationError)
   })
 
+  it('turns malformed nested input into a domain validation error instead of TypeError', () => {
+    expect(() => normalizeSelectionSnapshot({ id: 'broken' }))
+      .toThrow(SelectionSnapshotValidationError)
+    expect(() => normalizeSelectionSnapshot({
+      ...makeSnapshot(),
+      source: { kind: 'unknown-provider-kind' },
+    })).toThrow('source.kind must be one of')
+  })
+
   it('rejects invalid confidence and geometry', () => {
     expect(() => normalizeSelectionSnapshot(makeSnapshot({ confidence: 1.1 })))
       .toThrow('confidence must be a finite number between 0 and 1')
