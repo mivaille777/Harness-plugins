@@ -1,4 +1,5 @@
 pub mod bridge;
+pub mod native_messaging;
 pub mod protocol;
 
 pub fn run() {
