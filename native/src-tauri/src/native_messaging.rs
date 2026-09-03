@@ -93,7 +93,8 @@ fn extract_message_id(raw: &str) -> String {
 }
 
 fn protocol_error_response(id: String, error: ProtocolError) -> IpcMessage {
-    let code = match error {
+    let message = error.to_string();
+    let code = match &error {
         ProtocolError::ProtocolMismatch(_) => "PROTOCOL_MISMATCH",
         ProtocolError::UnknownMessageType(_) => "UNKNOWN_MESSAGE_TYPE",
         ProtocolError::FrameTooLarge(_) => "FRAME_TOO_LARGE",
@@ -101,7 +102,7 @@ fn protocol_error_response(id: String, error: ProtocolError) -> IpcMessage {
         ProtocolError::DuplicateRequestId(_) => "DUPLICATE_REQUEST_ID",
         ProtocolError::InvalidMessage(_) => "INVALID_MESSAGE",
     };
-    error_response(id, code, error.to_string())
+    error_response(id, code, message)
 }
 
 fn error_response(id: String, code: &str, message: String) -> IpcMessage {
