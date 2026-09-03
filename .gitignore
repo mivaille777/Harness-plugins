@@ -2,6 +2,7 @@ node_modules/
 lib/
 coverage/
 .test-dsh-home/
+native/dist/
 native/src-tauri/target/
 *.tgz
 *.log
