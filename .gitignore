@@ -1,0 +1,7 @@
+node_modules/
+lib/
+coverage/
+.test-dsh-home/
+*.tgz
+*.log
+.DS_Store
