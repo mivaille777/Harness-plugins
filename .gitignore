@@ -5,6 +5,9 @@ coverage/
 native/dist/
 native/src-tauri/target/
 native/src-tauri/gen/
+browser-extension/dist/
+browser-extension/test-results/
+browser-extension/playwright-report/
 *.tgz
 *.log
 .DS_Store
