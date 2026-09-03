@@ -52,8 +52,9 @@ function nextMessage(timeoutMs = 3_000) {
 
 async function request(type, payload) {
   const id = `debug-${randomUUID()}`
+  const responsePromise = nextMessage()
   socket.write(encode({ protocol: 1, id, type, payload }))
-  const response = await nextMessage()
+  const response = await responsePromise
   if (response.id !== id) throw new Error(`response id mismatch: ${response.id}`)
   if (response.type === 'error.response') {
     throw new Error(`${response.payload.code}: ${response.payload.message}`)
