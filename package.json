@@ -23,6 +23,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:selection": "vitest run tests/selection-context.spec.ts",
+    "demo:selection": "pnpm build && node scripts/demo-selection.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:bundle",
     "prepare": "pnpm build",
