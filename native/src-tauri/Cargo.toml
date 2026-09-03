@@ -6,10 +6,15 @@ edition = "2021"
 rust-version = "1.77.2"
 publish = false
 build = "build.rs"
+default-run = "dsh-selection-companion-native"
 
 [lib]
 name = "dsh_selection_companion_native"
 path = "src/lib.rs"
+
+[[bin]]
+name = "dsh-selection-companion-host"
+path = "src/bin/native_host.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
