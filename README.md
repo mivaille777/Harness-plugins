@@ -4,403 +4,387 @@ Windows Selection Context Bridge for DeepSeek Harness.
 
 > Select anywhere → Continue in DeepSeek.
 
-The repository has completed **Task 4**. It is still a normal DeepSeek Harness bundle, now with a real Windows Native Companion transport: the Harness plugin owns a Node named-pipe server and a Tauri 2 / Rust companion connects to it using the Task 3 versioned IPC contract.
+The repository has completed the implementation work for **Task 5**. It remains a normal DeepSeek Harness bundle, but now has a real Chrome/Edge browser selection provider that sends DOM selections through Chrome Native Messaging and the Task 4 Windows Named Pipe into `ctx.selectionContext`.
 
 ## Current architecture
 
 ```text
-External Windows applications
-        ↓ (Task 5+ providers)
-Tauri Native Companion
-React UI + Rust bridge client
+Chrome / Edge page
+DOM Selection / input selection
         ↓
+MV3 content script
+        ↓
+MV3 background service worker
+        ↓ Chrome Native Messaging
+ dsh-selection-companion-host.exe
+        ↓ Protocol V1 over Task 4 framing
 Windows Named Pipe
 \\.\pipe\dsh-selection-companion-v1
         ↓
 dsh-selection-companion Cordis plugin
-SelectionCompanionBridgeService
         ↓
 BridgeMessageRouter
         ↓
-SelectionContextService
-        ↓ (Task 9+)
-DeepSeek Harness Session / Agent tools
+ctx.selectionContext
+        ↓ (later tasks)
+Harness Session / Agent tools
 ```
 
-The Native Companion does **not** call an LLM, write Harness session files, or maintain a second conversation history.
+The browser extension, native host, and Tauri UI do **not** call an LLM or maintain a second chat history.
 
 ## Task 1 — installable Harness bundle
 
-- Standard Cordis plugin entry (`src/index.ts`)
+- standard Cordis plugin entry
 - `package.json#dsh.bundle.patch`
 - `cordis.patch.yml`
 - installable with `dsh plugin --profile web add ...`
-- TypeScript build, tests, bundle verification, `prepare`, and `prepack`
 
 ## Task 2 — Selection Context capability
 
-- `SelectionSnapshot` for browser/PDF/Word/desktop sources
-- runtime validation of untrusted snapshot data
-- detached, deeply frozen snapshots
-- strict per-id revision ordering
-- in-memory TTL and bounded retention
-- `SelectionContextService` registered as `ctx.selectionContext`
+- immutable validated `SelectionSnapshot`
+- strict revision ordering
+- in-memory TTL / bounded retention
+- `SelectionContextService` at `ctx.selectionContext`
 
-## Task 3 — versioned TypeScript ↔ Rust IPC contract
+## Task 3 — versioned TypeScript ↔ Rust IPC
 
-Every IPC message uses:
+Protocol V1 uses:
 
 ```json
 {
   "protocol": 1,
-  "id": "request-or-event-id",
-  "type": "bridge.ping",
+  "id": "request-id",
+  "type": "selection.update",
   "payload": {}
 }
 ```
 
-Framing is:
-
-```text
-4-byte unsigned big-endian JSON byte length
-+
-UTF-8 JSON payload
-```
-
-Protocol V1 limits one JSON payload to 1 MiB. TypeScript validates with Zod; Rust validates with serde/serde_json plus semantic checks. Shared JSON fixtures under `tests/protocol/` are consumed by both sides.
+Harness/native pipe framing is a 4-byte unsigned big-endian length followed by UTF-8 JSON, limited to 1 MiB.
 
 ## Task 4 — Native Companion + Windows Named Pipe
 
-### Harness side
+The Harness plugin owns `SelectionCompanionBridgeService`, a Cordis `Service` started through `Service.init` and disposed through `ctx.effect`.
 
-`SelectionCompanionBridgeService` is a real Cordis `Service`.
+The Tauri 2 companion connects to the same pipe and exposes `bridge_status`, `bridge_connect`, `bridge_ping`, and `bridge_disconnect` to its React UI.
 
-- starts in `Service.init`
-- listens only on Windows
-- defaults to `\\.\pipe\dsh-selection-companion-v1`
-- can be overridden with `DSH_SELECTION_COMPANION_PIPE`
-- owns all accepted sockets
-- uses the Task 3 incremental frame decoder
-- registers cleanup through `ctx.effect`
-- closes clients and the named-pipe server when its Harness fiber is disposed
+## Task 5 — Browser Selection Provider
 
-The Task 4 router currently implements:
+### Browser capture
 
-```text
-bridge.hello        → bridge.hello.result
-bridge.ping         → bridge.pong
-selection.update    → ctx.selectionContext.update(...)
-selection.current   → ctx.selectionContext.current()
-```
+`browser-extension/src/selection.ts` captures:
 
-Protocol V1 Session messages already exist in the contract, but Task 4 returns `BRIDGE_UNAVAILABLE` for them. They will be connected to Harness Session APIs in a later task rather than mocked in the Native Companion.
+- exact selected text without rewriting its whitespace
+- input / textarea selections
+- document language
+- nearby text before and after the selection
+- nearest semantic H1–H6 heading
+- bounded section/article/main text
+- frame URL and document title
+- top-level selection geometry when available
 
-### Native side
+Selections inside frames keep `frameUrl`. Task 5 deliberately does not fabricate top-level screen geometry for framed selections.
 
-`native/` is now a Tauri 2 application using the same desktop stack already proven in AITranslator WebReBuild:
+The canonical browser snapshot declares only capabilities already implemented:
 
 ```text
-React 19
-TypeScript 6
-Vite 8
-@tauri-apps/api 2
-Tauri 2
-Rust
-Tokio
-serde / serde_json
+localContext   true when nearby context exists
+sectionContext true when section text exists
+pageContext    false
+screenshot     false
 ```
 
-The Rust side owns the named-pipe client. The browser UI only calls Tauri commands:
+Page/document lazy expansion is a later task.
+
+### MV3 transport
+
+The browser extension uses:
 
 ```text
-bridge_status
-bridge_connect
-bridge_ping
-bridge_disconnect
+content.ts
+   ↓ chrome.runtime.sendMessage
+background.ts
+   ↓ chrome.runtime.connectNative
+io.github.mivaille777.dsh_selection_companion
 ```
 
-The React shell displays:
+It does **not** use localhost HTTP. A manifest regression test fails if `127.0.0.1` or `localhost` is added back to host permissions.
 
-- Connected / Disconnected
-- named-pipe endpoint
-- Protocol V1
-- connected Harness plugin version
-- last ping latency
-- Connect / Ping / Disconnect controls
+The background service worker converts a page capture into the canonical `SelectionSnapshot` and sends the existing Protocol V1 `selection.update` envelope to the native host.
 
-The window is frameless, always-on-top, draggable, resizable, skipped from the taskbar, and hides on Escape.
+### Native Messaging host
 
-### Important Task 4 boundary
+The Rust crate now also builds:
 
-Task 4 intentionally does **not** implement:
+```text
+dsh-selection-companion-host.exe
+```
 
-- browser selection capture
-- UI Automation / Word providers
-- selection-adjacent lens positioning
-- SessionController calls
-- assistant streaming
-- Agent tools
-- authentication / hardened pipe ACLs
+This is intentionally a separate binary from the Tauri GUI executable so Chrome/Edge always receive a normal stdio Native Messaging host.
 
-The purpose of Task 4 is to prove the real transport and native shell without mixing in capture or Agent business logic.
+Chrome Native Messaging uses its own 4-byte little-endian stdio message length. The host validates that outer framing, validates the embedded Protocol V1 message, performs a Harness `bridge.hello`, and forwards only browser-safe operations to the Task 4 pipe.
+
+The host currently accepts:
+
+```text
+selection.update
+bridge.ping
+```
+
+If the Harness pipe disappears, it drops the stale pipe client and attempts one fresh connection before returning `BRIDGE_UNAVAILABLE`.
 
 ## Repository structure
 
 ```text
-src/
-├── bridge/
-│   ├── frame.ts
-│   ├── index.ts
-│   ├── protocol.ts
-│   ├── request-tracker.ts
-│   ├── router.ts
-│   └── server.ts
-├── context/
-│   ├── cache.ts
-│   ├── service.ts
-│   └── snapshot.ts
-└── index.ts
-
-native/
+browser-extension/
+├── manifest.json
 ├── package.json
-├── index.html
-├── vite.config.ts
-├── vitest.config.ts
+├── playwright.config.ts
 ├── tsconfig.json
+├── vitest.config.ts
+├── scripts/build.mjs
 ├── src/
-│   ├── api/bridge.ts
-│   ├── App.tsx
-│   ├── App.test.tsx
-│   ├── main.tsx
-│   ├── styles.css
-│   └── test/setup.ts
-└── src-tauri/
-    ├── Cargo.toml
-    ├── build.rs
-    ├── tauri.conf.json
-    ├── capabilities/default.json
-    └── src/
-        ├── bridge.rs
-        ├── lib.rs
-        ├── main.rs
-        └── protocol.rs
+│   ├── background.ts
+│   ├── content.ts
+│   ├── selection.ts
+│   ├── snapshot.ts
+│   └── types.ts
+└── tests/
+    ├── fixtures/selection.html
+    ├── e2e/content.e2e.spec.ts
+    └── unit/
+        ├── manifest.spec.ts
+        ├── selection.spec.ts
+        └── snapshot.spec.ts
 
-tests/
-├── bridge-server.spec.ts
-├── protocol.spec.ts
-├── protocol/*.json
-├── selection-context.spec.ts
-└── bundle.spec.ts
+native/src-tauri/src/
+├── bridge.rs
+├── native_messaging.rs
+├── protocol.rs
+├── lib.rs
+├── main.rs
+└── bin/native_host.rs
+
+scripts/
+├── debug-selection.mjs
+├── register-native-host.ps1
+└── unregister-native-host.ps1
 ```
 
 ## Requirements
 
-- Windows 10/11 for the real Task 4 named-pipe integration test
-- Node.js `^22.19.0` or `>=24.0.0`
+- Windows 10/11 for real Named Pipe / Native Messaging integration
+- Chrome or Microsoft Edge
+- Node.js `^22.19.0` or `>=24`
 - pnpm `11.7.x`
 - Rust stable + Cargo
-- Tauri 2 Windows build prerequisites / WebView2
-- a working `dsh` CLI
+- Tauri 2 Windows prerequisites / WebView2 for the GUI shell
+- working `dsh` CLI
 
 ## Automated checks
 
-Install the whole pnpm workspace:
+Install all workspaces:
 
 ```powershell
 pnpm install
 ```
 
-Harness/plugin tests:
+Task 5 gate excluding the downloaded Playwright browser runtime:
 
 ```powershell
-pnpm check
+pnpm check:task5
 ```
 
-Task-specific tests:
+Focused commands:
 
 ```powershell
-pnpm test:selection
-pnpm test:protocol
 pnpm test:bridge
 pnpm test:native-ui
+pnpm test:browser
+pnpm browser:build
 cargo test --manifest-path native/src-tauri/Cargo.toml
+pnpm native:host:build
 ```
 
-Full Task 4 gate:
+For the real Chromium fixture test, install Playwright Chromium once:
 
 ```powershell
-pnpm check:task4
+pnpm --dir browser-extension exec playwright install chromium
 ```
 
-Optional Rust formatting gate:
+Then run:
 
 ```powershell
-cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+pnpm check:task5:e2e
 ```
 
-If rustfmt reports changes:
+The Playwright test loads the built content script into a real Chromium page, creates a DOM Range selection, fires `mouseup`, and verifies the captured text, heading, nearby context, frame URL, and top-level state.
 
-```powershell
-cargo fmt --manifest-path native/src-tauri/Cargo.toml
-git diff
-```
-
-## Manual Task 4 integration test
+## Manual Task 5 integration test
 
 ### 1. Pull and validate
 
 ```powershell
 git pull origin main
 pnpm install
-pnpm check:task4
+pnpm check:task5
 ```
 
-### 2. Repack and reinstall the Harness bundle
+### 2. Build the browser extension and native host
+
+```powershell
+pnpm browser:build
+pnpm native:host:build
+```
+
+Expected outputs:
+
+```text
+browser-extension/dist/
+native/src-tauri/target/debug/dsh-selection-companion-host.exe
+```
+
+### 3. Load the unpacked extension
+
+Chrome:
+
+```text
+chrome://extensions
+```
+
+Edge:
+
+```text
+edge://extensions
+```
+
+Enable Developer mode, choose **Load unpacked**, and select:
+
+```text
+<repo>\browser-extension\dist
+```
+
+Copy the generated 32-character extension ID. For `file://` testing, explicitly enable file URL access for the extension.
+
+### 4. Register the Native Messaging host
+
+From PowerShell at repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\register-native-host.ps1 `
+  -ExtensionId <YOUR_EXTENSION_ID>
+```
+
+The script writes a UTF-8 Native Messaging manifest under LocalAppData and registers it for both Chrome and Edge under the current user. No administrator privileges are required for the HKCU registration.
+
+To remove it later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\unregister-native-host.ps1
+```
+
+### 5. Start the real Harness plugin
+
+Build and install the Harness bundle if needed:
 
 ```powershell
 pnpm pack
-```
-
-If an older development copy is installed:
-
-```powershell
 dsh plugin --profile web remove dsh-selection-companion
-```
-
-Install the new tarball:
-
-```powershell
 dsh plugin --profile web add .\dsh-selection-companion-0.1.0.tgz
 ```
 
-Verify composition:
-
-```powershell
-dsh --profile web --dump-config | Select-String "selection-companion"
-```
-
-### 3. Start Harness
-
-Terminal A:
+Start Harness:
 
 ```powershell
 dsh web
 ```
 
-Expected logs include:
+Expected plugin/pipe logs include:
 
 ```text
 [selection-companion] plugin loaded!
 selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v1
 ```
 
-Leave this terminal running.
+### 6. Capture a browser selection
 
-### 4. Start the Native Companion
+Open a normal HTTP/HTTPS page in Chrome/Edge and select text with the mouse. Task 5 does not show the Selection Lens yet; capture is intentionally silent.
 
-Terminal B, from the repository root:
+The real path is now:
+
+```text
+DOM Selection
+ → content script
+ → background service worker
+ → Chrome Native Messaging
+ → dsh-selection-companion-host.exe
+ → Windows Named Pipe
+ → selection.update
+ → ctx.selectionContext
+```
+
+No clipboard mutation and no synthetic Ctrl+C/Ctrl+V are used.
+
+### 7. Verify the current Harness selection
+
+While `dsh web` is still running:
 
 ```powershell
-pnpm native:dev
+pnpm debug:selection
 ```
 
-The frameless always-on-top window should appear and automatically attempt `bridge.hello`.
+Expected output is a real browser `SelectionSnapshot`, for example:
 
-Expected UI state:
+```json
+{
+  "selection": {
+    "text": "The acquisition function balances exploration and exploitation"
+  },
+  "source": {
+    "kind": "browser",
+    "app": "Chrome/Edge"
+  },
+  "document": {
+    "title": "...",
+    "url": "https://...",
+    "section": "3.2 Acquisition Function",
+    "frameUrl": "https://..."
+  },
+  "provider": "browser-dom"
+}
+```
+
+If the command prints:
 
 ```text
-Status          Connected
-Pipe            \\.\pipe\dsh-selection-companion-v1
-Protocol        v1
-Harness plugin  0.1.0
+[debug-selection] no current selection
 ```
 
-### 5. Ping test
+check the extension service worker error console and the Native Messaging registration first.
 
-Click **Ping**.
+## Task 5 acceptance criteria
 
-Expected:
+Task 5 is complete only when all of these are true:
 
-```text
-Last ping       <number> ms
-```
+1. `pnpm check:task5` passes.
+2. `pnpm check:task5:e2e` passes after Playwright Chromium is installed.
+3. Chrome/Edge can load `browser-extension/dist` as an unpacked MV3 extension.
+4. The Native Messaging host is registered for that exact extension ID.
+5. Selecting browser text causes `pnpm debug:selection` to print the same selected text from Harness state.
+6. The flow works without localhost HTTP, clipboard writes, or synthetic copy/paste.
 
-This proves the complete path:
+## Still not implemented
 
-```text
-React
-  ↓ Tauri invoke
-Rust
-  ↓ Windows Named Pipe
-Harness Cordis plugin
-  ↓ bridge.pong
-Rust
-  ↓
-React
-```
-
-### 6. Disconnect / reconnect
-
-Click **Disconnect**.
-
-Expected state:
-
-```text
-Disconnected
-```
-
-Click **Connect**.
-
-Expected state returns to:
-
-```text
-Connected
-```
-
-### 7. Harness restart behavior
-
-While the Native Companion is connected:
-
-1. stop `dsh web`
-2. click **Ping**
-3. the Native Companion must switch to disconnected/error state
-4. restart `dsh web`
-5. click **Connect**
-6. it must complete a new hello handshake and return to Connected
-
-No stale socket should be treated as a live Harness connection.
-
-### 8. Escape behavior
-
-With the Native Companion visible, press:
-
-```text
-Esc
-```
-
-The window should hide. During Task 4 there is no tray/hotkey re-opener yet, so stop/re-run `pnpm native:dev` to show it again.
-
-## Custom development pipe
-
-Both sides read the same environment variable:
-
-```powershell
-$env:DSH_SELECTION_COMPANION_PIPE='\\.\pipe\dsh-selection-companion-dev'
-```
-
-Set it in both Terminal A and Terminal B before starting Harness / Native Companion.
-
-To temporarily load the Harness plugin without opening the Task 4 pipe during isolated tests:
-
-```powershell
-$env:DSH_SELECTION_COMPANION_DISABLE_BRIDGE='1'
-```
-
-Do not set that variable for the real Task 4 integration test.
+- Selection Lens / near-selection composer
+- generic Windows UIA provider
+- Word COM provider
+- lazy page context expansion
+- SessionController prompt/follow integration
+- Agent `selection_current` / `selection_read_context` tools
+- prebuilt binary / extension installer packaging
 
 ## DeepSeek Harness ecosystem contract
 
-The npm package is still a standard Harness bundle:
+The npm package remains a standard Harness bundle:
 
 ```json
 {
@@ -412,17 +396,7 @@ The npm package is still a standard Harness bundle:
 }
 ```
 
-and `cordis.patch.yml` still contributes:
-
-```yaml
-- insert:
-    - id: selection-companion
-      name: dsh-selection-companion
-```
-
-The Windows companion is therefore a provider/client of a capability owned by the installed Harness plugin; it is not a separate AI application pretending to be integrated with Harness.
-
-The current npm tarball contains the Harness bundle, not a prebuilt Native Companion executable. Prebuilt Windows binary packaging is a later release task; Task 4 launches the Native Companion from this repository source.
+The browser/native components are providers of a capability owned by that installed Harness plugin. They do not bypass Harness Session/Agent architecture.
 
 ## License
 
