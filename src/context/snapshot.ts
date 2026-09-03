@@ -61,64 +61,146 @@ export class SelectionSnapshotValidationError extends Error {
 }
 
 /**
- * Validate, detach, and deeply freeze a snapshot before it enters Harness state.
- * The selected text is preserved byte-for-byte; whitespace-only selections are rejected.
+ * Parse an untrusted value into the canonical selection domain model.
+ * Unknown fields are discarded, selected text is preserved exactly, and the
+ * returned snapshot is detached and deeply frozen.
  */
-export function normalizeSelectionSnapshot(input: SelectionSnapshot): SelectionSnapshot {
-  assertNonEmptyText(input.id, 'id')
-  if (input.id.length > 256) fail('id must be at most 256 characters')
-  assertNonNegativeInteger(input.revision, 'revision')
-  assertNonNegativeInteger(input.capturedAt, 'capturedAt')
-  assertNonEmptyText(input.selection.text, 'selection.text', true)
-  assertSourceKind(input.source.kind)
-  assertBoolean(input.context.pageAvailable, 'context.pageAvailable')
-  assertBoolean(input.capabilities.localContext, 'capabilities.localContext')
-  assertBoolean(input.capabilities.sectionContext, 'capabilities.sectionContext')
-  assertBoolean(input.capabilities.pageContext, 'capabilities.pageContext')
-  assertBoolean(input.capabilities.screenshot, 'capabilities.screenshot')
-  assertNonEmptyText(input.provider, 'provider')
+export function normalizeSelectionSnapshot(input: unknown): SelectionSnapshot {
+  const root = requireRecord(input, 'snapshot')
+  const selection = requireRecord(root.selection, 'selection')
+  const source = requireRecord(root.source, 'source')
+  const context = requireRecord(root.context, 'context')
+  const capabilities = requireRecord(root.capabilities, 'capabilities')
 
-  if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
+  const id = requireNonEmptyText(root.id, 'id')
+  if (id.length > 256) fail('id must be at most 256 characters')
+
+  const sourceKind = requireSourceKind(source.kind)
+  const confidence = requireFiniteNumber(root.confidence, 'confidence')
+  if (confidence < 0 || confidence > 1) {
     fail('confidence must be a finite number between 0 and 1')
   }
 
-  if (input.geometry !== undefined) {
-    assertFiniteNumber(input.geometry.x, 'geometry.x')
-    assertFiniteNumber(input.geometry.y, 'geometry.y')
-    assertFiniteNumber(input.geometry.width, 'geometry.width')
-    assertFiniteNumber(input.geometry.height, 'geometry.height')
-    if (input.geometry.width < 0 || input.geometry.height < 0) {
-      fail('geometry width and height must be non-negative')
-    }
+  const geometry = root.geometry === undefined
+    ? undefined
+    : parseGeometry(root.geometry)
+
+  const document = root.document === undefined
+    ? undefined
+    : parseDocument(root.document)
+
+  const snapshot: SelectionSnapshot = {
+    id,
+    revision: requireNonNegativeInteger(root.revision, 'revision'),
+    capturedAt: requireNonNegativeInteger(root.capturedAt, 'capturedAt'),
+    selection: {
+      text: requireMeaningfulSelection(selection.text),
+      ...optionalStringProperty(selection.language, 'selection.language', 'language'),
+    },
+    source: {
+      kind: sourceKind,
+      ...optionalStringProperty(source.app, 'source.app', 'app'),
+      ...optionalStringProperty(source.process, 'source.process', 'process'),
+      ...optionalStringProperty(source.windowTitle, 'source.windowTitle', 'windowTitle'),
+    },
+    ...(document === undefined ? {} : { document }),
+    context: {
+      ...optionalStringProperty(context.before, 'context.before', 'before'),
+      ...optionalStringProperty(context.after, 'context.after', 'after'),
+      ...optionalStringProperty(context.sectionText, 'context.sectionText', 'sectionText'),
+      pageAvailable: requireBoolean(context.pageAvailable, 'context.pageAvailable'),
+    },
+    capabilities: {
+      localContext: requireBoolean(capabilities.localContext, 'capabilities.localContext'),
+      sectionContext: requireBoolean(capabilities.sectionContext, 'capabilities.sectionContext'),
+      pageContext: requireBoolean(capabilities.pageContext, 'capabilities.pageContext'),
+      screenshot: requireBoolean(capabilities.screenshot, 'capabilities.screenshot'),
+    },
+    ...(geometry === undefined ? {} : { geometry }),
+    provider: requireNonEmptyText(root.provider, 'provider'),
+    confidence,
   }
 
-  return deepFreeze(structuredClone(input))
+  return deepFreeze(snapshot)
 }
 
-function assertSourceKind(value: string): asserts value is SelectionSourceKind {
-  if (!(SELECTION_SOURCE_KINDS as readonly string[]).includes(value)) {
+function parseDocument(value: unknown): NonNullable<SelectionSnapshot['document']> {
+  const document = requireRecord(value, 'document')
+  return {
+    ...optionalStringProperty(document.title, 'document.title', 'title'),
+    ...optionalStringProperty(document.url, 'document.url', 'url'),
+    ...optionalStringProperty(document.filePath, 'document.filePath', 'filePath'),
+    ...optionalStringProperty(document.section, 'document.section', 'section'),
+    ...optionalStringProperty(document.frameUrl, 'document.frameUrl', 'frameUrl'),
+  }
+}
+
+function parseGeometry(value: unknown): NonNullable<SelectionSnapshot['geometry']> {
+  const geometry = requireRecord(value, 'geometry')
+  const width = requireFiniteNumber(geometry.width, 'geometry.width')
+  const height = requireFiniteNumber(geometry.height, 'geometry.height')
+  if (width < 0 || height < 0) fail('geometry width and height must be non-negative')
+
+  return {
+    ...optionalStringProperty(geometry.monitorId, 'geometry.monitorId', 'monitorId'),
+    x: requireFiniteNumber(geometry.x, 'geometry.x'),
+    y: requireFiniteNumber(geometry.y, 'geometry.y'),
+    width,
+    height,
+  }
+}
+
+function requireRecord(value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    fail(`${field} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function requireSourceKind(value: unknown): SelectionSourceKind {
+  if (typeof value !== 'string' || !(SELECTION_SOURCE_KINDS as readonly string[]).includes(value)) {
     fail(`source.kind must be one of: ${SELECTION_SOURCE_KINDS.join(', ')}`)
   }
+  return value as SelectionSourceKind
 }
 
-function assertBoolean(value: unknown, field: string): asserts value is boolean {
+function requireBoolean(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') fail(`${field} must be a boolean`)
+  return value
 }
 
-function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+function requireFiniteNumber(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${field} must be a finite number`)
+  return value
 }
 
-function assertNonNegativeInteger(value: unknown, field: string): asserts value is number {
+function requireNonNegativeInteger(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     fail(`${field} must be a non-negative safe integer`)
   }
+  return value
 }
 
-function assertNonEmptyText(value: unknown, field: string, allowSurroundingWhitespace = false): asserts value is string {
+function requireNonEmptyText(value: unknown, field: string): string {
   if (typeof value !== 'string') fail(`${field} must be a string`)
-  const meaningful = allowSurroundingWhitespace ? value.trim() : value
-  if (meaningful.length === 0) fail(`${field} must not be empty`)
+  if (value.length === 0) fail(`${field} must not be empty`)
+  return value
+}
+
+function requireMeaningfulSelection(value: unknown): string {
+  if (typeof value !== 'string') fail('selection.text must be a string')
+  if (value.trim().length === 0) fail('selection.text must not be empty')
+  return value
+}
+
+function optionalStringProperty<K extends string>(
+  value: unknown,
+  field: string,
+  key: K,
+): Partial<Record<K, string>> {
+  if (value === undefined) return {}
+  if (typeof value !== 'string') fail(`${field} must be a string when provided`)
+  return { [key]: value } as Record<K, string>
 }
 
 function deepFreeze<T>(value: T): T {
