@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "DeepSeek Selection Companion",
+  "version": "0.1.0",
+  "description": "Capture browser selections and send them to DeepSeek Harness through the native companion.",
+  "permissions": [
+    "nativeMessaging",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "file://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}
