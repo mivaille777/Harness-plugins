@@ -20,14 +20,15 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown src/index.ts --format esm --dts --out-dir lib --clean",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:bundle",
     "prepare": "pnpm build",
     "prepack": "pnpm check"
   },
+  "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -55,7 +56,6 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@types/node": "^22.20.0",
-    "tsdown": "^0.22.14",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
