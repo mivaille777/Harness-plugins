@@ -97,6 +97,7 @@ describe('SelectionSnapshotCache', () => {
 
     const stale = cache.update(makeSnapshot({ revision: 1, selection: { text: 'stale' } }))
     expect(stale.accepted).toBe(false)
+    if (stale.accepted) throw new Error('expected stale revision to be rejected')
     expect(stale.reason).toBe('stale-revision')
     expect(cache.current()?.revision).toBe(2)
 
