@@ -36,7 +36,7 @@ describe('captureBrowserSelection', () => {
     expect(capture?.heading).toBe('3.2 Acquisition Function')
     expect(capture?.before).toContain('balances exploration and')
     expect(capture?.after).toContain('under uncertainty')
-    expect(capture?.sectionText).toContain('Safe Bayesian Optimization') === false
+    expect(capture?.sectionText).not.toContain('Safe Bayesian Optimization')
     expect(capture?.sectionText).toContain('Acquisition Function')
     expect(capture?.language).toBe('en')
   })
