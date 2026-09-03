@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "id": "hello-1",
+  "type": "bridge.hello.result",
+  "payload": {
+    "server": {
+      "name": "dsh-selection-companion",
+      "version": "0.1.0"
+    },
+    "protocol": 1,
+    "capabilities": ["selection", "session", "follow"]
+  }
+}

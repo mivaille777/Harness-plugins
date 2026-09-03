@@ -8,6 +8,7 @@ export function apply(ctx: Context): void {
   console.log('[selection-companion] plugin loaded!')
 }
 
+export * from './bridge/index.js'
 export * from './context/cache.js'
 export * from './context/service.js'
 export * from './context/snapshot.js'

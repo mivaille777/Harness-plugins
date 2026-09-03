@@ -10,6 +10,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./protocol": {
+      "types": "./lib/bridge/index.d.ts",
+      "default": "./lib/bridge/index.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -24,6 +28,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:selection": "vitest run tests/selection-context.spec.ts",
+    "test:protocol": "vitest run tests/protocol.spec.ts",
+    "test:rust": "cargo test --manifest-path native/src-tauri/Cargo.toml",
+    "check:task3": "pnpm check && pnpm test:rust",
     "demo:selection": "pnpm build && node scripts/demo-selection.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:bundle",
@@ -51,6 +58,9 @@
   "homepage": "https://github.com/mivaille777/Harness-plugins#readme",
   "bugs": {
     "url": "https://github.com/mivaille777/Harness-plugins/issues"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"

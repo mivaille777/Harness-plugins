@@ -1,0 +1,16 @@
+{
+  "protocol": 1,
+  "id": "submit-1",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-demo",
+    "requestId": "selreq-demo",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain the currently selected passage."
+      }
+    ]
+  }
+}

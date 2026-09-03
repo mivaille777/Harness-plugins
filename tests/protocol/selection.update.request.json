@@ -1,0 +1,46 @@
+{
+  "protocol": 1,
+  "id": "selection-update-1",
+  "type": "selection.update",
+  "payload": {
+    "snapshot": {
+      "id": "selection-1",
+      "revision": 1,
+      "capturedAt": 1000,
+      "selection": {
+        "text": "Gaussian-process posterior uncertainty"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome",
+        "process": "chrome.exe",
+        "windowTitle": "Safe Bayesian Optimization"
+      },
+      "document": {
+        "title": "Safe Bayesian Optimization",
+        "url": "https://example.test/paper",
+        "section": "3.2 Acquisition Function"
+      },
+      "context": {
+        "before": "The acquisition function uses the posterior.",
+        "after": "The next paragraph discusses exploitation.",
+        "pageAvailable": true
+      },
+      "capabilities": {
+        "localContext": true,
+        "sectionContext": true,
+        "pageContext": true,
+        "screenshot": false
+      },
+      "geometry": {
+        "monitorId": "display-1",
+        "x": 100,
+        "y": 200,
+        "width": 320,
+        "height": 28
+      },
+      "provider": "browser-dom",
+      "confidence": 0.99
+    }
+  }
+}

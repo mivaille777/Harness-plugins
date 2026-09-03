@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "id": "hello-2",
+  "type": "error.response",
+  "payload": {
+    "code": "PROTOCOL_MISMATCH",
+    "message": "Unsupported protocol version.",
+    "details": {
+      "expected": 1,
+      "received": 2
+    }
+  }
+}

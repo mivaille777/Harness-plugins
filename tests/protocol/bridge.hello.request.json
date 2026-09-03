@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "id": "hello-1",
+  "type": "bridge.hello",
+  "payload": {
+    "client": {
+      "name": "dsh-selection-companion-native",
+      "version": "0.1.0",
+      "platform": "windows"
+    },
+    "supportedProtocols": [1]
+  }
+}
