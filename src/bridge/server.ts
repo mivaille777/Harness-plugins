@@ -103,7 +103,6 @@ export class SelectionCompanionBridgeService extends Service {
   private accept(socket: Socket): void {
     const decoder = new IpcFrameDecoder()
     this.clients.add(socket)
-    socket.setNoDelay(true)
 
     socket.on('data', chunk => {
       try {
