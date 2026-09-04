@@ -72,11 +72,7 @@ fn browser_identity(window_title: &str) -> (&'static str, Option<&'static str>) 
 }
 
 fn document_title_from_window(window_title: &str) -> Option<String> {
-    let suffixes = [
-        " - Google Chrome",
-        " - Microsoft Edge",
-        " - Brave",
-    ];
+    let suffixes = [" - Google Chrome", " - Microsoft Edge", " - Brave"];
     let trimmed = suffixes
         .iter()
         .find_map(|suffix| window_title.strip_suffix(suffix))
@@ -159,11 +155,10 @@ mod windows_impl {
             return Ok(ProviderCapture::NotApplicable);
         };
 
-        let selected = find_selected_range(&focused, &browser_window, &walker)
-            .or_else(|| {
-                let mut visited = 0usize;
-                search_selected_range(&browser_window, &walker, &mut visited)
-            });
+        let selected = find_selected_range(&focused, &walker).or_else(|| {
+            let mut visited = 0usize;
+            search_selected_range(&browser_window, &walker, &mut visited)
+        });
         let Some((range, selected_text, text_provider)) = selected else {
             return Ok(ProviderCapture::NoSelection);
         };
@@ -185,6 +180,18 @@ mod windows_impl {
         let process_id = focused.get_process_id().unwrap_or_default();
         let local_context = before.is_some() || after.is_some();
         let section_context = paragraph.is_some() || heading.is_some();
+        let has_heading = heading.is_some();
+        let has_url = url.is_some();
+        let has_title = document_title.is_some();
+        let has_geometry = geometry.is_some();
+        let confidence_value = confidence(
+            local_context,
+            section_context,
+            has_heading,
+            has_url,
+            has_title,
+            has_geometry,
+        );
         let captured_at = now_millis();
 
         let snapshot = SelectionSnapshot {
@@ -203,9 +210,9 @@ mod windows_impl {
             },
             document: Some(SelectionDocument {
                 title: document_title,
-                url: url.clone(),
+                url,
                 file_path: None,
-                section: heading.clone(),
+                section: heading,
                 frame_url: None,
             }),
             context: SelectionContext {
@@ -222,14 +229,7 @@ mod windows_impl {
             },
             geometry,
             provider: PROVIDER_ID.to_owned(),
-            confidence: confidence(
-                local_context,
-                section_context,
-                heading.is_some(),
-                url.is_some(),
-                document_title.is_some(),
-                geometry.is_some(),
-            ),
+            confidence: confidence_value,
         };
 
         snapshot.validate().map_err(|error| error.to_string())?;
@@ -254,16 +254,12 @@ mod windows_impl {
 
     fn find_selected_range(
         focused: &UIElement,
-        browser_window: &UIElement,
         walker: &UITreeWalker,
     ) -> Option<(UITextRange, String, UIElement)> {
         let mut current = focused.clone();
         for _ in 0..MAX_ANCESTOR_DEPTH {
             if let Some(found) = selected_range_from_element(&current) {
                 return Some((found.0, found.1, current));
-            }
-            if current == *browser_window {
-                break;
             }
             current = walker.get_parent(&current).ok()?;
         }
@@ -459,10 +455,10 @@ mod windows_impl {
     }
 
     fn element_geometry(element: &UIElement) -> Option<SelectionGeometry> {
-        // UIA 0.16 does not expose TextRange.GetBoundingRectangles directly.
-        // For the extensionless provider we use the enclosing accessibility element
-        // as a conservative anchor; an exact range rectangle can replace this in
-        // the Task 6 lens without changing SelectionSnapshot.
+        // uiautomation 0.16 does not wrap TextRange.GetBoundingRectangles.
+        // Use the enclosing accessibility element as a conservative screen-space
+        // anchor. Task 6 can refine the exact selection range rectangle without
+        // changing SelectionSnapshot or the provider seam.
         let rect = element.get_bounding_rectangle().ok()?;
         let width = rect.get_width();
         let height = rect.get_height();
