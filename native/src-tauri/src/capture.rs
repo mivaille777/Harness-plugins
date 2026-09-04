@@ -42,7 +42,8 @@ impl Drop for CaptureRuntime {
 
 #[cfg(windows)]
 fn start_windows_capture(app: AppHandle, stop: Arc<AtomicBool>) {
-    let (trigger_tx, trigger_rx) = mpsc::channel::<()>();
+    // Capacity one intentionally coalesces bursts of UIA events for the same user gesture.
+    let (trigger_tx, trigger_rx) = mpsc::sync_channel::<()>(1);
     let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::unbounded_channel::<SelectionSnapshot>();
 
     let event_stop = stop.clone();
@@ -59,7 +60,13 @@ fn start_windows_capture(app: AppHandle, stop: Arc<AtomicBool>) {
     thread::Builder::new()
         .name("dsh-selection-capture-worker".to_owned())
         .spawn(move || {
-            let provider = BrowserAccessibilityProvider::default();
+            let provider = match BrowserAccessibilityProvider::standard() {
+                Ok(provider) => provider,
+                Err(error) => {
+                    eprintln!("[selection-companion] could not initialize browser accessibility provider: {error}");
+                    return;
+                }
+            };
             let mut last_capture: Option<(u64, Instant)> = None;
 
             while !worker_stop.load(Ordering::Acquire) {
@@ -69,10 +76,11 @@ fn start_windows_capture(app: AppHandle, stop: Arc<AtomicBool>) {
                         match provider.capture() {
                             Ok(ProviderCapture::Captured(snapshot)) => {
                                 let signature = snapshot_signature(&snapshot);
-                                if is_duplicate(&last_capture, signature, Instant::now()) {
+                                let now = Instant::now();
+                                if is_duplicate(&last_capture, signature, now) {
                                     continue;
                                 }
-                                last_capture = Some((signature, Instant::now()));
+                                last_capture = Some((signature, now));
                                 if snapshot_tx.send(snapshot).is_err() {
                                     break;
                                 }
@@ -101,7 +109,10 @@ fn start_windows_capture(app: AppHandle, stop: Arc<AtomicBool>) {
 }
 
 #[cfg(windows)]
-fn run_selection_event_source(trigger_tx: mpsc::Sender<()>, stop: Arc<AtomicBool>) -> Result<(), String> {
+fn run_selection_event_source(
+    trigger_tx: mpsc::SyncSender<()>,
+    stop: Arc<AtomicBool>,
+) -> Result<(), String> {
     use uiautomation::events::{CustomEventHandlerFn, UIEventHandler, UIEventType};
     use uiautomation::types::TreeScope;
     use uiautomation::UIAutomation;
@@ -112,7 +123,7 @@ fn run_selection_event_source(trigger_tx: mpsc::Sender<()>, stop: Arc<AtomicBool
         .map_err(|error| error.to_string())?;
 
     let callback: Box<CustomEventHandlerFn> = Box::new(move |_sender, _event| {
-        let _ = trigger_tx.send(());
+        let _ = trigger_tx.try_send(());
         Ok(())
     });
     let handler = UIEventHandler::from(callback);
@@ -142,7 +153,11 @@ fn snapshot_signature(snapshot: &SelectionSnapshot) -> u64 {
     snapshot.selection.text.hash(&mut hasher);
     snapshot.source.process.hash(&mut hasher);
     snapshot.source.window_title.hash(&mut hasher);
-    snapshot.document.as_ref().and_then(|document| document.url.as_ref()).hash(&mut hasher);
+    snapshot
+        .document
+        .as_ref()
+        .and_then(|document| document.url.as_ref())
+        .hash(&mut hasher);
     if let Some(geometry) = &snapshot.geometry {
         geometry.x.to_bits().hash(&mut hasher);
         geometry.y.to_bits().hash(&mut hasher);
@@ -200,7 +215,10 @@ mod tests {
 
     #[test]
     fn dedupe_signature_changes_with_selection_text() {
-        assert_ne!(snapshot_signature(&snapshot("alpha")), snapshot_signature(&snapshot("beta")));
+        assert_ne!(
+            snapshot_signature(&snapshot("alpha")),
+            snapshot_signature(&snapshot("beta"))
+        );
     }
 
     #[test]
@@ -208,7 +226,15 @@ mod tests {
         let signature = snapshot_signature(&snapshot("alpha"));
         let captured_at = Instant::now();
         let last = Some((signature, captured_at));
-        assert!(is_duplicate(&last, signature, captured_at + Duration::from_millis(100)));
-        assert!(!is_duplicate(&last, signature, captured_at + Duration::from_millis(200)));
+        assert!(is_duplicate(
+            &last,
+            signature,
+            captured_at + Duration::from_millis(100)
+        ));
+        assert!(!is_duplicate(
+            &last,
+            signature,
+            captured_at + Duration::from_millis(200)
+        ));
     }
 }
