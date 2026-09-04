@@ -16,7 +16,7 @@ pub const NATIVE_MESSAGE_MAX_BYTES: usize = IPC_MAX_FRAME_BYTES;
 const O_BINARY: i32 = 0x8000;
 
 #[cfg(windows)]
-unsafe extern "C" {
+extern "C" {
     fn _setmode(fd: i32, mode: i32) -> i32;
 }
 
