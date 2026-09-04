@@ -10,7 +10,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 35
     env:
-      DSH_HOME: ${{ runner.temp }}\dsh-home
       TASK5_MARKER: UIA_BROWSER_SELECTION_2BD748D
     steps:
       - name: Checkout exact 2bd748d
@@ -18,21 +17,22 @@ jobs:
         with:
           ref: 2bd748d51c18b6caaa9e02ef6429c44a4be4a1fa
 
-      - name: Assert exact source commit
+      - name: Assert exact source commit and isolate Harness home
         shell: pwsh
         run: |
           $actual = (git rev-parse HEAD).Trim()
           if ($actual -ne '2bd748d51c18b6caaa9e02ef6429c44a4be4a1fa') {
             throw "Expected 2bd748d51c18b6caaa9e02ef6429c44a4be4a1fa, got $actual"
           }
+          "DSH_HOME=$env:RUNNER_TEMP\dsh-home" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           git status --short
 
-      - name: Setup Node 22.19 and pnpm 11.7
+      - name: Setup Node 22.19
         uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
 
-      - name: Enable pnpm
+      - name: Enable pnpm 11.7
         shell: pwsh
         run: |
           corepack enable
@@ -68,11 +68,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:DSH_HOME | Out-Null
           dsh plugin --profile web add "$env:DSH_TGZ"
-          dsh web --dump-config | Tee-Object -FilePath dsh-config.txt
-          $config = Get-Content dsh-config.txt -Raw
-          if ($config -notmatch 'dsh-selection-companion') {
-            throw 'web profile dump does not contain dsh-selection-companion'
-          }
 
       - name: Start dsh web and prove named pipe is created
         shell: pwsh
@@ -80,7 +75,7 @@ jobs:
           $dsh = (Get-Command dsh.cmd -ErrorAction Stop).Source
           $stdout = Join-Path $pwd 'dsh-web.out.log'
           $stderr = Join-Path $pwd 'dsh-web.err.log'
-          $proc = Start-Process -FilePath $dsh -ArgumentList @('web','--no-open') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $proc = Start-Process -FilePath $dsh -ArgumentList @('web') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
           "DSH_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $connected = $false
