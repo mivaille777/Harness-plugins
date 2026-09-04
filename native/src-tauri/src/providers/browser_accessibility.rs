@@ -14,22 +14,28 @@ const MAX_FALLBACK_NODES: usize = 400;
 #[derive(Debug, Clone)]
 pub struct BrowserAccessibilityProvider {
     context_chars: i32,
-}
-
-impl Default for BrowserAccessibilityProvider {
-    fn default() -> Self {
-        Self {
-            context_chars: DEFAULT_CONTEXT_CHARS,
-        }
-    }
+    #[cfg(windows)]
+    automation: uiautomation::UIAutomation,
 }
 
 impl BrowserAccessibilityProvider {
+    pub fn standard() -> Result<Self, String> {
+        Self::new(DEFAULT_CONTEXT_CHARS)
+    }
+
     pub fn new(context_chars: i32) -> Result<Self, String> {
         if context_chars <= 0 {
             return Err("browser accessibility context_chars must be greater than zero".to_owned());
         }
-        Ok(Self { context_chars })
+
+        #[cfg(windows)]
+        let automation = uiautomation::UIAutomation::new().map_err(|error| error.to_string())?;
+
+        Ok(Self {
+            context_chars,
+            #[cfg(windows)]
+            automation,
+        })
     }
 }
 
@@ -39,18 +45,16 @@ impl SelectionProvider for BrowserAccessibilityProvider {
     }
 
     fn capture(&self) -> Result<ProviderCapture, String> {
-        capture_platform(self.context_chars)
+        #[cfg(windows)]
+        {
+            return windows_impl::capture(&self.automation, self.context_chars);
+        }
+
+        #[cfg(not(windows))]
+        {
+            Ok(ProviderCapture::NotApplicable)
+        }
     }
-}
-
-#[cfg(not(windows))]
-fn capture_platform(_context_chars: i32) -> Result<ProviderCapture, String> {
-    Ok(ProviderCapture::NotApplicable)
-}
-
-#[cfg(windows)]
-fn capture_platform(context_chars: i32) -> Result<ProviderCapture, String> {
-    windows_impl::capture(context_chars)
 }
 
 fn clean_context(value: String) -> Option<String> {
@@ -142,8 +146,10 @@ mod windows_impl {
     use uiautomation::types::{HeadingLevel, TextPatternRangeEndpoint, TextUnit};
     use uiautomation::{UIAutomation, UIElement, UITreeWalker};
 
-    pub(super) fn capture(context_chars: i32) -> Result<ProviderCapture, String> {
-        let automation = UIAutomation::new().map_err(|error| error.to_string())?;
+    pub(super) fn capture(
+        automation: &UIAutomation,
+        context_chars: i32,
+    ) -> Result<ProviderCapture, String> {
         let walker = automation
             .get_control_view_walker()
             .map_err(|error| error.to_string())?;
@@ -478,6 +484,11 @@ mod windows_impl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_non_positive_context_limits() {
+        assert!(BrowserAccessibilityProvider::new(0).is_err());
+    }
 
     #[test]
     fn recognizes_browser_titles_without_localized_address_bar_names() {
