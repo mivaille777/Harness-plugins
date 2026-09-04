@@ -4,20 +4,28 @@ Windows Selection Context Bridge for DeepSeek Harness.
 
 > Select anywhere → Continue in DeepSeek.
 
-The repository has completed the implementation work for **Task 5**. It remains a normal DeepSeek Harness bundle, but now has a real Chrome/Edge browser selection provider that sends DOM selections through Chrome Native Messaging and the Task 4 Windows Named Pipe into `ctx.selectionContext`.
+The project is a normal DeepSeek Harness / Cordis bundle with a Windows Native Companion. The default browser path is now **extensionless**: Chrome, Edge, and Chromium-family selections are captured through Windows UI Automation and forwarded through the existing Harness named-pipe capability.
+
+The optional MV3 extension / Chrome Native Messaging implementation remains in the repository as a future DOM-rich provider, but installing a browser extension is no longer part of the default product path.
 
 ## Current architecture
 
 ```text
-Chrome / Edge page
-DOM Selection / input selection
+Chrome / Edge / Chromium
+ordinary browser, no extension required
         ↓
-MV3 content script
+Windows UI Automation
+Text_TextSelectionChanged
         ↓
-MV3 background service worker
-        ↓ Chrome Native Messaging
- dsh-selection-companion-host.exe
-        ↓ Protocol V1 over Task 4 framing
+CaptureRuntime
+        ↓
+BrowserAccessibilityProvider
+TextPattern.GetSelection()
+        ↓
+SelectionSnapshot
+        ↓
+Tauri / Rust Native Companion
+        ↓ Protocol V1
 Windows Named Pipe
 \\.\pipe\dsh-selection-companion-v1
         ↓
@@ -26,13 +34,15 @@ dsh-selection-companion Cordis plugin
 BridgeMessageRouter
         ↓
 ctx.selectionContext
-        ↓ (later tasks)
+        ↓ later tasks
 Harness Session / Agent tools
 ```
 
-The browser extension, native host, and Tauri UI do **not** call an LLM or maintain a second chat history.
+The Native Companion does **not** call an LLM, write Harness Session files directly, or maintain a second conversation history.
 
 ## Task 1 — installable Harness bundle
+
+Completed:
 
 - standard Cordis plugin entry
 - `package.json#dsh.bundle.patch`
@@ -41,14 +51,16 @@ The browser extension, native host, and Tauri UI do **not** call an LLM or maint
 
 ## Task 2 — Selection Context capability
 
-- immutable validated `SelectionSnapshot`
-- strict revision ordering
-- in-memory TTL / bounded retention
+Completed:
+
+- validated immutable `SelectionSnapshot`
+- strict per-id revision ordering
+- in-memory TTL and bounded retention
 - `SelectionContextService` at `ctx.selectionContext`
 
 ## Task 3 — versioned TypeScript ↔ Rust IPC
 
-Protocol V1 uses:
+Protocol V1:
 
 ```json
 {
@@ -59,89 +71,185 @@ Protocol V1 uses:
 }
 ```
 
-Harness/native pipe framing is a 4-byte unsigned big-endian length followed by UTF-8 JSON, limited to 1 MiB.
+Harness/native pipe framing is a 4-byte unsigned big-endian JSON length followed by UTF-8 JSON, limited to 1 MiB.
 
 ## Task 4 — Native Companion + Windows Named Pipe
 
 The Harness plugin owns `SelectionCompanionBridgeService`, a Cordis `Service` started through `Service.init` and disposed through `ctx.effect`.
 
-The Tauri 2 companion connects to the same pipe and exposes `bridge_status`, `bridge_connect`, `bridge_ping`, and `bridge_disconnect` to its React UI.
+The Tauri 2 companion owns the native pipe client and exposes the transport status to its React shell.
 
-## Task 5 — Browser Selection Provider
-
-### Browser capture
-
-`browser-extension/src/selection.ts` captures:
-
-- exact selected text without rewriting its whitespace
-- input / textarea selections
-- document language
-- nearby text before and after the selection
-- nearest semantic H1–H6 heading
-- bounded section/article/main text
-- frame URL and document title
-- top-level selection geometry when available
-
-Selections inside frames keep `frameUrl`. Task 5 deliberately does not fabricate top-level screen geometry for framed selections.
-
-The canonical browser snapshot declares only capabilities already implemented:
+The bridge currently handles:
 
 ```text
-localContext   true when nearby context exists
-sectionContext true when section text exists
+bridge.hello
+bridge.ping
+selection.update
+selection.current
+```
+
+`BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
+
+## Task 5 — Extensionless Browser Accessibility Provider
+
+Task 5 has been redesigned so a normal user does **not** need to install a Chrome/Edge extension.
+
+### Default provider
+
+```text
+provider = browser-accessibility
+```
+
+The Windows-only implementation uses pinned `uiautomation = 0.16.1`, compatible with the repository's current Rust 1.77 / edition 2021 baseline.
+
+The provider:
+
+- detects a Chromium-family foreground accessibility tree through `Chrome_WidgetWin_*`
+- queries `TextPattern.GetSelection()` instead of synthesizing Ctrl+C
+- rejects collapsed / empty selections
+- preserves the selected text returned by the accessibility range
+- derives bounded local context before and after the selection
+- expands the current range to a paragraph for section-level context
+- searches nearby accessibility headings without depending on localized labels
+- reads browser title / document title where available
+- searches the browser chrome for a URL-bearing Edit + ValuePattern
+- emits a conservative screen-space geometry anchor from the enclosing accessibility element
+- dynamically calculates capabilities and confidence
+- detects obvious `.pdf` browser documents as `source.kind = "pdf"`
+
+Current capabilities are intentionally bounded:
+
+```text
+localContext   dynamic
+sectionContext dynamic
 pageContext    false
 screenshot     false
 ```
 
-Page/document lazy expansion is a later task.
+Full page/document expansion remains a later task.
 
-### MV3 transport
+### Automatic selection trigger
 
-The browser extension uses:
-
-```text
-content.ts
-   ↓ chrome.runtime.sendMessage
-background.ts
-   ↓ chrome.runtime.connectNative
-io.github.mivaille777.dsh_selection_companion
-```
-
-It does **not** use localhost HTTP. A manifest regression test fails if `127.0.0.1` or `localhost` is added back to host permissions.
-
-The background service worker converts a page capture into the canonical `SelectionSnapshot` and sends the existing Protocol V1 `selection.update` envelope to the native host.
-
-### Native Messaging host
-
-The Rust crate now also builds:
+The Native Companion registers the Windows UI Automation event:
 
 ```text
-dsh-selection-companion-host.exe
+Text_TextSelectionChanged
 ```
 
-This is intentionally a separate binary from the Tauri GUI executable so Chrome/Edge always receive a normal stdio Native Messaging host.
+on the desktop accessibility subtree.
 
-Chrome Native Messaging uses its own 4-byte little-endian stdio message length. The host validates that outer framing, validates the embedded Protocol V1 message, performs a Harness `bridge.hello`, and forwards only browser-safe operations to the Task 4 pipe.
-
-The host currently accepts:
+The event callback does no expensive capture work. It only sends a bounded trigger to `CaptureRuntime`:
 
 ```text
-selection.update
-bridge.ping
+UIA event
+   ↓ capacity-1 trigger channel
+35 ms settle delay
+   ↓
+BrowserAccessibilityProvider.capture()
+   ↓
+120 ms signature dedupe
+   ↓
+BridgeRuntime.submit_selection()
 ```
 
-If the Harness pipe disappears, it drops the stale pipe client and attempts one fresh connection before returning `BRIDGE_UNAVAILABLE`.
+This avoids a global mouse hook for the primary implementation and prevents bursts of duplicate UIA events from creating duplicate Harness snapshots.
+
+The Browser provider owns one UI Automation session for the lifetime of its capture worker rather than repeatedly initializing COM for every selection.
+
+### SelectionSnapshot example
+
+```json
+{
+  "selection": {
+    "text": "exploitation"
+  },
+  "source": {
+    "kind": "browser",
+    "app": "Google Chrome",
+    "process": "chrome.exe"
+  },
+  "document": {
+    "title": "Safe Bayesian Optimization",
+    "url": "https://example.com/paper",
+    "section": "3.2 Acquisition Function"
+  },
+  "context": {
+    "before": "The acquisition function balances exploration and",
+    "after": "under uncertainty.",
+    "sectionText": "The acquisition function balances exploration and exploitation under uncertainty.",
+    "pageAvailable": false
+  },
+  "provider": "browser-accessibility"
+}
+```
+
+### Geometry note
+
+`uiautomation 0.16.1` does not currently wrap `IUIAutomationTextRange::GetBoundingRectangles`, so Task 5 uses the enclosing accessibility element rectangle as a conservative anchor.
+
+Task 6 can refine exact range geometry for the near-selection Lens without changing `SelectionSnapshot` or the provider abstraction.
+
+## Provider seam
+
+Native selection sources now implement a common capability seam:
+
+```rust
+pub trait SelectionProvider {
+    fn id(&self) -> &'static str;
+    fn capture(&self) -> Result<ProviderCapture, String>;
+}
+```
+
+Current/future providers:
+
+```text
+BrowserAccessibilityProvider  default browser provider
+Browser DOM extension         optional rich provider
+Generic Windows UIA           later task
+Word COM                      later task
+```
+
+This keeps capture source details outside the Harness transport and Session layers.
+
+## Optional Browser DOM extension
+
+The existing `browser-extension/` and `dsh-selection-companion-host.exe` implementation is retained as an optional rich-context provider.
+
+Its path is:
+
+```text
+MV3 content script
+   ↓
+MV3 background
+   ↓ Chrome Native Messaging
+optional native host
+   ↓
+Task 4 Named Pipe
+   ↓
+Harness
+```
+
+It does not use localhost HTTP. Windows Native Messaging stdio is explicitly switched to `O_BINARY` before Chrome framing is read or written.
+
+This optional path may later be useful when exact DOM/iframe semantics are worth the additional browser installation step. It is **not required** for normal Task 5 operation.
 
 ## Repository structure
 
 ```text
-browser-extension/
+native/src-tauri/src/
+├── bridge.rs
+├── capture.rs
+├── native_messaging.rs
+├── protocol.rs
+├── providers/
+│   ├── mod.rs
+│   └── browser_accessibility.rs
+├── lib.rs
+├── main.rs
+└── bin/native_host.rs
+
+browser-extension/                 optional
 ├── manifest.json
-├── package.json
-├── playwright.config.ts
-├── tsconfig.json
-├── vitest.config.ts
-├── scripts/build.mjs
 ├── src/
 │   ├── background.ts
 │   ├── content.ts
@@ -149,46 +257,36 @@ browser-extension/
 │   ├── snapshot.ts
 │   └── types.ts
 └── tests/
-    ├── fixtures/selection.html
-    ├── e2e/content.e2e.spec.ts
-    └── unit/
-        ├── manifest.spec.ts
-        ├── selection.spec.ts
-        └── snapshot.spec.ts
-
-native/src-tauri/src/
-├── bridge.rs
-├── native_messaging.rs
-├── protocol.rs
-├── lib.rs
-├── main.rs
-└── bin/native_host.rs
 
 scripts/
 ├── debug-selection.mjs
-├── register-native-host.ps1
-└── unregister-native-host.ps1
+├── register-native-host.ps1       optional extension path
+└── unregister-native-host.ps1     optional extension path
 ```
 
 ## Requirements
 
-- Windows 10/11 for real Named Pipe / Native Messaging integration
-- Chrome or Microsoft Edge
+Default extensionless path:
+
+- Windows 10/11
+- Chrome, Microsoft Edge, or compatible Chromium browser
 - Node.js `^22.19.0` or `>=24`
 - pnpm `11.7.x`
 - Rust stable + Cargo
-- Tauri 2 Windows prerequisites / WebView2 for the GUI shell
+- Tauri 2 Windows prerequisites / WebView2
 - working `dsh` CLI
+
+A browser extension is **not** a default requirement.
 
 ## Automated checks
 
-Install all workspaces:
+Install workspaces:
 
 ```powershell
 pnpm install
 ```
 
-Task 5 gate excluding the downloaded Playwright browser runtime:
+Full extensionless Task 5 gate:
 
 ```powershell
 pnpm check:task5
@@ -199,27 +297,33 @@ Focused commands:
 ```powershell
 pnpm test:bridge
 pnpm test:native-ui
-pnpm test:browser
-pnpm browser:build
+pnpm test:browser-accessibility
 cargo test --manifest-path native/src-tauri/Cargo.toml
-pnpm native:host:build
+cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
 
-For the real Chromium fixture test, install Playwright Chromium once:
+Rust formatting:
+
+```powershell
+cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+```
+
+### Optional extension checks
+
+The DOM extension is tested separately and is no longer part of `check:task5`:
+
+```powershell
+pnpm check:browser-extension
+```
+
+Optional real Chromium DOM fixture:
 
 ```powershell
 pnpm --dir browser-extension exec playwright install chromium
+pnpm check:browser-extension:e2e
 ```
 
-Then run:
-
-```powershell
-pnpm check:task5:e2e
-```
-
-The Playwright test loads the built content script into a real Chromium page, creates a DOM Range selection, fires `mouseup`, and verifies the captured text, heading, nearby context, frame URL, and top-level state.
-
-## Manual Task 5 integration test
+## Manual Task 5 extensionless integration test
 
 ### 1. Pull and validate
 
@@ -229,62 +333,11 @@ pnpm install
 pnpm check:task5
 ```
 
-### 2. Build the browser extension and native host
+No extension build or Native Messaging registration is required.
 
-```powershell
-pnpm browser:build
-pnpm native:host:build
-```
+### 2. Install / start the Harness bundle
 
-Expected outputs:
-
-```text
-browser-extension/dist/
-native/src-tauri/target/debug/dsh-selection-companion-host.exe
-```
-
-### 3. Load the unpacked extension
-
-Chrome:
-
-```text
-chrome://extensions
-```
-
-Edge:
-
-```text
-edge://extensions
-```
-
-Enable Developer mode, choose **Load unpacked**, and select:
-
-```text
-<repo>\browser-extension\dist
-```
-
-Copy the generated 32-character extension ID. For `file://` testing, explicitly enable file URL access for the extension.
-
-### 4. Register the Native Messaging host
-
-From PowerShell at repository root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\register-native-host.ps1 `
-  -ExtensionId <YOUR_EXTENSION_ID>
-```
-
-The script writes a UTF-8 Native Messaging manifest under LocalAppData and registers it for both Chrome and Edge under the current user. No administrator privileges are required for the HKCU registration.
-
-To remove it later:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\unregister-native-host.ps1
-```
-
-### 5. Start the real Harness plugin
-
-Build and install the Harness bundle if needed:
+If the development bundle needs reinstalling:
 
 ```powershell
 pnpm pack
@@ -292,95 +345,116 @@ dsh plugin --profile web remove dsh-selection-companion
 dsh plugin --profile web add .\dsh-selection-companion-0.1.0.tgz
 ```
 
-Start Harness:
+Start Harness in Terminal A:
 
 ```powershell
 dsh web
 ```
 
-Expected plugin/pipe logs include:
+Expected logs include:
 
 ```text
 [selection-companion] plugin loaded!
 selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v1
 ```
 
-### 6. Capture a browser selection
+### 3. Start Native Companion
 
-Open a normal HTTP/HTTPS page in Chrome/Edge and select text with the mouse. Task 5 does not show the Selection Lens yet; capture is intentionally silent.
+Terminal B:
 
-The real path is now:
+```powershell
+pnpm native:dev
+```
+
+The Tauri process now owns both:
 
 ```text
-DOM Selection
- → content script
- → background service worker
- → Chrome Native Messaging
- → dsh-selection-companion-host.exe
+Task 4 Harness bridge client
+Task 5 UIA selection capture runtime
+```
+
+### 4. Select text in an ordinary browser
+
+Open an ordinary HTTP/HTTPS page in Chrome or Edge.
+
+Do **not** install the project extension.
+
+Select a non-empty piece of page text using the mouse or keyboard. Task 5 capture is silent; the near-selection Lens belongs to Task 6.
+
+Expected path:
+
+```text
+browser text selection
+ → UIA Text_TextSelectionChanged
+ → BrowserAccessibilityProvider
+ → SelectionSnapshot
  → Windows Named Pipe
  → selection.update
  → ctx.selectionContext
 ```
 
-No clipboard mutation and no synthetic Ctrl+C/Ctrl+V are used.
+No clipboard writes and no synthetic Ctrl+C / Ctrl+V are used.
 
-### 7. Verify the current Harness selection
+### 5. Verify Harness received it
 
-While `dsh web` is still running:
+While `dsh web` and `pnpm native:dev` remain running:
 
 ```powershell
 pnpm debug:selection
 ```
 
-Expected output is a real browser `SelectionSnapshot`, for example:
+Expected output contains the selected browser text and:
 
 ```json
 {
-  "selection": {
-    "text": "The acquisition function balances exploration and exploitation"
-  },
-  "source": {
-    "kind": "browser",
-    "app": "Chrome/Edge"
-  },
-  "document": {
-    "title": "...",
-    "url": "https://...",
-    "section": "3.2 Acquisition Function",
-    "frameUrl": "https://..."
-  },
-  "provider": "browser-dom"
+  "provider": "browser-accessibility"
 }
 ```
 
-If the command prints:
+Useful fields to inspect:
 
 ```text
-[debug-selection] no current selection
+selection.text
+source.kind
+source.app
+document.title
+document.url
+document.section
+context.before
+context.after
+context.sectionText
+geometry
+confidence
 ```
 
-check the extension service worker error console and the Native Messaging registration first.
+Some browser versions/pages may expose less accessibility metadata. Missing optional URL/heading/context fields must reduce capabilities/confidence rather than invalidate an otherwise valid selected-text snapshot.
 
 ## Task 5 acceptance criteria
 
-Task 5 is complete only when all of these are true:
+The extensionless Task 5 golden path is accepted when:
 
-1. `pnpm check:task5` passes.
-2. `pnpm check:task5:e2e` passes after Playwright Chromium is installed.
-3. Chrome/Edge can load `browser-extension/dist` as an unpacked MV3 extension.
-4. The Native Messaging host is registered for that exact extension ID.
-5. Selecting browser text causes `pnpm debug:selection` to print the same selected text from Harness state.
-6. The flow works without localhost HTTP, clipboard writes, or synthetic copy/paste.
+1. `pnpm check:task5` passes on Windows.
+2. `cargo fmt --check` passes.
+3. Chrome/Edge has no project extension installed or enabled.
+4. `dsh web` and `pnpm native:dev` start normally.
+5. selecting text automatically causes `pnpm debug:selection` to return the same text from Harness state.
+6. the returned snapshot uses `provider = browser-accessibility`.
+7. no localhost HTTP bridge is opened.
+8. no clipboard mutation or synthetic copy/paste occurs.
+9. repeated UIA events for one selection do not create an uncontrolled burst of snapshots.
+
+The optional Browser DOM extension has its own separate checks and is not a Task 5 acceptance dependency.
 
 ## Still not implemented
 
-- Selection Lens / near-selection composer
-- generic Windows UIA provider
+- exact TextRange bounding rectangles for the Lens
+- MouseUp fallback for browser builds that do not reliably raise UIA selection-change events
+- generic Windows UIA provider for arbitrary desktop applications
 - Word COM provider
-- lazy page context expansion
+- lazy full-page context expansion
 - SessionController prompt/follow integration
 - Agent `selection_current` / `selection_read_context` tools
-- prebuilt binary / extension installer packaging
+- prebuilt Windows installer / binary packaging
 
 ## DeepSeek Harness ecosystem contract
 
@@ -396,7 +470,7 @@ The npm package remains a standard Harness bundle:
 }
 ```
 
-The browser/native components are providers of a capability owned by that installed Harness plugin. They do not bypass Harness Session/Agent architecture.
+Native providers only feed a capability owned by the installed Harness plugin. They do not bypass Harness Session, Agent, tool, or durable-log architecture.
 
 ## License
 
