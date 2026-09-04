@@ -12,6 +12,14 @@ use crate::protocol::{
 pub const NATIVE_HOST_NAME: &str = "io.github.mivaille777.dsh_selection_companion";
 pub const NATIVE_MESSAGE_MAX_BYTES: usize = IPC_MAX_FRAME_BYTES;
 
+#[cfg(windows)]
+const O_BINARY: i32 = 0x8000;
+
+#[cfg(windows)]
+unsafe extern "C" {
+    fn _setmode(fd: i32, mode: i32) -> i32;
+}
+
 pub fn run_stdio() -> Result<(), String> {
     #[cfg(not(windows))]
     {
@@ -20,6 +28,12 @@ pub fn run_stdio() -> Result<(), String> {
 
     #[cfg(windows)]
     {
+        // Chrome Native Messaging is a binary protocol: a 4-byte little-endian
+        // payload length followed by raw UTF-8 JSON bytes. Windows CRT text mode
+        // may translate CR/LF on stdin/stdout, so switch both descriptors before
+        // constructing or locking any Rust stdio handles.
+        configure_stdio_binary()?;
+
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -45,6 +59,27 @@ pub fn run_stdio() -> Result<(), String> {
         }
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn configure_stdio_binary() -> Result<(), String> {
+    set_binary_mode(0, "stdin")?;
+    set_binary_mode(1, "stdout")?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_binary_mode(fd: i32, name: &str) -> Result<(), String> {
+    // SAFETY: `_setmode` is the Windows CRT API for changing translation mode
+    // of an existing CRT file descriptor. Native Messaging hosts receive stdin
+    // and stdout as descriptors 0 and 1 from Chromium.
+    let previous_mode = unsafe { _setmode(fd, O_BINARY) };
+    if previous_mode == -1 {
+        return Err(format!(
+            "failed to set native messaging {name} (fd {fd}) to O_BINARY"
+        ));
+    }
+    Ok(())
 }
 
 fn read_native_json<R: Read>(reader: &mut R) -> Result<Option<String>, String> {
