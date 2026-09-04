@@ -69,6 +69,15 @@ jobs:
           "DSH_TGZ=$tgz" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Packed: $tgz"
 
+      - name: Build extensionless Native Companion before runtime gate
+        shell: pwsh
+        run: |
+          pnpm --dir native build
+          cargo build --manifest-path native/src-tauri/Cargo.toml
+          $exe = (Resolve-Path 'native/src-tauri/target/debug/dsh-selection-companion-native.exe').Path
+          "NATIVE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Native companion: $exe"
+
       - name: Install DeepSeek Harness CLI with normal peer resolution
         shell: pwsh
         run: |
@@ -81,49 +90,49 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:DSH_HOME | Out-Null
           dsh plugin --profile web add "$env:DSH_TGZ"
 
-      - name: Start dsh web and prove named pipe is created
+      - name: Start fresh dsh web and prove protocol-level named pipe
         shell: pwsh
         run: |
           $dsh = (Get-Command dsh.cmd -ErrorAction Stop).Source
           $stdout = Join-Path $pwd 'dsh-web.out.log'
           $stderr = Join-Path $pwd 'dsh-web.err.log'
-          $proc = Start-Process -FilePath $dsh -ArgumentList @('web') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $proc = Start-Process -FilePath $dsh -ArgumentList @('web', '--no-open') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
           "DSH_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          $connected = $false
+          $ready = $false
+          $last = ''
           $deadline = (Get-Date).AddSeconds(90)
-          while ((Get-Date) -lt $deadline -and -not $connected) {
-            $pipe = $null
-            try {
-              $pipe = [System.IO.Pipes.NamedPipeClientStream]::new('.', 'dsh-selection-companion-v1', [System.IO.Pipes.PipeDirection]::InOut)
-              $pipe.Connect(500)
-              $connected = $pipe.IsConnected
-            } catch {
-              Start-Sleep -Milliseconds 500
-            } finally {
-              if ($null -ne $pipe) { $pipe.Dispose() }
+          while ((Get-Date) -lt $deadline -and -not $ready) {
+            if ($proc.HasExited) {
+              Get-Content $stdout -ErrorAction SilentlyContinue
+              Get-Content $stderr -ErrorAction SilentlyContinue
+              throw "dsh web exited before the bridge became ready, code=$($proc.ExitCode)"
+            }
+            Start-Sleep -Milliseconds 500
+            $last = (node scripts/debug-selection.mjs 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -and $last -match '\[debug-selection\] no current selection') {
+              $ready = $true
             }
           }
 
           Get-Content $stdout -ErrorAction SilentlyContinue
           Get-Content $stderr -ErrorAction SilentlyContinue
-          if (-not $connected) {
-            throw 'Named pipe \\.\pipe\dsh-selection-companion-v1 was not connectable within 90 seconds'
+          if (-not $ready) {
+            Write-Host $last
+            throw 'Harness bridge did not answer a valid bridge.hello + selection.current probe within 90 seconds'
           }
-          Write-Host 'Verified named pipe: \\.\pipe\dsh-selection-companion-v1'
+          Write-Host 'Verified protocol-level named pipe: \\.\pipe\dsh-selection-companion-v1'
 
-      - name: Build extensionless Native Companion
+      - name: Start Native Companion and recheck Harness lifecycle
         shell: pwsh
         run: |
-          pnpm --dir native build
-          cargo build --manifest-path native/src-tauri/Cargo.toml
-          $exe = (Resolve-Path 'native/src-tauri/target/debug/dsh-selection-companion-native.exe').Path
-          "NATIVE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Native companion: $exe"
+          $dshProc = Get-Process -Id ([int]$env:DSH_PID) -ErrorAction SilentlyContinue
+          if (-not $dshProc) {
+            Get-Content dsh-web.out.log -ErrorAction SilentlyContinue
+            Get-Content dsh-web.err.log -ErrorAction SilentlyContinue
+            throw 'dsh web is no longer alive before Native Companion startup'
+          }
 
-      - name: Start Native Companion
-        shell: pwsh
-        run: |
           $stdout = Join-Path $pwd 'native.out.log'
           $stderr = Join-Path $pwd 'native.err.log'
           $proc = Start-Process -FilePath $env:NATIVE_EXE -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -135,9 +144,22 @@ jobs:
             throw "Native companion exited early with code $($proc.ExitCode)"
           }
 
+          $probe = (node scripts/debug-selection.mjs 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host $probe
+            throw 'Harness named pipe became unavailable after Native Companion startup'
+          }
+          Write-Host $probe
+          Write-Host 'Verified Harness bridge remains available with Native Companion running'
+
       - name: Chrome extensionless UIA selection to ctx.selectionContext
         shell: pwsh
         run: |
+          $dshProc = Get-Process -Id ([int]$env:DSH_PID) -ErrorAction SilentlyContinue
+          if (-not $dshProc) { throw 'dsh web died before Chrome UIA E2E' }
+          $nativeProc = Get-Process -Id ([int]$env:NATIVE_PID) -ErrorAction SilentlyContinue
+          if (-not $nativeProc) { throw 'Native Companion died before Chrome UIA E2E' }
+
           $html = @"
           <!doctype html>
           <html><head><meta charset="utf-8"><title>Task5 UIA Probe</title></head>
@@ -175,6 +197,7 @@ jobs:
             '--no-first-run',
             '--no-default-browser-check',
             '--disable-background-networking',
+            '--disable-extensions',
             '--new-window',
             $url
           ) -PassThru
@@ -192,7 +215,7 @@ jobs:
           if (-not $activated) { throw 'Could not activate Chrome window for UIA selection probe' }
           Start-Sleep -Milliseconds 500
 
-          1..29 | ForEach-Object {
+          1..$env:TASK5_MARKER.Length | ForEach-Object {
             $shell.SendKeys('+{RIGHT}')
             Start-Sleep -Milliseconds 20
           }
@@ -203,13 +226,15 @@ jobs:
             if (-not $matched) {
               Start-Sleep -Milliseconds 500
               $last = (node scripts/debug-selection.mjs 2>&1 | Out-String)
-              if ($last -match [regex]::Escape($env:TASK5_MARKER) -and $last -match '"provider"\s*:\s*"browser-accessibility"') {
+              if ($LASTEXITCODE -eq 0 -and $last -match [regex]::Escape($env:TASK5_MARKER) -and $last -match '"provider"\s*:\s*"browser-accessibility"') {
                 $matched = $true
               }
             }
           }
           Write-Host $last
           if (-not $matched) {
+            Get-Content dsh-web.out.log -ErrorAction SilentlyContinue
+            Get-Content dsh-web.err.log -ErrorAction SilentlyContinue
             Get-Content native.out.log -ErrorAction SilentlyContinue
             Get-Content native.err.log -ErrorAction SilentlyContinue
             throw 'Chrome selection did not reach Harness as provider=browser-accessibility'
