@@ -34,6 +34,8 @@ declare module '@deepseek-ai/cordis' {
  * Business semantics remain in Harness services/router; this class only owns transport lifecycle.
  */
 export class SelectionCompanionBridgeService extends Service {
+  static inject = ['selectionContext']
+
   private readonly endpointValue: string
   private readonly enabledValue: boolean
   private readonly clients = new Set<Socket>()
