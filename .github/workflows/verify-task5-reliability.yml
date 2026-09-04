@@ -1,0 +1,22 @@
+name: verify-task5-reliability
+
+on:
+  push:
+    branches:
+      - task5/reliability
+
+jobs:
+  native-reliability:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reliability branch
+        uses: actions/checkout@v4
+
+      - name: Rust format gate
+        shell: pwsh
+        run: cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+
+      - name: Native tests
+        shell: pwsh
+        run: cargo test --manifest-path native/src-tauri/Cargo.toml
