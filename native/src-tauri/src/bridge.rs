@@ -404,4 +404,167 @@ mod tests {
         assert_eq!(status.protocol, IPC_PROTOCOL_VERSION);
         assert!(status.server_version.is_none());
     }
+
+    #[cfg(windows)]
+    async fn read_server_message(
+        server: &mut tokio::net::windows::named_pipe::NamedPipeServer,
+    ) -> IpcMessage {
+        use tokio::io::AsyncReadExt;
+
+        let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+        server.read_exact(&mut header).await.expect("read frame header");
+        let declared = u32::from_be_bytes(header) as usize;
+        assert!(declared <= IPC_MAX_FRAME_BYTES);
+        let mut payload = vec![0_u8; declared];
+        server.read_exact(&mut payload).await.expect("read frame payload");
+        let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+        frame.extend_from_slice(&header);
+        frame.extend_from_slice(&payload);
+        crate::protocol::decode_frame(&frame).expect("decode client frame")
+    }
+
+    #[cfg(windows)]
+    async fn write_server_message(
+        server: &mut tokio::net::windows::named_pipe::NamedPipeServer,
+        message: &IpcMessage,
+    ) {
+        use tokio::io::AsyncWriteExt;
+
+        let frame = crate::protocol::encode_frame(message).expect("encode server frame");
+        server.write_all(&frame).await.expect("write server frame");
+        server.flush().await.expect("flush server frame");
+    }
+
+    #[cfg(windows)]
+    fn hello_result(id: String) -> IpcMessage {
+        IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id,
+            type_name: "bridge.hello.result".to_owned(),
+            payload: serde_json::json!({
+                "server": { "name": "task5-test-harness", "version": "1.0.0" },
+                "protocol": IPC_PROTOCOL_VERSION,
+                "capabilities": []
+            }),
+        }
+    }
+
+    #[cfg(windows)]
+    fn sample_snapshot() -> SelectionSnapshot {
+        use crate::protocol::{
+            SelectionCapabilities, SelectionContext, SelectionSource, SelectionSourceKind,
+            SelectionValue,
+        };
+
+        SelectionSnapshot {
+            id: "task5-first-selection-after-restart".to_owned(),
+            revision: 1,
+            captured_at: 1,
+            selection: SelectionValue {
+                text: "first selection after Harness restart".to_owned(),
+                language: None,
+            },
+            source: SelectionSource {
+                kind: SelectionSourceKind::Browser,
+                app: Some("Google Chrome".to_owned()),
+                process: Some("chrome.exe".to_owned()),
+                window_title: Some("Task 5 Probe - Google Chrome".to_owned()),
+            },
+            document: None,
+            context: SelectionContext {
+                before: None,
+                after: None,
+                section_text: None,
+                page_available: false,
+            },
+            capabilities: SelectionCapabilities {
+                local_context: false,
+                section_context: false,
+                page_context: false,
+                screenshot: false,
+            },
+            geometry: None,
+            provider: "browser-accessibility".to_owned(),
+            confidence: 0.8,
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn first_selection_reconnects_after_cached_pipe_goes_stale() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        use tokio::time::{timeout, Duration};
+
+        let endpoint = format!(
+            r"\\.\pipe\dsh-selection-companion-test-{}-{}",
+            std::process::id(),
+            now_millis()
+        );
+
+        let mut first_server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&endpoint)
+            .expect("create first pipe server");
+        let first_server_task = tokio::spawn(async move {
+            first_server.connect().await.expect("connect first client");
+            let hello = read_server_message(&mut first_server).await;
+            assert_eq!(hello.type_name, "bridge.hello");
+            write_server_message(&mut first_server, &hello_result(hello.id)).await;
+            // Drop the server immediately after hello. BridgeRuntime still caches
+            // the client as connected, reproducing a dsh web restart.
+        });
+
+        let runtime = BridgeRuntime {
+            endpoint: endpoint.clone(),
+            inner: Mutex::new(BridgeInner {
+                connected: false,
+                server_version: None,
+                last_error: None,
+                last_latency_ms: None,
+                client: None,
+            }),
+        };
+        runtime.connect().await.expect("initial bridge connect");
+        first_server_task.await.expect("first server task");
+
+        let mut restarted_server = ServerOptions::new()
+            .create(&endpoint)
+            .expect("create restarted pipe server");
+        let restarted_server_task = tokio::spawn(async move {
+            restarted_server
+                .connect()
+                .await
+                .expect("connect after restart");
+            let hello = read_server_message(&mut restarted_server).await;
+            assert_eq!(hello.type_name, "bridge.hello");
+            write_server_message(&mut restarted_server, &hello_result(hello.id)).await;
+
+            let update = read_server_message(&mut restarted_server).await;
+            assert_eq!(update.type_name, "selection.update");
+            assert_eq!(
+                update.payload["snapshot"]["selection"]["text"],
+                "first selection after Harness restart"
+            );
+            write_server_message(
+                &mut restarted_server,
+                &IpcMessage {
+                    protocol: IPC_PROTOCOL_VERSION,
+                    id: update.id,
+                    type_name: "selection.updated".to_owned(),
+                    payload: serde_json::json!({ "accepted": true }),
+                },
+            )
+            .await;
+        });
+
+        timeout(Duration::from_secs(5), runtime.submit_selection(sample_snapshot()))
+            .await
+            .expect("selection retry timed out")
+            .expect("first post-restart selection should reconnect and succeed");
+        restarted_server_task.await.expect("restarted server task");
+
+        let status = runtime.status().await;
+        assert!(status.connected);
+        assert!(status.last_error.is_none());
+    }
 }
