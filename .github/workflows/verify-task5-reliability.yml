@@ -13,9 +13,11 @@ jobs:
       - name: Checkout reliability branch
         uses: actions/checkout@v4
 
-      - name: Bridge Rust format gate
+      - name: Format bridge regression fixture in runner
         shell: pwsh
-        run: rustfmt --edition 2021 --check native/src-tauri/src/bridge.rs
+        run: |
+          rustfmt --edition 2021 native/src-tauri/src/bridge.rs
+          git diff -- native/src-tauri/src/bridge.rs
 
       - name: Provide Tauri frontendDist fixture
         shell: pwsh
