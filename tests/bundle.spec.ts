@@ -20,7 +20,7 @@ describe('dsh-selection-companion bundle entry', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
     try {
-      expect(() => apply(ctx)).not.toThrow()
+      await expect(apply(ctx)).resolves.toBeUndefined()
       expect(plugin).toHaveBeenCalledWith(SelectionContextService)
       expect(plugin).toHaveBeenCalledWith(SelectionCompanionBridgeService)
       expect(ctx.selectionContext).toBeDefined()
