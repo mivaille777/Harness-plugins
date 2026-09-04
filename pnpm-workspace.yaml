@@ -1,3 +1,5 @@
 packages:
   - native
   - browser-extension
+allowBuilds:
+  esbuild: true
