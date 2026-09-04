@@ -5,8 +5,8 @@ import { SelectionContextService } from './context/service.js'
 export const name = 'selection-companion'
 
 export function apply(ctx: Context): void {
-  new SelectionContextService(ctx)
-  new SelectionCompanionBridgeService(ctx)
+  ctx.plugin(SelectionContextService)
+  ctx.plugin(SelectionCompanionBridgeService)
   console.log('[selection-companion] plugin loaded!')
 }
 
