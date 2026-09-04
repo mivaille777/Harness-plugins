@@ -17,6 +17,12 @@ jobs:
         shell: pwsh
         run: rustfmt --edition 2021 --check native/src-tauri/src/bridge.rs
 
+      - name: Provide Tauri frontendDist fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path native/dist | Out-Null
+          '<!doctype html><title>Task 5 reliability fixture</title>' | Set-Content -Path native/dist/index.html -Encoding utf8
+
       - name: Native tests
         shell: pwsh
         run: cargo test --manifest-path native/src-tauri/Cargo.toml
