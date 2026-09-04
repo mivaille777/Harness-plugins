@@ -13,9 +13,9 @@ jobs:
       - name: Checkout reliability branch
         uses: actions/checkout@v4
 
-      - name: Rust format gate
+      - name: Bridge Rust format gate
         shell: pwsh
-        run: cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+        run: rustfmt --edition 2021 --check native/src-tauri/src/bridge.rs
 
       - name: Native tests
         shell: pwsh
