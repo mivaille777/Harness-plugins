@@ -40,9 +40,26 @@ jobs:
           node --version
           pnpm --version
 
-      - name: Install workspace dependencies
+      - name: Install dependencies with one-time esbuild approval
         shell: pwsh
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          pnpm install --no-frozen-lockfile
+          $firstInstall = $LASTEXITCODE
+          if ($firstInstall -ne 0) {
+            Write-Host "Fresh pnpm 11 install was blocked; retrying with only esbuild approved for this disposable runner."
+            @"
+          packages:
+            - native
+            - browser-extension
+          allowBuilds:
+            esbuild: true
+          "@ | Set-Content -Path pnpm-workspace.yaml -Encoding utf8
+            pnpm install --no-frozen-lockfile
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            git checkout -- pnpm-workspace.yaml
+          }
+          Write-Host 'Workspace policy restored before pnpm check.'
+          git diff -- pnpm-workspace.yaml
 
       - name: First gate - pnpm check on exact 2bd748d
         shell: pwsh
