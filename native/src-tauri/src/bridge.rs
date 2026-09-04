@@ -5,8 +5,8 @@ use tauri::State;
 use tokio::sync::Mutex;
 
 use crate::protocol::{
-    BridgeHelloResultPayload, IpcMessage, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES,
-    IPC_PROTOCOL_VERSION,
+    BridgeHelloResultPayload, IpcMessage, SelectionSnapshot, IPC_FRAME_HEADER_BYTES,
+    IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v1";
@@ -211,6 +211,68 @@ impl BridgeRuntime {
 
     #[cfg(not(windows))]
     async fn ping(&self) -> Result<(), String> {
+        self.connect().await
+    }
+
+    #[cfg(windows)]
+    pub async fn submit_selection(&self, snapshot: SelectionSnapshot) -> Result<(), String> {
+        snapshot.validate().map_err(|error| error.to_string())?;
+        self.connect().await?;
+
+        let request_id = request_id("selection");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "selection.update".to_owned(),
+            payload: serde_json::json!({ "snapshot": snapshot }),
+        };
+
+        let mut inner = self.inner.lock().await;
+        if !inner.connected || inner.client.is_none() {
+            let message = "bridge is not connected".to_owned();
+            inner.last_error = Some(message.clone());
+            return Err(message);
+        }
+
+        let result = {
+            let client = inner.client.as_mut().expect("connected client");
+            exchange(client, &message).await
+        };
+
+        match result {
+            Ok(response) => {
+                if let Err(error) = ensure_response_id(&response, &request_id) {
+                    inner.last_error = Some(error.clone());
+                    return Err(error);
+                }
+                if response.type_name == "error.response" {
+                    let error = format!("Harness rejected selection update: {}", response.payload);
+                    inner.last_error = Some(error.clone());
+                    return Err(error);
+                }
+                if response.type_name != "selection.updated" {
+                    let error = format!(
+                        "unexpected selection update response: {}",
+                        response.type_name
+                    );
+                    inner.last_error = Some(error.clone());
+                    return Err(error);
+                }
+                inner.last_error = None;
+                Ok(())
+            }
+            Err(error) => {
+                let message = format!("selection update failed: {error}");
+                inner.connected = false;
+                inner.client = None;
+                inner.last_error = Some(message.clone());
+                Err(message)
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub async fn submit_selection(&self, _snapshot: SelectionSnapshot) -> Result<(), String> {
         self.connect().await
     }
 
