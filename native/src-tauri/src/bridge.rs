@@ -217,7 +217,6 @@ impl BridgeRuntime {
     #[cfg(windows)]
     pub async fn submit_selection(&self, snapshot: SelectionSnapshot) -> Result<(), String> {
         snapshot.validate().map_err(|error| error.to_string())?;
-        self.connect().await?;
 
         let request_id = request_id("selection");
         let message = IpcMessage {
@@ -226,49 +225,68 @@ impl BridgeRuntime {
             type_name: "selection.update".to_owned(),
             payload: serde_json::json!({ "snapshot": snapshot }),
         };
+        let mut last_transport_error = None;
 
-        let mut inner = self.inner.lock().await;
-        if !inner.connected || inner.client.is_none() {
-            let message = "bridge is not connected".to_owned();
-            inner.last_error = Some(message.clone());
-            return Err(message);
+        // A cached NamedPipeClient can become stale when `dsh web` restarts. The
+        // first exchange detects that stale transport, clears it, reconnects,
+        // and retries this immutable selection exactly once. Replaying the same
+        // snapshot is safe because Harness revision ordering makes the update
+        // idempotent if the first write was accepted but its response was lost.
+        for attempt in 0..2 {
+            self.connect().await?;
+
+            let result = {
+                let mut inner = self.inner.lock().await;
+                if !inner.connected || inner.client.is_none() {
+                    Err("bridge is not connected".to_owned())
+                } else {
+                    let client = inner.client.as_mut().expect("connected client");
+                    exchange(client, &message).await
+                }
+            };
+
+            match result {
+                Ok(response) => {
+                    let mut inner = self.inner.lock().await;
+                    if let Err(error) = ensure_response_id(&response, &request_id) {
+                        inner.last_error = Some(error.clone());
+                        return Err(error);
+                    }
+                    if response.type_name == "error.response" {
+                        let error =
+                            format!("Harness rejected selection update: {}", response.payload);
+                        inner.last_error = Some(error.clone());
+                        return Err(error);
+                    }
+                    if response.type_name != "selection.updated" {
+                        let error = format!(
+                            "unexpected selection update response: {}",
+                            response.type_name
+                        );
+                        inner.last_error = Some(error.clone());
+                        return Err(error);
+                    }
+                    inner.last_error = None;
+                    return Ok(());
+                }
+                Err(error) => {
+                    let message = format!("selection update failed: {error}");
+                    {
+                        let mut inner = self.inner.lock().await;
+                        inner.connected = false;
+                        inner.client = None;
+                        inner.last_error = Some(message.clone());
+                    }
+                    last_transport_error = Some(message);
+                    if attempt == 0 {
+                        continue;
+                    }
+                }
+            }
         }
 
-        let result = {
-            let client = inner.client.as_mut().expect("connected client");
-            exchange(client, &message).await
-        };
-
-        match result {
-            Ok(response) => {
-                if let Err(error) = ensure_response_id(&response, &request_id) {
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                if response.type_name == "error.response" {
-                    let error = format!("Harness rejected selection update: {}", response.payload);
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                if response.type_name != "selection.updated" {
-                    let error = format!(
-                        "unexpected selection update response: {}",
-                        response.type_name
-                    );
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                inner.last_error = None;
-                Ok(())
-            }
-            Err(error) => {
-                let message = format!("selection update failed: {error}");
-                inner.connected = false;
-                inner.client = None;
-                inner.last_error = Some(message.clone());
-                Err(message)
-            }
-        }
+        Err(last_transport_error
+            .unwrap_or_else(|| "selection update failed after transport retry".to_owned()))
     }
 
     #[cfg(not(windows))]
