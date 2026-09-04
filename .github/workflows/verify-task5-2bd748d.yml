@@ -25,7 +25,6 @@ jobs:
             throw "Expected 2bd748d51c18b6caaa9e02ef6429c44a4be4a1fa, got $actual"
           }
           "DSH_HOME=$env:RUNNER_TEMP\dsh-home" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          git status --short
 
       - name: Setup Node 22.19
         uses: actions/setup-node@v4
@@ -40,32 +39,28 @@ jobs:
           node --version
           pnpm --version
 
-      - name: Install dependencies with one-time esbuild approval
+      - name: Apply candidate pnpm 11 build policy
         shell: pwsh
         run: |
-          pnpm install --no-frozen-lockfile
-          $firstInstall = $LASTEXITCODE
-          if ($firstInstall -ne 0) {
-            Write-Host "Fresh pnpm 11 install was blocked; retrying with only esbuild approved for this disposable runner."
-            @"
+          @"
           packages:
             - native
             - browser-extension
           allowBuilds:
             esbuild: true
           "@ | Set-Content -Path pnpm-workspace.yaml -Encoding utf8
-            pnpm install --no-frozen-lockfile
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            git checkout -- pnpm-workspace.yaml
-          }
-          Write-Host 'Workspace policy restored before pnpm check.'
+          Write-Host 'Candidate diff relative to 2bd748d:'
           git diff -- pnpm-workspace.yaml
 
-      - name: First gate - pnpm check on exact 2bd748d
+      - name: Install workspace dependencies
+        shell: pwsh
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Gate - pnpm check with candidate Task 5 build-policy fix
         shell: pwsh
         run: pnpm check
 
-      - name: Pack exact 2bd748d
+      - name: Pack bundle
         shell: pwsh
         run: |
           pnpm pack
