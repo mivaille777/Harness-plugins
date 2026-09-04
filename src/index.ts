@@ -4,9 +4,13 @@ import { SelectionContextService } from './context/service.js'
 
 export const name = 'selection-companion'
 
-export function apply(ctx: Context): void {
-  ctx.plugin(SelectionContextService)
-  ctx.plugin(SelectionCompanionBridgeService)
+export async function apply(ctx: Context): Promise<void> {
+  const selectionContextFiber = ctx.plugin(SelectionContextService)
+  await selectionContextFiber.await()
+
+  const bridgeFiber = ctx.plugin(SelectionCompanionBridgeService)
+  await bridgeFiber.await()
+
   console.log('[selection-companion] plugin loaded!')
 }
 
