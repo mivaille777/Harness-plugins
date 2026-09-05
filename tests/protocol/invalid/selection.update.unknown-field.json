@@ -1,0 +1,30 @@
+{
+  "protocol": 1,
+  "id": "selection-invalid-1",
+  "type": "selection.update",
+  "payload": {
+    "snapshot": {
+      "id": "selection-1",
+      "revision": 1,
+      "capturedAt": 1000,
+      "selection": {
+        "text": "Selected text"
+      },
+      "source": {
+        "kind": "browser"
+      },
+      "context": {
+        "pageAvailable": false
+      },
+      "capabilities": {
+        "localContext": false,
+        "sectionContext": false,
+        "pageContext": false,
+        "screenshot": false
+      },
+      "provider": "browser-accessibility",
+      "confidence": 0.5,
+      "unexpected": true
+    }
+  }
+}

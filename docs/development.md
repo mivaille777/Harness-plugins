@@ -37,6 +37,10 @@ pnpm check:task5 does not exercise a real desktop selection. Follow the relevant
 
 Record each manual, platform, or model-backed result with [the test evidence template](test-evidence-template.md). Keep the recorded commit SHA and environment version with the result. A skipped environment check remains unverified.
 
+## Protocol
+
+Read [the protocol contract](protocol.md) before changing IPC message types, payloads, fixtures, or the native bridge. The contract check runs TypeScript and Rust against the same valid and invalid JSON fixtures.
+
 ## Decisions
 
 Use [the decision record convention](decisions/README.md) for non-trivial choices that affect protocol, lifecycle, privacy, user interaction, or release behaviour.

@@ -1,0 +1,9 @@
+{
+  "protocol": 1,
+  "id": "subscribe-invalid-1",
+  "type": "session.subscribe",
+  "payload": {
+    "sessionId": "session-1",
+    "cursor": -1
+  }
+}

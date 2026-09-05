@@ -1,0 +1,9 @@
+{
+  "protocol": 1,
+  "id": "ping-invalid-1",
+  "type": "bridge.ping",
+  "payload": {
+    "sentAt": 1000,
+    "unexpected": true
+  }
+}

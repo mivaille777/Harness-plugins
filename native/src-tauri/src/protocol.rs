@@ -8,6 +8,7 @@ pub const IPC_PROTOCOL_VERSION: u32 = 1;
 pub const IPC_MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const IPC_FRAME_HEADER_BYTES: usize = 4;
 pub const DEFAULT_IPC_REQUEST_TIMEOUT_MS: u64 = 30_000;
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub const IPC_MESSAGE_TYPES: &[&str] = &[
     "bridge.hello",
@@ -73,6 +74,23 @@ pub struct BridgeHelloResultPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct EmptyPayload {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PingPayload {
+    pub sent_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PongPayload {
+    pub sent_at: u64,
+    pub received_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
@@ -82,6 +100,65 @@ pub struct ServerInfo {
 #[serde(deny_unknown_fields)]
 pub struct SelectionUpdatePayload {
     pub snapshot: SelectionSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionUpdatedPayload {
+    pub accepted: bool,
+    pub snapshot_id: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub reason: Option<StaleRevisionReason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum StaleRevisionReason {
+    StaleRevision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionCurrentResultPayload {
+    pub snapshot: Option<SelectionSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionExpandPayload {
+    pub snapshot_id: String,
+    pub scope: ContextScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextScope {
+    Selection,
+    Local,
+    Section,
+    Page,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionExpandedPayload {
+    pub snapshot_id: String,
+    pub scope: ContextScope,
+    pub context: ExpandedSelectionContext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExpandedSelectionContext {
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
+    #[serde(default)]
+    pub section_text: Option<String>,
+    #[serde(default)]
+    pub page_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -180,11 +257,66 @@ pub struct SelectionGeometry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionListResultPayload {
+    pub sessions: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSummary {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub status: Option<SessionStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Idle,
+    Running,
+    Queued,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCreatePayload {
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub agent_preset: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCreatedPayload {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionSubmitPayload {
     pub session_id: String,
     pub request_id: String,
     pub mode: SessionDeliveryMode,
     pub content: Vec<PromptContentPart>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionSubmittedPayload {
+    pub accepted: bool,
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionSubscriptionPayload {
+    pub session_id: String,
+    #[serde(default)]
+    pub cursor: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -330,10 +462,63 @@ impl IpcMessage {
                 }
                 require_text(&payload.server.name, "server.name")?;
                 require_text(&payload.server.version, "server.version")?;
+                for capability in &payload.capabilities {
+                    require_text(capability, "capabilities")?;
+                }
+            }
+            "bridge.ping" => {
+                let payload: PingPayload = typed_payload(&self.payload)?;
+                require_safe_integer(payload.sent_at, "sentAt")?;
+            }
+            "bridge.pong" => {
+                let payload: PongPayload = typed_payload(&self.payload)?;
+                require_safe_integer(payload.sent_at, "sentAt")?;
+                require_safe_integer(payload.received_at, "receivedAt")?;
             }
             "selection.update" => {
                 let payload: SelectionUpdatePayload = typed_payload(&self.payload)?;
                 payload.snapshot.validate()?;
+            }
+            "selection.updated" => {
+                let payload: SelectionUpdatedPayload = typed_payload(&self.payload)?;
+                require_text(&payload.snapshot_id, "snapshotId")?;
+                require_safe_integer(payload.revision, "revision")?;
+            }
+            "selection.current" | "session.list" => {
+                let _: EmptyPayload = typed_payload(&self.payload)?;
+            }
+            "selection.current.result" => {
+                let payload: SelectionCurrentResultPayload = typed_payload(&self.payload)?;
+                if let Some(snapshot) = payload.snapshot {
+                    snapshot.validate()?;
+                }
+            }
+            "selection.expand" => {
+                let payload: SelectionExpandPayload = typed_payload(&self.payload)?;
+                require_text(&payload.snapshot_id, "snapshotId")?;
+            }
+            "selection.expanded" => {
+                let payload: SelectionExpandedPayload = typed_payload(&self.payload)?;
+                require_text(&payload.snapshot_id, "snapshotId")?;
+            }
+            "session.list.result" => {
+                let payload: SessionListResultPayload = typed_payload(&self.payload)?;
+                for session in &payload.sessions {
+                    require_text(&session.id, "sessions.id")?;
+                }
+            }
+            "session.create" => {
+                let payload: SessionCreatePayload = typed_payload(&self.payload)?;
+                if let Some(cwd) = &payload.cwd {
+                    require_text(cwd, "cwd")?;
+                }
+                if let Some(agent_preset) = &payload.agent_preset {
+                    require_text(agent_preset, "agentPreset")?;
+                }
+            }
+            "session.created" => {
+                let payload: SessionCreatedPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
             }
             "session.submit" => {
                 let payload: SessionSubmitPayload = typed_payload(&self.payload)?;
@@ -348,6 +533,17 @@ impl IpcMessage {
                     match part {
                         PromptContentPart::Text { text } => require_text(text, "content.text")?,
                     }
+                }
+            }
+            "session.submitted" => {
+                let payload: SessionSubmittedPayload = typed_payload(&self.payload)?;
+                require_text(&payload.request_id, "requestId")?;
+            }
+            "session.subscribe" | "session.subscribed" => {
+                let payload: SessionSubscriptionPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
+                if let Some(cursor) = payload.cursor {
+                    require_safe_integer(cursor, "cursor")?;
                 }
             }
             "agent.event" => {
@@ -375,6 +571,8 @@ impl SelectionSnapshot {
                 "snapshot.id must be at most 256 characters".into(),
             ));
         }
+        require_safe_integer(self.revision, "snapshot.revision")?;
+        require_safe_integer(self.captured_at, "snapshot.capturedAt")?;
         if self.selection.text.trim().is_empty() {
             return Err(ProtocolError::InvalidMessage(
                 "selection.text must not be empty".into(),
@@ -559,6 +757,15 @@ fn require_text(value: &str, field: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn require_safe_integer(value: u64, field: &str) -> Result<(), ProtocolError> {
+    if value > MAX_SAFE_INTEGER {
+        return Err(ProtocolError::InvalidMessage(format!(
+            "{field} must be a non-negative safe integer"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,11 +778,28 @@ mod tests {
         include_str!("../../../tests/protocol/agent.event.json"),
         include_str!("../../../tests/protocol/error.response.json"),
     ];
+    const INVALID_FIXTURES: &[&str] = &[
+        include_str!("../../../tests/protocol/invalid/bridge.ping.unknown-field.json"),
+        include_str!("../../../tests/protocol/invalid/selection.expand.missing-scope.json"),
+        include_str!("../../../tests/protocol/invalid/selection.update.unknown-field.json"),
+        include_str!("../../../tests/protocol/invalid/session.subscribe.negative-cursor.json"),
+        include_str!("../../../tests/protocol/invalid/session.submit.empty-content.json"),
+    ];
 
     #[test]
     fn parses_all_shared_golden_fixtures() {
         for fixture in FIXTURES {
             IpcMessage::from_json(fixture).expect("fixture must match Rust protocol contract");
+        }
+    }
+
+    #[test]
+    fn rejects_all_shared_invalid_fixtures() {
+        for fixture in INVALID_FIXTURES {
+            assert!(
+                IpcMessage::from_json(fixture).is_err(),
+                "invalid fixture unexpectedly parsed: {fixture}"
+            );
         }
     }
 

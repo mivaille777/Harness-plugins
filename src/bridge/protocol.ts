@@ -171,6 +171,49 @@ const errorCodeSchema = z.enum([
   'BRIDGE_UNAVAILABLE',
   'INTERNAL_ERROR',
 ])
+const selectionSnapshotWireSchema = z.object({
+  id: nonEmptyString.max(256),
+  revision: nonNegativeSafeInteger,
+  capturedAt: nonNegativeSafeInteger,
+  selection: z.object({
+    text: z.string(),
+    language: z.string().optional(),
+  }).strict(),
+  source: z.object({
+    kind: z.enum(['browser', 'pdf', 'word', 'desktop']),
+    app: z.string().optional(),
+    process: z.string().optional(),
+    windowTitle: z.string().optional(),
+  }).strict(),
+  document: z.object({
+    title: z.string().optional(),
+    url: z.string().optional(),
+    filePath: z.string().optional(),
+    section: z.string().optional(),
+    frameUrl: z.string().optional(),
+  }).strict().optional(),
+  context: z.object({
+    before: z.string().optional(),
+    after: z.string().optional(),
+    sectionText: z.string().optional(),
+    pageAvailable: z.boolean(),
+  }).strict(),
+  capabilities: z.object({
+    localContext: z.boolean(),
+    sectionContext: z.boolean(),
+    pageContext: z.boolean(),
+    screenshot: z.boolean(),
+  }).strict(),
+  geometry: z.object({
+    monitorId: z.string().optional(),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().finite(),
+    height: z.number().finite(),
+  }).strict().optional(),
+  provider: nonEmptyString,
+  confidence: z.number().finite(),
+}).strict()
 
 const envelopeSchema = z.object({
   protocol: z.number().int(),
@@ -278,7 +321,7 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
       }).strict().parse(payload)
     case 'selection.update': {
       const parsed = z.object({ snapshot: z.unknown() }).strict().parse(payload)
-      return { snapshot: normalizeSelectionSnapshot(parsed.snapshot) }
+      return { snapshot: parseSelectionSnapshot(parsed.snapshot) }
     }
     case 'selection.updated':
       return z.object({
@@ -292,7 +335,7 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
       return emptyPayloadSchema.parse(payload)
     case 'selection.current.result': {
       const parsed = z.object({ snapshot: z.unknown().nullable() }).strict().parse(payload)
-      return { snapshot: parsed.snapshot === null ? null : normalizeSelectionSnapshot(parsed.snapshot) }
+      return { snapshot: parsed.snapshot === null ? null : parseSelectionSnapshot(parsed.snapshot) }
     }
     case 'selection.expand':
       return z.object({ snapshotId: nonEmptyString, scope: scopeSchema }).strict().parse(payload)
@@ -344,6 +387,10 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         details: z.unknown().optional(),
       }).strict().parse(payload)
   }
+}
+
+function parseSelectionSnapshot(input: unknown): SelectionSnapshot {
+  return normalizeSelectionSnapshot(selectionSnapshotWireSchema.parse(input))
 }
 
 function invalidMessage(error: unknown): IpcProtocolError {

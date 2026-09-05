@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "id": "expand-invalid-1",
+  "type": "selection.expand",
+  "payload": {
+    "snapshotId": "selection-1"
+  }
+}

@@ -14,6 +14,7 @@ import {
 } from '../src/index.js'
 
 const fixtureDir = fileURLToPath(new URL('./protocol/', import.meta.url))
+const invalidFixtureDir = fileURLToPath(new URL('./protocol/invalid/', import.meta.url))
 
 const ping: IpcMessage = {
   protocol: IPC_PROTOCOL_VERSION,
@@ -24,12 +25,24 @@ const ping: IpcMessage = {
 
 describe('IPC golden fixtures', () => {
   it('accepts every shared JSON fixture on the TypeScript side', async () => {
-    const files = (await readdir(fixtureDir)).filter(file => file.endsWith('.json')).sort()
+    const files = (await readdir(fixtureDir))
+      .filter(file => file.endsWith('.json'))
+      .sort()
     expect(files.length).toBeGreaterThanOrEqual(6)
 
     for (const file of files) {
       const source = await readFile(new URL(`./protocol/${file}`, import.meta.url), 'utf8')
       expect(() => parseIpcMessage(source), file).not.toThrow()
+    }
+  })
+
+  it('rejects every shared invalid JSON fixture on the TypeScript side', async () => {
+    const files = (await readdir(invalidFixtureDir)).filter(file => file.endsWith('.json')).sort()
+    expect(files.length).toBeGreaterThanOrEqual(5)
+
+    for (const file of files) {
+      const source = await readFile(new URL(`./protocol/invalid/${file}`, import.meta.url), 'utf8')
+      expect(() => parseIpcMessage(source), file).toThrow(IpcProtocolError)
     }
   })
 })
@@ -68,8 +81,8 @@ describe('IPC message validation', () => {
     }
   })
 
-  it('normalizes SelectionSnapshot payloads through the Task 2 domain validator', () => {
-    const message = parseIpcMessage({
+  it('rejects unknown selection fields at the IPC boundary', () => {
+    expect(() => parseIpcMessage({
       protocol: 1,
       id: 'selection-1',
       type: 'selection.update',
@@ -92,13 +105,7 @@ describe('IPC message validation', () => {
           ignoredWireField: 'discard me',
         },
       },
-    })
-
-    expect(message.type).toBe('selection.update')
-    if (message.type !== 'selection.update') throw new Error('unexpected message type')
-    expect(message.payload.snapshot.selection.text).toBe('  多模态 context 🚀  ')
-    expect('ignoredWireField' in message.payload.snapshot).toBe(false)
-    expect(Object.isFrozen(message.payload.snapshot)).toBe(true)
+    })).toThrow(IpcProtocolError)
   })
 })
 
