@@ -154,6 +154,8 @@ BridgeRuntime.submit_selection()
 
 This avoids a global mouse hook for the primary implementation and prevents bursts of duplicate UIA events from creating duplicate Harness snapshots.
 
+Task 2 adds a second bounded, latest-value mailbox between capture and publish. It retains one unpublished snapshot at most; a slower bridge receives the newest material rather than an unbounded backlog. The native diagnostics window can pause capture without disconnecting Harness. Pause clears only unpublished local material, and reconnecting cannot resume it. See [capture reliability and privacy](docs/capture-reliability.md) for configuration, privacy exclusions, state meanings, and the required Windows evidence.
+
 The Browser provider owns one UI Automation session for the lifetime of its capture worker rather than repeatedly initializing COM for every selection.
 
 ### SelectionSnapshot example
@@ -298,6 +300,7 @@ Focused commands:
 pnpm test:bridge
 pnpm test:native-ui
 pnpm test:browser-accessibility
+pnpm test:capture
 cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```

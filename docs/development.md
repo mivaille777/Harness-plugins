@@ -29,9 +29,12 @@ The Windows native aggregate builds the Tauri frontend before compiling Rust bec
 ~~~powershell
 pnpm check:task5
 cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+pnpm test:capture
 ~~~
 
 pnpm check:task5 does not exercise a real desktop selection. Follow the relevant task's interactive Windows evidence procedure before declaring UI Automation, focus, DPI, or browser support verified.
+
+Read [capture reliability and privacy](capture-reliability.md) before changing the native capture worker, its timing settings, or its pause semantics. `pnpm test:capture:windows` is an explicit non-pass guard until interactive fixture evidence is recorded.
 
 ## Evidence
 

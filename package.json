@@ -32,6 +32,8 @@
     "test:contract": "pnpm test:protocol && pnpm --dir native build && pnpm test:rust",
     "test:bridge": "vitest run tests/bridge-server.spec.ts",
     "test:rust": "cargo test --manifest-path native/src-tauri/Cargo.toml",
+    "test:capture": "cargo test --manifest-path native/src-tauri/Cargo.toml capture::tests",
+    "test:capture:windows": "node scripts/test-capture-windows.mjs",
     "test:native-ui": "pnpm --dir native test",
     "test:browser-accessibility": "cargo test --manifest-path native/src-tauri/Cargo.toml browser_accessibility",
     "test:browser-extension": "pnpm --dir browser-extension test",

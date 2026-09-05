@@ -3,8 +3,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   connectBridge,
   disconnectBridge,
+  getCaptureStatus,
   getBridgeStatus,
+  pauseCapture,
   pingBridge,
+  resumeCapture,
+  type CaptureStatus,
   type BridgeStatus,
 } from './api/bridge'
 
@@ -17,9 +21,30 @@ const EMPTY_STATUS: BridgeStatus = {
   lastLatencyMs: null,
 }
 
+const EMPTY_CAPTURE_STATUS: CaptureStatus = {
+  paused: false,
+  phase: 'running',
+  queueDepth: 0,
+  lastTransitionAt: 0,
+  lastError: null,
+  metrics: {
+    captured: 0,
+    published: 0,
+    deduplicated: 0,
+    pausedDrops: 0,
+    coalesced: 0,
+    noSelection: 0,
+    notApplicable: 0,
+    excluded: 0,
+    errors: 0,
+    lastCaptureLatencyMs: null,
+  },
+}
+
 export default function App() {
   const [status, setStatus] = useState<BridgeStatus>(EMPTY_STATUS)
-  const [busy, setBusy] = useState<'connect' | 'ping' | 'disconnect' | null>(null)
+  const [capture, setCapture] = useState<CaptureStatus>(EMPTY_CAPTURE_STATUS)
+  const [busy, setBusy] = useState<'connect' | 'ping' | 'disconnect' | 'capture' | null>(null)
   const [uiError, setUiError] = useState<string | null>(null)
 
   const run = useCallback(async (
@@ -46,6 +71,8 @@ export default function App() {
     let cancelled = false
     void (async () => {
       try {
+        const captureStatus = await getCaptureStatus()
+        if (!cancelled) setCapture(captureStatus)
         const current = await getBridgeStatus()
         if (!cancelled) setStatus(current)
         if (!current.connected && !cancelled) {
@@ -58,6 +85,18 @@ export default function App() {
     return () => { cancelled = true }
   }, [run])
 
+  const toggleCapture = useCallback(async () => {
+    setBusy('capture')
+    setUiError(null)
+    try {
+      setCapture(await (capture.paused ? resumeCapture() : pauseCapture()))
+    } catch (error) {
+      setUiError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
+    }
+  }, [capture.paused])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -68,7 +107,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const effectiveError = uiError ?? status.lastError
+  const effectiveError = uiError ?? status.lastError ?? capture.lastError
 
   return (
     <main className="shell" data-testid="companion-shell">
@@ -105,6 +144,21 @@ export default function App() {
 
       {effectiveError ? <p className="error" role="alert">{effectiveError}</p> : null}
 
+      <section className="status-card" aria-live="polite">
+        <div className="status-row">
+          <span>Capture</span>
+          <strong>{capture.paused ? 'Paused' : capture.phase}</strong>
+        </div>
+        <div className="status-row">
+          <span>Queue</span>
+          <strong>{capture.queueDepth} / 1</strong>
+        </div>
+        <div className="status-row">
+          <span>Published</span>
+          <strong>{capture.metrics.published}</strong>
+        </div>
+      </section>
+
       <div className="actions">
         <button
           type="button"
@@ -130,7 +184,18 @@ export default function App() {
         </button>
       </div>
 
-      <footer>Task 5 · extensionless browser accessibility capture enabled</footer>
+      <div className="actions">
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => { void toggleCapture() }}
+          disabled={busy !== null}
+        >
+          {busy === 'capture' ? 'Updating…' : capture.paused ? 'Resume capture' : 'Pause capture'}
+        </button>
+      </div>
+
+      <footer>Task 2 · extensionless browser accessibility capture enabled</footer>
     </main>
   )
 }

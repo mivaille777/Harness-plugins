@@ -299,6 +299,10 @@ mod windows_impl {
     }
 
     fn selected_range_from_element(element: &UIElement) -> Option<(UITextRange, String)> {
+        // Password controls can expose a text pattern. Never turn it into a selection snapshot.
+        if element.is_password().unwrap_or(false) {
+            return None;
+        }
         let pattern = element.get_pattern::<UITextPattern>().ok()?;
         let ranges = pattern.get_selection().ok()?;
         ranges.into_iter().find_map(|range| {
