@@ -265,10 +265,19 @@ impl Display for ProtocolError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidMessage(message) => write!(f, "invalid IPC message: {message}"),
-            Self::ProtocolMismatch(received) => write!(f, "unsupported IPC protocol {received}; expected {IPC_PROTOCOL_VERSION}"),
+            Self::ProtocolMismatch(received) => write!(
+                f,
+                "unsupported IPC protocol {received}; expected {IPC_PROTOCOL_VERSION}"
+            ),
             Self::UnknownMessageType(name) => write!(f, "unknown IPC message type: {name}"),
-            Self::FrameTooLarge(size) => write!(f, "IPC frame payload is {size} bytes; maximum is {IPC_MAX_FRAME_BYTES}"),
-            Self::FrameLengthMismatch { declared, actual } => write!(f, "IPC frame declares {declared} payload bytes but contains {actual}"),
+            Self::FrameTooLarge(size) => write!(
+                f,
+                "IPC frame payload is {size} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
+            ),
+            Self::FrameLengthMismatch { declared, actual } => write!(
+                f,
+                "IPC frame declares {declared} payload bytes but contains {actual}"
+            ),
             Self::DuplicateRequestId(id) => write!(f, "request id is already pending: {id}"),
         }
     }
@@ -290,13 +299,17 @@ impl IpcMessage {
         }
         require_text(&self.id, "id")?;
         if self.id.chars().count() > 128 {
-            return Err(ProtocolError::InvalidMessage("id must be at most 128 characters".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "id must be at most 128 characters".into(),
+            ));
         }
         if !IPC_MESSAGE_TYPES.contains(&self.type_name.as_str()) {
             return Err(ProtocolError::UnknownMessageType(self.type_name.clone()));
         }
         if !self.payload.is_object() {
-            return Err(ProtocolError::InvalidMessage("payload must be an object".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "payload must be an object".into(),
+            ));
         }
 
         match self.type_name.as_str() {
@@ -305,7 +318,9 @@ impl IpcMessage {
                 require_text(&payload.client.name, "client.name")?;
                 require_text(&payload.client.version, "client.version")?;
                 if payload.supported_protocols.is_empty() {
-                    return Err(ProtocolError::InvalidMessage("supportedProtocols must not be empty".into()));
+                    return Err(ProtocolError::InvalidMessage(
+                        "supportedProtocols must not be empty".into(),
+                    ));
                 }
             }
             "bridge.hello.result" => {
@@ -325,7 +340,9 @@ impl IpcMessage {
                 require_text(&payload.session_id, "sessionId")?;
                 require_text(&payload.request_id, "requestId")?;
                 if payload.content.is_empty() {
-                    return Err(ProtocolError::InvalidMessage("content must not be empty".into()));
+                    return Err(ProtocolError::InvalidMessage(
+                        "content must not be empty".into(),
+                    ));
                 }
                 for part in &payload.content {
                     match part {
@@ -354,14 +371,20 @@ impl SelectionSnapshot {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         require_text(&self.id, "snapshot.id")?;
         if self.id.chars().count() > 256 {
-            return Err(ProtocolError::InvalidMessage("snapshot.id must be at most 256 characters".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "snapshot.id must be at most 256 characters".into(),
+            ));
         }
         if self.selection.text.trim().is_empty() {
-            return Err(ProtocolError::InvalidMessage("selection.text must not be empty".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "selection.text must not be empty".into(),
+            ));
         }
         require_text(&self.provider, "provider")?;
         if !self.confidence.is_finite() || !(0.0..=1.0).contains(&self.confidence) {
-            return Err(ProtocolError::InvalidMessage("confidence must be between 0 and 1".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "confidence must be between 0 and 1".into(),
+            ));
         }
         if let Some(geometry) = &self.geometry {
             if !geometry.x.is_finite()
@@ -371,7 +394,9 @@ impl SelectionSnapshot {
                 || geometry.width < 0.0
                 || geometry.height < 0.0
             {
-                return Err(ProtocolError::InvalidMessage("invalid selection geometry".into()));
+                return Err(ProtocolError::InvalidMessage(
+                    "invalid selection geometry".into(),
+                ));
             }
         }
         Ok(())
@@ -401,7 +426,10 @@ pub fn encode_frame(message: &IpcMessage) -> Result<Vec<u8>, ProtocolError> {
 
 pub fn decode_frame(frame: &[u8]) -> Result<IpcMessage, ProtocolError> {
     if frame.len() < IPC_FRAME_HEADER_BYTES {
-        return Err(ProtocolError::FrameLengthMismatch { declared: 0, actual: frame.len() });
+        return Err(ProtocolError::FrameLengthMismatch {
+            declared: 0,
+            actual: frame.len(),
+        });
     }
     let declared = u32::from_be_bytes(frame[0..4].try_into().expect("four-byte header")) as usize;
     if declared > IPC_MAX_FRAME_BYTES {
@@ -429,7 +457,9 @@ impl FrameDecoder {
             if self.buffer.len() < IPC_FRAME_HEADER_BYTES {
                 break;
             }
-            let declared = u32::from_be_bytes(self.buffer[0..4].try_into().expect("four-byte header")) as usize;
+            let declared =
+                u32::from_be_bytes(self.buffer[0..4].try_into().expect("four-byte header"))
+                    as usize;
             if declared > IPC_MAX_FRAME_BYTES {
                 self.buffer.clear();
                 return Err(ProtocolError::FrameTooLarge(declared));
@@ -462,20 +492,28 @@ pub struct RequestTracker {
 impl RequestTracker {
     pub fn new(timeout_ms: u64) -> Result<Self, ProtocolError> {
         if timeout_ms == 0 {
-            return Err(ProtocolError::InvalidMessage("timeout must be greater than zero".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "timeout must be greater than zero".into(),
+            ));
         }
-        Ok(Self { pending: HashMap::new(), timeout_ms })
+        Ok(Self {
+            pending: HashMap::new(),
+            timeout_ms,
+        })
     }
 
     pub fn begin(&mut self, id: &str, now_ms: u64) -> Result<(), ProtocolError> {
         require_text(id, "request id")?;
         if id.chars().count() > 128 {
-            return Err(ProtocolError::InvalidMessage("request id must be at most 128 characters".into()));
+            return Err(ProtocolError::InvalidMessage(
+                "request id must be at most 128 characters".into(),
+            ));
         }
         if self.pending.contains_key(id) {
             return Err(ProtocolError::DuplicateRequestId(id.to_owned()));
         }
-        self.pending.insert(id.to_owned(), now_ms.saturating_add(self.timeout_ms));
+        self.pending
+            .insert(id.to_owned(), now_ms.saturating_add(self.timeout_ms));
         Ok(())
     }
 
@@ -484,7 +522,9 @@ impl RequestTracker {
     }
 
     pub fn expire(&mut self, now_ms: u64) -> Vec<String> {
-        let mut expired: Vec<String> = self.pending.iter()
+        let mut expired: Vec<String> = self
+            .pending
+            .iter()
             .filter_map(|(id, deadline)| (*deadline <= now_ms).then_some(id.clone()))
             .collect();
         expired.sort();
@@ -512,7 +552,9 @@ impl RequestTracker {
 
 fn require_text(value: &str, field: &str) -> Result<(), ProtocolError> {
     if value.is_empty() {
-        return Err(ProtocolError::InvalidMessage(format!("{field} must not be empty")));
+        return Err(ProtocolError::InvalidMessage(format!(
+            "{field} must not be empty"
+        )));
     }
     Ok(())
 }
@@ -540,10 +582,16 @@ mod tests {
     #[test]
     fn rejects_protocol_mismatch_and_unknown_message_type() {
         let mismatch = r#"{"protocol":2,"id":"x","type":"bridge.ping","payload":{"sentAt":1}}"#;
-        assert!(matches!(IpcMessage::from_json(mismatch), Err(ProtocolError::ProtocolMismatch(2))));
+        assert!(matches!(
+            IpcMessage::from_json(mismatch),
+            Err(ProtocolError::ProtocolMismatch(2))
+        ));
 
         let unknown = r#"{"protocol":1,"id":"x","type":"unknown.method","payload":{}}"#;
-        assert!(matches!(IpcMessage::from_json(unknown), Err(ProtocolError::UnknownMessageType(_))));
+        assert!(matches!(
+            IpcMessage::from_json(unknown),
+            Err(ProtocolError::UnknownMessageType(_))
+        ));
     }
 
     #[test]
@@ -564,17 +612,26 @@ mod tests {
         let message = IpcMessage::from_json(FIXTURES[0]).unwrap();
         let mut frame = encode_frame(&message).unwrap();
         frame.pop();
-        assert!(matches!(decode_frame(&frame), Err(ProtocolError::FrameLengthMismatch { .. })));
+        assert!(matches!(
+            decode_frame(&frame),
+            Err(ProtocolError::FrameLengthMismatch { .. })
+        ));
 
         let oversized = ((IPC_MAX_FRAME_BYTES + 1) as u32).to_be_bytes();
-        assert!(matches!(decode_frame(&oversized), Err(ProtocolError::FrameTooLarge(_))));
+        assert!(matches!(
+            decode_frame(&oversized),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
     }
 
     #[test]
     fn tracks_duplicates_timeouts_and_transport_reset() {
         let mut tracker = RequestTracker::new(100).unwrap();
         tracker.begin("req-1", 1_000).unwrap();
-        assert!(matches!(tracker.begin("req-1", 1_001), Err(ProtocolError::DuplicateRequestId(_))));
+        assert!(matches!(
+            tracker.begin("req-1", 1_001),
+            Err(ProtocolError::DuplicateRequestId(_))
+        ));
         assert!(tracker.expire(1_099).is_empty());
         assert_eq!(tracker.expire(1_100), vec!["req-1"]);
 

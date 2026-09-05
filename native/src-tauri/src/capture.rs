@@ -44,7 +44,8 @@ impl Drop for CaptureRuntime {
 fn start_windows_capture(app: AppHandle, stop: Arc<AtomicBool>) {
     // Capacity one intentionally coalesces bursts of UIA events for the same user gesture.
     let (trigger_tx, trigger_rx) = mpsc::sync_channel::<()>(1);
-    let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::unbounded_channel::<SelectionSnapshot>();
+    let (snapshot_tx, mut snapshot_rx) =
+        tokio::sync::mpsc::unbounded_channel::<SelectionSnapshot>();
 
     let event_stop = stop.clone();
     thread::Builder::new()

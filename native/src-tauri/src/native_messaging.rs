@@ -84,7 +84,9 @@ fn set_binary_mode(fd: i32, name: &str) -> Result<(), String> {
 
 fn read_native_json<R: Read>(reader: &mut R) -> Result<Option<String>, String> {
     let mut header = [0_u8; 4];
-    let first = reader.read(&mut header[..1]).map_err(|error| error.to_string())?;
+    let first = reader
+        .read(&mut header[..1])
+        .map_err(|error| error.to_string())?;
     if first == 0 {
         return Ok(None);
     }
@@ -101,7 +103,9 @@ fn read_native_json<R: Read>(reader: &mut R) -> Result<Option<String>, String> {
     reader
         .read_exact(&mut payload)
         .map_err(|error| format!("truncated native messaging payload: {error}"))?;
-    String::from_utf8(payload).map(Some).map_err(|error| error.to_string())
+    String::from_utf8(payload)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 fn write_native_message<W: Write>(writer: &mut W, message: &IpcMessage) -> Result<(), String> {
@@ -116,13 +120,20 @@ fn write_native_message<W: Write>(writer: &mut W, message: &IpcMessage) -> Resul
     writer
         .write_all(&(payload.len() as u32).to_le_bytes())
         .map_err(|error| error.to_string())?;
-    writer.write_all(&payload).map_err(|error| error.to_string())
+    writer
+        .write_all(&payload)
+        .map_err(|error| error.to_string())
 }
 
 fn extract_message_id(raw: &str) -> String {
     serde_json::from_str::<serde_json::Value>(raw)
         .ok()
-        .and_then(|value| value.get("id").and_then(|id| id.as_str()).map(str::to_owned))
+        .and_then(|value| {
+            value
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(str::to_owned)
+        })
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| format!("native-error-{}", now_millis()))
 }
@@ -172,7 +183,10 @@ impl NativeMessagingHost {
     }
 
     async fn forward(&mut self, message: IpcMessage) -> IpcMessage {
-        if !matches!(message.type_name.as_str(), "selection.update" | "bridge.ping") {
+        if !matches!(
+            message.type_name.as_str(),
+            "selection.update" | "bridge.ping"
+        ) {
             return error_response(
                 message.id,
                 "INVALID_MESSAGE",
@@ -249,7 +263,10 @@ impl NativeMessagingHost {
         };
         let response = exchange(&mut client, &hello).await?;
         if response.id != hello_id || response.type_name != "bridge.hello.result" {
-            return Err(format!("unexpected Harness hello response: {}", response.type_name));
+            return Err(format!(
+                "unexpected Harness hello response: {}",
+                response.type_name
+            ));
         }
         let hello_result: BridgeHelloResultPayload = serde_json::from_value(response.payload)
             .map_err(|error| format!("invalid Harness hello payload: {error}"))?;
@@ -272,7 +289,10 @@ async fn exchange(
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let frame = crate::protocol::encode_frame(message).map_err(|error| error.to_string())?;
-    client.write_all(&frame).await.map_err(|error| error.to_string())?;
+    client
+        .write_all(&frame)
+        .await
+        .map_err(|error| error.to_string())?;
     client.flush().await.map_err(|error| error.to_string())?;
 
     let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];

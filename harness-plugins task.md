@@ -826,7 +826,7 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 
 | 任务 | 初始状态 | 所有者 | 验收 SHA | 证据 |
 |---|---|---|---|---|
-| T00 | 待开始 | 待分配 | — | — |
+| T00 | 自动检查通过，待 CI | Codex | 本提交 | `docs/development.md`、`.github/workflows/ci.yml` |
 | T01 | 待开始 | 待分配 | — | — |
 | T02 | 待开始 | 待分配 | — | — |
 | T03 | 待开始 | 待分配 | — | — |

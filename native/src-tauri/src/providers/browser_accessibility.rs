@@ -412,7 +412,13 @@ mod windows_impl {
     fn find_address_bar_url(browser_window: &UIElement, walker: &UITreeWalker) -> Option<String> {
         let window_rect = browser_window.get_bounding_rectangle().ok();
         let mut visited = 0usize;
-        find_url_recursive(browser_window, walker, window_rect.as_ref(), 0, &mut visited)
+        find_url_recursive(
+            browser_window,
+            walker,
+            window_rect.as_ref(),
+            0,
+            &mut visited,
+        )
     }
 
     fn find_url_recursive(
@@ -442,7 +448,8 @@ mod windows_impl {
 
         let mut child = walker.get_first_child(element).ok();
         while let Some(current) = child {
-            if let Some(url) = find_url_recursive(&current, walker, window_rect, depth + 1, visited) {
+            if let Some(url) = find_url_recursive(&current, walker, window_rect, depth + 1, visited)
+            {
                 return Some(url);
             }
             child = walker.get_next_sibling(&current).ok();
@@ -454,8 +461,12 @@ mod windows_impl {
         element: &UIElement,
         window_rect: Option<&uiautomation::types::Rect>,
     ) -> bool {
-        let Some(window) = window_rect else { return true };
-        let Ok(rect) = element.get_bounding_rectangle() else { return false };
+        let Some(window) = window_rect else {
+            return true;
+        };
+        let Ok(rect) = element.get_bounding_rectangle() else {
+            return false;
+        };
         let top_band = window.get_top() + (window.get_height().max(1) / 3).min(240);
         rect.get_top() >= window.get_top() && rect.get_top() <= top_band
     }
@@ -493,7 +504,10 @@ mod tests {
     #[test]
     fn recognizes_browser_titles_without_localized_address_bar_names() {
         assert_eq!(browser_identity("Paper - Google Chrome").0, "Google Chrome");
-        assert_eq!(browser_identity("Paper - Microsoft Edge").0, "Microsoft Edge");
+        assert_eq!(
+            browser_identity("Paper - Microsoft Edge").0,
+            "Microsoft Edge"
+        );
         assert_eq!(browser_identity("Paper - Brave").0, "Brave");
     }
 
