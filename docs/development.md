@@ -44,6 +44,8 @@ Record each manual, platform, or model-backed result with [the test evidence tem
 
 Read [the protocol contract](protocol.md) before changing IPC message types, payloads, fixtures, or the native bridge. The contract check runs TypeScript and Rust against the same valid and invalid JSON fixtures.
 
+Read [bridge transport limits](bridge-transport.md) before changing named-pipe timeouts, reconnect behavior, or client admission. The real Node/Rust integration command remains a non-pass guard until it has Windows fault-injection coverage.
+
 ## Decisions
 
 Use [the decision record convention](decisions/README.md) for non-trivial choices that affect protocol, lifecycle, privacy, user interaction, or release behaviour.

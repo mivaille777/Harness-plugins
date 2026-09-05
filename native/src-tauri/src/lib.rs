@@ -8,7 +8,7 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(bridge::BridgeRuntime::from_environment())
+        .manage(bridge::BridgeRuntime::from_environment().expect("invalid bridge configuration"))
         .setup(|app| {
             let capture = capture::CaptureRuntime::start(app.handle().clone())?;
             app.manage(capture);

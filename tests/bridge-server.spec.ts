@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   BRIDGE_CAPABILITIES,
   BridgeMessageRouter,
+  DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+  DEFAULT_MAX_BRIDGE_CLIENTS,
+  SelectionCompanionBridgeService,
   SelectionContextService,
   parseIpcMessage,
 } from '../src/index.js'
@@ -48,6 +51,16 @@ function selectionUpdate() {
 }
 
 describe('BridgeMessageRouter', () => {
+  it('exposes bounded server defaults', () => {
+    expect(DEFAULT_BRIDGE_IDLE_TIMEOUT_MS).toBe(30_000)
+    expect(DEFAULT_MAX_BRIDGE_CLIENTS).toBe(4)
+    const idleContext = new Context()
+    new SelectionContextService(idleContext)
+    expect(() => new SelectionCompanionBridgeService(idleContext, { idleTimeoutMs: 0 })).toThrow('positive')
+    const clientContext = new Context()
+    new SelectionContextService(clientContext)
+    expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
+  })
   it('negotiates Protocol V1 and advertises only Task 4 capabilities', () => {
     const { router } = setup()
     const response = router.handle(parseIpcMessage({

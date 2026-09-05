@@ -4,6 +4,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::sync::Mutex;
 
+const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
+
 use crate::protocol::{
     BridgeHelloResultPayload, IpcMessage, SelectionSnapshot, IPC_FRAME_HEADER_BYTES,
     IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
@@ -24,6 +26,7 @@ pub struct BridgeStatus {
 
 pub struct BridgeRuntime {
     endpoint: String,
+    request_timeout: std::time::Duration,
     inner: Mutex<BridgeInner>,
 }
 
@@ -37,11 +40,23 @@ struct BridgeInner {
 }
 
 impl BridgeRuntime {
-    pub fn from_environment() -> Self {
+    pub fn from_environment() -> Result<Self, String> {
         let endpoint = env::var("DSH_SELECTION_COMPANION_PIPE")
             .unwrap_or_else(|_| DEFAULT_PIPE_NAME.to_owned());
-        Self {
+        let request_timeout = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .map_err(|_| "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be a positive integer".to_owned())?
+            .unwrap_or(DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS);
+        if request_timeout == 0 || request_timeout > 60_000 {
+            return Err(
+                "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be an integer from 1 to 60000".to_owned(),
+            );
+        }
+        Ok(Self {
             endpoint,
+            request_timeout: std::time::Duration::from_millis(request_timeout),
             inner: Mutex::new(BridgeInner {
                 connected: false,
                 server_version: None,
@@ -50,7 +65,7 @@ impl BridgeRuntime {
                 #[cfg(windows)]
                 client: None,
             }),
-        }
+        })
     }
 
     async fn status(&self) -> BridgeStatus {
@@ -120,11 +135,13 @@ impl BridgeRuntime {
             }),
         };
 
-        let response = exchange(&mut client, &hello).await.map_err(|error| {
-            let message = format!("bridge hello failed: {error}");
-            inner.last_error = Some(message.clone());
-            message
-        })?;
+        let response = exchange(&mut client, &hello, self.request_timeout)
+            .await
+            .map_err(|error| {
+                let message = format!("bridge hello failed: {error}");
+                inner.last_error = Some(message.clone());
+                message
+            })?;
         ensure_response_id(&response, &request_id)?;
         if response.type_name == "error.response" {
             let message = format!("Harness rejected bridge hello: {}", response.payload);
@@ -184,7 +201,7 @@ impl BridgeRuntime {
         let started = Instant::now();
         let result = {
             let client = inner.client.as_mut().expect("connected client");
-            exchange(client, &ping).await
+            exchange(client, &ping, self.request_timeout).await
         };
 
         match result {
@@ -236,7 +253,7 @@ impl BridgeRuntime {
 
         let result = {
             let client = inner.client.as_mut().expect("connected client");
-            exchange(client, &message).await
+            exchange(client, &message, self.request_timeout).await
         };
 
         match result {
@@ -315,37 +332,48 @@ pub async fn bridge_disconnect(state: State<'_, BridgeRuntime>) -> Result<Bridge
 async fn exchange(
     client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
     message: &IpcMessage,
+    request_timeout: std::time::Duration,
 ) -> Result<IpcMessage, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::timeout;
 
     let frame = crate::protocol::encode_frame(message).map_err(|error| error.to_string())?;
-    client
-        .write_all(&frame)
-        .await
-        .map_err(|error| error.to_string())?;
-    client.flush().await.map_err(|error| error.to_string())?;
+    timeout(request_timeout, async {
+        client
+            .write_all(&frame)
+            .await
+            .map_err(|error| error.to_string())?;
+        client.flush().await.map_err(|error| error.to_string())?;
 
-    let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
-    client
-        .read_exact(&mut header)
-        .await
-        .map_err(|error| error.to_string())?;
-    let declared = u32::from_be_bytes(header) as usize;
-    if declared > IPC_MAX_FRAME_BYTES {
-        return Err(format!(
-            "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
-        ));
-    }
+        let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+        client
+            .read_exact(&mut header)
+            .await
+            .map_err(|error| error.to_string())?;
+        let declared = u32::from_be_bytes(header) as usize;
+        if declared > IPC_MAX_FRAME_BYTES {
+            return Err(format!(
+                "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
+            ));
+        }
 
-    let mut payload = vec![0_u8; declared];
-    client
-        .read_exact(&mut payload)
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut full_frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
-    full_frame.extend_from_slice(&header);
-    full_frame.extend_from_slice(&payload);
-    crate::protocol::decode_frame(&full_frame).map_err(|error| error.to_string())
+        let mut payload = vec![0_u8; declared];
+        client
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut full_frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+        full_frame.extend_from_slice(&header);
+        full_frame.extend_from_slice(&payload);
+        crate::protocol::decode_frame(&full_frame).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| {
+        format!(
+            "bridge request timed out after {} ms",
+            request_timeout.as_millis()
+        )
+    })?
 }
 
 fn ensure_response_id(response: &IpcMessage, request_id: &str) -> Result<(), String> {
@@ -380,10 +408,22 @@ mod tests {
 
     #[tokio::test]
     async fn initial_status_is_disconnected() {
-        let runtime = BridgeRuntime::from_environment();
+        let runtime = BridgeRuntime::from_environment().unwrap();
         let status = runtime.status().await;
         assert!(!status.connected);
         assert_eq!(status.protocol, IPC_PROTOCOL_VERSION);
         assert!(status.server_version.is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_request_timeout_configuration() {
+        let previous = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS").ok();
+        env::set_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS", "0");
+        assert!(BridgeRuntime::from_environment().is_err());
+        if let Some(previous) = previous {
+            env::set_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS", previous);
+        } else {
+            env::remove_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS");
+        }
     }
 }

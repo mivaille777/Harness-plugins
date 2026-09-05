@@ -9,6 +9,8 @@ use crate::protocol::{
     IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
+const NATIVE_MESSAGE_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub const NATIVE_HOST_NAME: &str = "io.github.mivaille777.dsh_selection_companion";
 pub const NATIVE_MESSAGE_MAX_BYTES: usize = IPC_MAX_FRAME_BYTES;
 
@@ -209,7 +211,7 @@ impl NativeMessagingHost {
     async fn forward_once(&mut self, message: &IpcMessage) -> Result<IpcMessage, String> {
         self.ensure_connected().await?;
         let client = self.client.as_mut().expect("connected native pipe client");
-        exchange(client, message).await
+        exchange(client, message, NATIVE_MESSAGE_EXCHANGE_TIMEOUT).await
     }
 
     async fn ensure_connected(&mut self) -> Result<(), String> {
@@ -261,7 +263,7 @@ impl NativeMessagingHost {
                 "supportedProtocols": [IPC_PROTOCOL_VERSION]
             }),
         };
-        let response = exchange(&mut client, &hello).await?;
+        let response = exchange(&mut client, &hello, NATIVE_MESSAGE_EXCHANGE_TIMEOUT).await?;
         if response.id != hello_id || response.type_name != "bridge.hello.result" {
             return Err(format!(
                 "unexpected Harness hello response: {}",
@@ -285,36 +287,47 @@ impl NativeMessagingHost {
 async fn exchange(
     client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
     message: &IpcMessage,
+    request_timeout: std::time::Duration,
 ) -> Result<IpcMessage, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::timeout;
 
     let frame = crate::protocol::encode_frame(message).map_err(|error| error.to_string())?;
-    client
-        .write_all(&frame)
-        .await
-        .map_err(|error| error.to_string())?;
-    client.flush().await.map_err(|error| error.to_string())?;
+    timeout(request_timeout, async {
+        client
+            .write_all(&frame)
+            .await
+            .map_err(|error| error.to_string())?;
+        client.flush().await.map_err(|error| error.to_string())?;
 
-    let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
-    client
-        .read_exact(&mut header)
-        .await
-        .map_err(|error| error.to_string())?;
-    let declared = u32::from_be_bytes(header) as usize;
-    if declared > IPC_MAX_FRAME_BYTES {
-        return Err(format!(
-            "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
-        ));
-    }
-    let mut payload = vec![0_u8; declared];
-    client
-        .read_exact(&mut payload)
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
-    frame.extend_from_slice(&header);
-    frame.extend_from_slice(&payload);
-    crate::protocol::decode_frame(&frame).map_err(|error| error.to_string())
+        let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+        client
+            .read_exact(&mut header)
+            .await
+            .map_err(|error| error.to_string())?;
+        let declared = u32::from_be_bytes(header) as usize;
+        if declared > IPC_MAX_FRAME_BYTES {
+            return Err(format!(
+                "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
+            ));
+        }
+        let mut payload = vec![0_u8; declared];
+        client
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+        frame.extend_from_slice(&header);
+        frame.extend_from_slice(&payload);
+        crate::protocol::decode_frame(&frame).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| {
+        format!(
+            "native message exchange timed out after {} ms",
+            request_timeout.as_millis()
+        )
+    })?
 }
 
 #[cfg(test)]

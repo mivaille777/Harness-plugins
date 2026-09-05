@@ -298,12 +298,15 @@ Focused commands:
 
 ```powershell
 pnpm test:bridge
+pnpm test:bridge:integration
 pnpm test:native-ui
 pnpm test:browser-accessibility
 pnpm test:capture
 cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
+
+`pnpm test:bridge:integration` deliberately reports unverified until it exercises the real Node/Rust named-pipe path on Windows. The bridge has bounded request exchanges and client admission; see [bridge transport limits](docs/bridge-transport.md) for its retry and access-control limits.
 
 Rust formatting:
 

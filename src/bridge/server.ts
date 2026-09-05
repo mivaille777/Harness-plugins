@@ -10,10 +10,14 @@ import {
 import { BridgeMessageRouter } from './router.js'
 
 export const DEFAULT_SELECTION_COMPANION_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v1`
+export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30_000
+export const DEFAULT_MAX_BRIDGE_CLIENTS = 4
 
 export interface SelectionCompanionBridgeOptions {
   readonly endpoint?: string
   readonly enabled?: boolean
+  readonly idleTimeoutMs?: number
+  readonly maxClients?: number
 }
 
 export interface SelectionCompanionBridgeStatus {
@@ -38,6 +42,8 @@ export class SelectionCompanionBridgeService extends Service {
 
   private readonly endpointValue: string
   private readonly enabledValue: boolean
+  private readonly idleTimeoutMs: number
+  private readonly maxClients: number
   private readonly clients = new Set<Socket>()
   private readonly router: BridgeMessageRouter
   private server: Server | undefined
@@ -50,6 +56,14 @@ export class SelectionCompanionBridgeService extends Service {
       ?? DEFAULT_SELECTION_COMPANION_PIPE
     this.enabledValue = options.enabled
       ?? process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE !== '1'
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_BRIDGE_IDLE_TIMEOUT_MS
+    this.maxClients = options.maxClients ?? DEFAULT_MAX_BRIDGE_CLIENTS
+    if (!Number.isSafeInteger(this.idleTimeoutMs) || this.idleTimeoutMs <= 0) {
+      throw new RangeError('idleTimeoutMs must be a positive safe integer')
+    }
+    if (!Number.isSafeInteger(this.maxClients) || this.maxClients <= 0) {
+      throw new RangeError('maxClients must be a positive safe integer')
+    }
     this.router = new BridgeMessageRouter(ctx.selectionContext)
   }
 
@@ -103,15 +117,32 @@ export class SelectionCompanionBridgeService extends Service {
   }
 
   private accept(socket: Socket): void {
+    if (this.clients.size >= this.maxClients) {
+      socket.destroy(new Error('selection companion bridge client limit reached'))
+      return
+    }
     const decoder = new IpcFrameDecoder()
     this.clients.add(socket)
+    socket.setNoDelay(true)
+    socket.setTimeout(this.idleTimeoutMs)
+
+    let writes = Promise.resolve()
+    const write = (message: IpcMessage): void => {
+      writes = writes.then(() => new Promise<void>((resolve, reject) => {
+        socket.write(encodeIpcFrame(message), error => {
+          if (error === undefined) resolve()
+          else reject(error)
+        })
+      }))
+      writes.catch(error => { socket.destroy(error) })
+    }
 
     socket.on('data', chunk => {
       try {
         const messages = decoder.push(chunk)
         for (const message of messages) {
           const response = this.router.handle(message)
-          socket.write(encodeIpcFrame(response))
+          write(response)
         }
       } catch (error) {
         const response = this.errorResponse(error)
@@ -125,6 +156,10 @@ export class SelectionCompanionBridgeService extends Service {
 
     socket.on('error', error => {
       this.ctx.logger.warn(error)
+    })
+
+    socket.on('timeout', () => {
+      socket.destroy(new Error(`selection companion bridge idle timeout after ${this.idleTimeoutMs} ms`))
     })
 
     socket.once('close', () => {

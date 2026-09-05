@@ -31,6 +31,7 @@
     "test:protocol": "vitest run tests/protocol.spec.ts",
     "test:contract": "pnpm test:protocol && pnpm --dir native build && pnpm test:rust",
     "test:bridge": "vitest run tests/bridge-server.spec.ts",
+    "test:bridge:integration": "node scripts/test-bridge-integration.mjs",
     "test:rust": "cargo test --manifest-path native/src-tauri/Cargo.toml",
     "test:capture": "cargo test --manifest-path native/src-tauri/Cargo.toml capture::tests",
     "test:capture:windows": "node scripts/test-capture-windows.mjs",
