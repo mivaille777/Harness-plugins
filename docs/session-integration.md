@@ -17,15 +17,19 @@ Repeated `requestId` values are idempotent for five minutes; a repeated id for a
 
 The bridge also implements session list, create, submit, subscribe, and cancel messages.
 Subscriptions project durable session events and status events with a session id and cursor.
-The current Tauri client deliberately does not consume subscription frames yet: the existing request/reply pipe reader cannot safely multiplex streamed events with a request response.
+The native client opens one dedicated named-pipe connection for each subscribed session.
+Its request/reply connection is never read by an event task, so a reply cannot race an `agent.event` frame.
+The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event.
+Replacing a session subscription aborts the earlier reader, and bridge disconnect aborts every active reader.
 The Lens shows that a request has been queued, but it does not claim that an answer has been rendered.
-Completing the answer stream requires a dedicated multiplexed native reader, request-to-turn correlation, reconnect cursor recovery, and an interactive Windows test.
+Completing the answer stream still requires request-to-turn correlation, reconnect cursor recovery, Lens rendering, and an interactive Windows test.
 
 Run the available checks from the repository root:
 
 ```powershell
 pnpm test:session
 pnpm test:session:replay
+pnpm test:session:transport
 pnpm test:protocol
 pnpm --dir native test
 pnpm --dir native build

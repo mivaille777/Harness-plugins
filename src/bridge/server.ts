@@ -131,7 +131,7 @@ export class SelectionCompanionBridgeService extends Service {
     const write = (message: IpcMessage): void => {
       writes = writes.then(() => new Promise<void>((resolve, reject) => {
         socket.write(encodeIpcFrame(message), error => {
-          if (error === undefined) resolve()
+          if (error == null) resolve()
           else reject(error)
         })
       }))

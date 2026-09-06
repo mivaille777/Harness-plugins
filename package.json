@@ -39,6 +39,7 @@
     "test:lens": "pnpm --dir native test",
     "test:lens:e2e": "node scripts/test-lens-e2e.mjs",
     "test:session": "vitest run tests/session-service.spec.ts tests/bridge-server.spec.ts",
+    "test:session:transport": "vitest run tests/session-transport.spec.ts",
     "test:session:replay": "vitest run tests/session-replay.spec.ts",
     "test:session:e2e": "node scripts/test-session-e2e.mjs",
     "test:browser-accessibility": "cargo test --manifest-path native/src-tauri/Cargo.toml browser_accessibility",

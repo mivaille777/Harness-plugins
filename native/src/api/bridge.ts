@@ -37,6 +37,19 @@ export interface SessionSubmission {
   readonly requestId: string
 }
 
+/** A durable Harness event delivered over the dedicated session pipe. */
+export interface SessionAgentEvent {
+  readonly sessionId: string
+  readonly event?: {
+    readonly kind: string
+    readonly data: {
+      readonly cursor: number
+      readonly value: unknown
+    }
+  }
+  readonly error?: string
+}
+
 export function getBridgeStatus(): Promise<BridgeStatus> {
   return invoke<BridgeStatus>('bridge_status')
 }
@@ -71,4 +84,9 @@ export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
 
 export function submitSessionPrompt(sessionId: string | null, content: string): Promise<SessionSubmission> {
   return invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content })
+}
+
+/** Opens a pipe owned solely by the event stream for one Harness session. */
+export function subscribeSession(sessionId: string, cursor?: number): Promise<void> {
+  return invoke<void>('bridge_subscribe_session', { sessionId, cursor })
 }

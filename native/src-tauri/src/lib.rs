@@ -21,6 +21,7 @@ pub fn run() {
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
             bridge::bridge_submit_prompt,
+            bridge::bridge_subscribe_session,
             capture::capture_status,
             capture::capture_pause,
             capture::capture_resume,

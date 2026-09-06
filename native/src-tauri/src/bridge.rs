@@ -1,7 +1,11 @@
 use serde::Serialize;
+#[cfg(windows)]
+use std::collections::HashMap;
 use std::env;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::State;
+#[cfg(windows)]
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
@@ -44,6 +48,8 @@ struct BridgeInner {
     last_latency_ms: Option<u64>,
     #[cfg(windows)]
     client: Option<tokio::net::windows::named_pipe::NamedPipeClient>,
+    #[cfg(windows)]
+    subscriptions: HashMap<String, tokio::task::JoinHandle<()>>,
 }
 
 impl BridgeRuntime {
@@ -71,6 +77,8 @@ impl BridgeRuntime {
                 last_latency_ms: None,
                 #[cfg(windows)]
                 client: None,
+                #[cfg(windows)]
+                subscriptions: HashMap::new(),
             }),
         })
     }
@@ -176,6 +184,148 @@ impl BridgeRuntime {
         inner.server_version = Some(hello_result.server.version);
         inner.last_error = None;
         inner.client = Some(client);
+        Ok(())
+    }
+
+    /// Starts a dedicated pipe reader for a session event stream.
+    ///
+    /// The request/reply pipe remains exclusively owned by `BridgeInner::client`.
+    #[cfg(windows)]
+    async fn subscribe_session(
+        &self,
+        app: AppHandle,
+        session_id: String,
+        cursor: Option<u64>,
+    ) -> Result<(), String> {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::windows::named_pipe::ClientOptions;
+        use tokio::time::{sleep, timeout, Duration};
+
+        if session_id.trim().is_empty() {
+            return Err("session id must not be empty".to_owned());
+        }
+
+        let mut last_error = None;
+        let mut client = None;
+        for attempt in 0..20 {
+            match ClientOptions::new().open(&self.endpoint) {
+                Ok(opened) => {
+                    client = Some(opened);
+                    break;
+                }
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    let retryable = matches!(error.raw_os_error(), Some(2 | 231));
+                    if !retryable || attempt == 19 {
+                        break;
+                    }
+                    sleep(Duration::from_millis(50)).await;
+                }
+            }
+        }
+        let Some(mut client) = client else {
+            return Err(format!(
+                "cannot open session event pipe {}: {}",
+                self.endpoint,
+                last_error.unwrap_or_else(|| "unknown error".to_owned())
+            ));
+        };
+
+        let hello_id = request_id("subscription-hello");
+        let hello = bridge_hello(hello_id.clone());
+        let response = exchange(&mut client, &hello, self.request_timeout).await?;
+        ensure_response_id(&response, &hello_id)?;
+        ensure_hello_response(response)?;
+
+        let subscribe_id = request_id("session-subscribe");
+        let payload = match cursor {
+            Some(cursor) => serde_json::json!({ "sessionId": session_id, "cursor": cursor }),
+            None => serde_json::json!({ "sessionId": session_id }),
+        };
+        let subscribe = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: subscribe_id.clone(),
+            type_name: "session.subscribe".to_owned(),
+            payload,
+        };
+        let frame = crate::protocol::encode_frame(&subscribe).map_err(|error| error.to_string())?;
+        timeout(self.request_timeout, async {
+            client
+                .write_all(&frame)
+                .await
+                .map_err(|error| error.to_string())?;
+            client.flush().await.map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|_| {
+            format!(
+                "session subscription timed out after {} ms",
+                self.request_timeout.as_millis()
+            )
+        })??;
+
+        let subscribed = read_message(&mut client, self.request_timeout).await?;
+        ensure_response_id(&subscribed, &subscribe_id)?;
+        if subscribed.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session subscription: {}",
+                subscribed.payload
+            ));
+        }
+        if subscribed.type_name != "session.subscribed" {
+            return Err(format!(
+                "unexpected session.subscribe response: {}",
+                subscribed.type_name
+            ));
+        }
+
+        let expected_session_id = session_id.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                match read_message_unbounded(&mut client).await {
+                    Ok(message) if message.type_name == "agent.event" => {
+                        let matches_session = message
+                            .payload
+                            .get("sessionId")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(expected_session_id.as_str());
+                        if !matches_session {
+                            let _ = app.emit(
+                                "session-agent-event",
+                                serde_json::json!({
+                                    "sessionId": expected_session_id,
+                                    "error": "received event for a different session",
+                                }),
+                            );
+                            break;
+                        }
+                        let _ = app.emit("session-agent-event", message.payload);
+                    }
+                    Ok(message) => {
+                        let _ = app.emit(
+                            "session-agent-event",
+                            serde_json::json!({
+                                "sessionId": expected_session_id,
+                                "error": format!("unexpected subscription frame: {}", message.type_name),
+                            }),
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        let _ = app.emit(
+                            "session-agent-event",
+                            serde_json::json!({ "sessionId": expected_session_id, "error": error }),
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+
+        let mut inner = self.inner.lock().await;
+        if let Some(previous) = inner.subscriptions.insert(session_id, task) {
+            previous.abort();
+        }
         Ok(())
     }
 
@@ -432,6 +582,9 @@ impl BridgeRuntime {
         #[cfg(windows)]
         {
             inner.client = None;
+            for (_, subscription) in inner.subscriptions.drain() {
+                subscription.abort();
+            }
         }
     }
 }
@@ -476,12 +629,23 @@ pub async fn bridge_submit_prompt(
 }
 
 #[cfg(windows)]
+#[tauri::command]
+pub async fn bridge_subscribe_session(
+    state: State<'_, BridgeRuntime>,
+    app: AppHandle,
+    session_id: String,
+    cursor: Option<u64>,
+) -> Result<(), String> {
+    state.subscribe_session(app, session_id, cursor).await
+}
+
+#[cfg(windows)]
 async fn exchange(
     client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
     message: &IpcMessage,
     request_timeout: std::time::Duration,
 ) -> Result<IpcMessage, String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::time::timeout;
 
     let frame = crate::protocol::encode_frame(message).map_err(|error| error.to_string())?;
@@ -492,27 +656,7 @@ async fn exchange(
             .map_err(|error| error.to_string())?;
         client.flush().await.map_err(|error| error.to_string())?;
 
-        let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
-        client
-            .read_exact(&mut header)
-            .await
-            .map_err(|error| error.to_string())?;
-        let declared = u32::from_be_bytes(header) as usize;
-        if declared > IPC_MAX_FRAME_BYTES {
-            return Err(format!(
-                "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
-            ));
-        }
-
-        let mut payload = vec![0_u8; declared];
-        client
-            .read_exact(&mut payload)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut full_frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
-        full_frame.extend_from_slice(&header);
-        full_frame.extend_from_slice(&payload);
-        crate::protocol::decode_frame(&full_frame).map_err(|error| error.to_string())
+        read_message_unbounded(client).await
     })
     .await
     .map_err(|_| {
@@ -521,6 +665,94 @@ async fn exchange(
             request_timeout.as_millis()
         )
     })?
+}
+
+#[cfg(windows)]
+async fn read_message(
+    client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
+    request_timeout: std::time::Duration,
+) -> Result<IpcMessage, String> {
+    use tokio::time::timeout;
+
+    timeout(request_timeout, read_message_unbounded(client))
+        .await
+        .map_err(|_| {
+            format!(
+                "bridge request timed out after {} ms",
+                request_timeout.as_millis()
+            )
+        })?
+}
+
+#[cfg(windows)]
+async fn read_message_unbounded(
+    client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
+) -> Result<IpcMessage, String> {
+    use tokio::io::AsyncReadExt;
+
+    let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+    client
+        .read_exact(&mut header)
+        .await
+        .map_err(|error| error.to_string())?;
+    let declared = u32::from_be_bytes(header) as usize;
+    if declared > IPC_MAX_FRAME_BYTES {
+        return Err(format!(
+            "Harness frame declares {declared} bytes; maximum is {IPC_MAX_FRAME_BYTES}"
+        ));
+    }
+
+    let mut payload = vec![0_u8; declared];
+    client
+        .read_exact(&mut payload)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut full_frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+    full_frame.extend_from_slice(&header);
+    full_frame.extend_from_slice(&payload);
+    crate::protocol::decode_frame(&full_frame).map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn bridge_hello(id: String) -> IpcMessage {
+    IpcMessage {
+        protocol: IPC_PROTOCOL_VERSION,
+        id,
+        type_name: "bridge.hello".to_owned(),
+        payload: serde_json::json!({
+            "client": {
+                "name": "dsh-selection-companion-native",
+                "version": env!("CARGO_PKG_VERSION"),
+                "platform": "windows"
+            },
+            "supportedProtocols": [IPC_PROTOCOL_VERSION]
+        }),
+    }
+}
+
+#[cfg(windows)]
+fn ensure_hello_response(response: IpcMessage) -> Result<BridgeHelloResultPayload, String> {
+    if response.type_name == "error.response" {
+        return Err(format!(
+            "Harness rejected bridge hello: {}",
+            response.payload
+        ));
+    }
+    if response.type_name != "bridge.hello.result" {
+        return Err(format!(
+            "unexpected bridge hello response: {}",
+            response.type_name
+        ));
+    }
+    let result: BridgeHelloResultPayload = serde_json::from_value(response.payload)
+        .map_err(|error| format!("invalid bridge hello payload: {error}"))?;
+    if result.protocol != IPC_PROTOCOL_VERSION {
+        return Err(format!(
+            "Harness selected protocol {}, expected {}",
+            result.protocol, IPC_PROTOCOL_VERSION
+        ));
+    }
+    Ok(result)
 }
 
 fn ensure_response_id(response: &IpcMessage, request_id: &str) -> Result<(), String> {
