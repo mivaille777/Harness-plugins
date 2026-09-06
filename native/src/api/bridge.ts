@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
 
 export interface BridgeStatus {
   readonly connected: boolean
@@ -57,4 +58,8 @@ export function pauseCapture(): Promise<CaptureStatus> {
 
 export function resumeCapture(): Promise<CaptureStatus> {
   return invoke<CaptureStatus>('capture_resume')
+}
+
+export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
+  return invoke<SelectionSnapshot | null>('bridge_current_selection')
 }

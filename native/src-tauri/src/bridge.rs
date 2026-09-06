@@ -7,8 +7,8 @@ use tokio::sync::Mutex;
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
 
 use crate::protocol::{
-    BridgeHelloResultPayload, IpcMessage, SelectionSnapshot, IPC_FRAME_HEADER_BYTES,
-    IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
+    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionSnapshot,
+    IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v1";
@@ -293,6 +293,40 @@ impl BridgeRuntime {
         self.connect().await
     }
 
+    #[cfg(windows)]
+    async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
+        self.connect().await?;
+        let request_id = request_id("selection-current");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "selection.current".to_owned(),
+            payload: serde_json::json!({}),
+        };
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let response = exchange(client, &message, self.request_timeout).await?;
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name != "selection.current.result" {
+            return Err(format!(
+                "unexpected selection.current response: {}",
+                response.type_name
+            ));
+        }
+        let payload: SelectionCurrentResultPayload = serde_json::from_value(response.payload)
+            .map_err(|error| format!("invalid selection.current payload: {error}"))?;
+        Ok(payload.snapshot)
+    }
+
+    #[cfg(not(windows))]
+    async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
+        self.connect().await?;
+        Ok(None)
+    }
+
     async fn disconnect(&self) {
         let mut inner = self.inner.lock().await;
         inner.connected = false;
@@ -326,6 +360,13 @@ pub async fn bridge_ping(state: State<'_, BridgeRuntime>) -> Result<BridgeStatus
 pub async fn bridge_disconnect(state: State<'_, BridgeRuntime>) -> Result<BridgeStatus, String> {
     state.disconnect().await;
     Ok(state.status().await)
+}
+
+#[tauri::command]
+pub async fn bridge_current_selection(
+    state: State<'_, BridgeRuntime>,
+) -> Result<Option<SelectionSnapshot>, String> {
+    state.current_selection().await
 }
 
 #[cfg(windows)]

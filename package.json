@@ -36,6 +36,8 @@
     "test:capture": "cargo test --manifest-path native/src-tauri/Cargo.toml capture::tests",
     "test:capture:windows": "node scripts/test-capture-windows.mjs",
     "test:native-ui": "pnpm --dir native test",
+    "test:lens": "pnpm --dir native test",
+    "test:lens:e2e": "node scripts/test-lens-e2e.mjs",
     "test:browser-accessibility": "cargo test --manifest-path native/src-tauri/Cargo.toml browser_accessibility",
     "test:browser-extension": "pnpm --dir browser-extension test",
     "test:browser-extension:e2e": "pnpm --dir browser-extension test:e2e",

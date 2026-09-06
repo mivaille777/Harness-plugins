@@ -830,7 +830,7 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T01 | 自动检查通过，待 CI | Codex | 本提交 | `docs/protocol.md`、`pnpm test:contract` |
 | T02 | 自动检查通过待实测 | Codex | 本提交 | `docs/capture-reliability.md`、`pnpm test:capture`、`pnpm test:native-ui` |
 | T03 | 自动检查通过待实测 | Codex | 本提交 | `docs/bridge-transport.md`、`pnpm test:bridge`、`pnpm test:rust` |
-| T04 | 待开始 | 待分配 | — | — |
+| T04 | 自动检查通过待实测 | Codex | 本提交 | `docs/selection-lens.md`、`pnpm test:lens` |
 | T05 | 待开始 | 待分配 | — | — |
 | T06 | 待开始 | 待分配 | — | — |
 | T07 | 待开始 | 待分配 | — | — |

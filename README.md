@@ -300,11 +300,14 @@ Focused commands:
 pnpm test:bridge
 pnpm test:bridge:integration
 pnpm test:native-ui
+pnpm test:lens
 pnpm test:browser-accessibility
 pnpm test:capture
 cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
+
+The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Session submission is deliberately unavailable until T05; see [Selection Lens](docs/selection-lens.md) for input, focus, and geometry limits.
 
 `pnpm test:bridge:integration` deliberately reports unverified until it exercises the real Node/Rust named-pipe path on Windows. The bridge has bounded request exchanges and client admission; see [bridge transport limits](docs/bridge-transport.md) for its retry and access-control limits.
 
