@@ -8,12 +8,68 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type { AgentEventKind, SessionDeliveryMode, SessionSummary } from '../bridge/protocol.js'
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'selection-companion': {
+      readonly kind: 'selection-companion'
+      readonly requestId: string
+    }
+  }
+}
+
 export const DEFAULT_SUBMISSION_RETENTION_MS = 5 * 60_000
 
 export interface SessionAgentEvent {
   readonly cursor: number
+  readonly requestId?: string
   readonly kind: AgentEventKind
   readonly data: unknown
+}
+
+/** Maps durable selection request messages to their enclosing Harness turn. */
+export class RequestTurnTracker {
+  private openTurn: number | undefined
+  private readonly requests = new Map<number, string>()
+
+  project(event: SessionEvent): SessionAgentEvent {
+    switch (event.type) {
+      case 'turn/start':
+        this.openTurn = event.data.turn
+        return { cursor: event.seq, kind: 'status', data: { status: 'running', turn: event.data.turn } }
+      case 'user/message': {
+        if (event.data.source.kind === 'selection-companion' && this.openTurn !== undefined) {
+          this.requests.set(this.openTurn, event.data.source.requestId)
+        }
+        return { cursor: event.seq, kind: 'status', data: { type: event.type } }
+      }
+      case 'assistant/chunk':
+        return this.withTurn(event.seq, event.data.turn, 'assistant-delta', event.data.chunk)
+      case 'assistant/message':
+        return this.withTurn(event.seq, event.data.turn, 'assistant-complete', event.data.message)
+      case 'tool/call':
+        return this.withTurn(event.seq, event.data.turn, 'tool-call', event.data)
+      case 'tool/result':
+        return this.withTurn(event.seq, event.data.turn, 'tool-result', event.data)
+      case 'turn/end': {
+        const result = this.withTurn(event.seq, event.data.turn, 'status', { status: 'idle', reason: event.data.reason })
+        this.requests.delete(event.data.turn)
+        if (this.openTurn === event.data.turn) this.openTurn = undefined
+        return result
+      }
+      default:
+        return { cursor: event.seq, kind: 'status', data: { type: event.type, data: event.data } }
+    }
+  }
+
+  private withTurn(
+    cursor: number,
+    turn: number,
+    kind: AgentEventKind,
+    data: unknown,
+  ): SessionAgentEvent {
+    const requestId = this.requests.get(turn)
+    return { cursor, ...(requestId === undefined ? {} : { requestId }), kind, data }
+  }
 }
 
 export interface SessionSubscription {
@@ -98,7 +154,7 @@ export class SelectionCompanionSessionService extends Service {
     const agent = await this.resolveAgent(sessionId)
     const message = createUserMessage({
       content: [...content],
-      source: { kind: 'plugin', plugin: 'selection-companion' },
+      source: { kind: 'selection-companion', requestId },
     })
     if (mode === 'queue') agent.followup(message)
     else agent.steer(message)
@@ -118,14 +174,14 @@ export class SelectionCompanionSessionService extends Service {
     listener: (event: SessionAgentEvent) => void,
   ): Promise<SessionSubscription> {
     const id = SessionId(sessionId)
-    if (cursor !== undefined) {
-      const snapshot = await this.ctx.sessionQuery.readSession(id)
-      for (const event of snapshot.events) {
-        if (event.seq > cursor) listener(this.projectEvent(event))
-      }
+    const tracker = new RequestTurnTracker()
+    const snapshot = await this.ctx.sessionQuery.readSession(id)
+    for (const event of snapshot.events) {
+      const projected = tracker.project(event)
+      if (cursor === undefined || event.seq > cursor) listener(projected)
     }
     const stopSessionEvents = this.ctx.on('session/event', (session, event) => {
-      if (session.id === id) listener(this.projectEvent(event))
+      if (session.id === id) listener(tracker.project(event))
     })
     const stopStatusEvents = this.ctx.on('agent/status', ({ agent, status }) => {
       if (agent.id === id) listener({ cursor: agent.session.events.at(-1)?.seq ?? 0, kind: 'status', data: { status } })
@@ -153,20 +209,4 @@ export class SelectionCompanionSessionService extends Service {
     }
   }
 
-  private projectEvent(event: SessionEvent): SessionAgentEvent {
-    switch (event.type) {
-      case 'assistant/chunk':
-        return { cursor: event.seq, kind: 'assistant-delta', data: event.data.chunk }
-      case 'assistant/message':
-        return { cursor: event.seq, kind: 'assistant-complete', data: event.data.message }
-      case 'tool/call':
-        return { cursor: event.seq, kind: 'tool-call', data: event.data }
-      case 'tool/result':
-        return { cursor: event.seq, kind: 'tool-result', data: event.data }
-      case 'turn/end':
-        return { cursor: event.seq, kind: 'status', data: { status: 'idle', reason: event.data.reason } }
-      default:
-        return { cursor: event.seq, kind: 'status', data: { type: event.type, data: event.data } }
-    }
-  }
 }

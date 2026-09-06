@@ -164,7 +164,11 @@ export class BridgeMessageRouter {
       protocol: IPC_PROTOCOL_VERSION,
       id,
       type: 'agent.event',
-      payload: { sessionId, event: { kind: event.kind, data: { cursor: event.cursor, value: event.data } } },
+      payload: {
+        sessionId,
+        ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+        event: { kind: event.kind, data: { cursor: event.cursor, value: event.data } },
+      },
     }
   }
 

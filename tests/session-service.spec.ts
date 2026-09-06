@@ -49,7 +49,7 @@ describe('SelectionCompanionSessionService', () => {
     expect(followup.mock.calls[0]?.[0]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'Explain this fixed selection.' }],
-      source: { kind: 'plugin', plugin: 'selection-companion' },
+      source: { kind: 'selection-companion', requestId: 'request-1' },
     })
     await expect(service.submit('another-session', 'request-1', 'queue', [{ type: 'text', text: 'x' }]))
       .rejects.toThrow('belongs to another session')

@@ -40,6 +40,7 @@ export interface SessionSubmission {
 /** A durable Harness event delivered over the dedicated session pipe. */
 export interface SessionAgentEvent {
   readonly sessionId: string
+  readonly requestId?: string
   readonly event?: {
     readonly kind: string
     readonly data: {

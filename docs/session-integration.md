@@ -15,6 +15,12 @@ Selected page content is labelled as untrusted reference data in the user prompt
 Repeated `requestId` values are idempotent for five minutes; a repeated id for another session fails.
 `session.cancel` calls the host's documented user cancellation operation.
 
+Each submitted message uses the merge-extensible durable source `{ kind: 'selection-companion', requestId }`.
+The subscription projects a request id only after the persisted `turn/start` and that exact source message establish a turn association.
+It applies that association to chunks, assistant messages, tool events, and `turn/end`, then discards it.
+An event outside that durable association has no request id, so a Lens must ignore it for a selected request instead of assigning it to the most recent submission.
+On reconnect the service reads the whole log to rebuild those associations before replaying only events after the acknowledged cursor.
+
 The bridge also implements session list, create, submit, subscribe, and cancel messages.
 Subscriptions project durable session events and status events with a session id and cursor.
 The native client opens one dedicated named-pipe connection for each subscribed session.

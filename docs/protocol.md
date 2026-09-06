@@ -16,7 +16,7 @@ The current protocol supports selection, local, section, and page expansion scop
 
 ## Session and event messages
 
-Session list, create, submit, subscribe, and agent event messages are schema-validated in both implementations. The current bridge does not advertise session operations. The session adapter introduced by a later task owns persistence, idempotency, cancellation, and subscription recovery through the Harness APIs.
+Session list, create, submit, subscribe, cancel, and agent event messages are schema-validated in both implementations and advertised by the session bridge. The session adapter owns persistence, idempotency, cancellation, and subscription recovery through the Harness APIs. An `agent.event.requestId` is present only when the event's persisted turn is associated with a `selection-companion` source message; clients must not infer a missing value from event order.
 
 ## Shared fixtures
 
