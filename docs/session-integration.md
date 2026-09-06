@@ -27,8 +27,8 @@ The native client opens one dedicated named-pipe connection for each subscribed 
 Its request/reply connection is never read by an event task, so a reply cannot race an `agent.event` frame.
 The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event.
 Replacing a session subscription aborts the earlier reader, and bridge disconnect aborts every active reader.
-The Lens shows that a request has been queued, but it does not claim that an answer has been rendered.
-Completing the answer stream still requires request-to-turn correlation, reconnect cursor recovery, Lens rendering, and an interactive Windows test.
+The Lens subscribes after each accepted request and renders text only from an event carrying both its active session id and request id. It offers a session-only stop action and preserves its fixed selection and draft while a response arrives. It does not project tool approvals yet.
+Completing the user flow still requires reconnect cursor persistence, approval presentation, and an interactive Windows test.
 
 Run the available checks from the repository root:
 

@@ -91,3 +91,8 @@ export function submitSessionPrompt(sessionId: string | null, content: string): 
 export function subscribeSession(sessionId: string, cursor?: number): Promise<void> {
   return invoke<void>('bridge_subscribe_session', { sessionId, cursor })
 }
+
+/** Requests the Harness cancellation operation for the selected session only. */
+export function cancelSession(sessionId: string): Promise<boolean> {
+  return invoke<boolean>('bridge_cancel_session', { sessionId })
+}

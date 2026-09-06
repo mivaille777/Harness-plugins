@@ -558,12 +558,57 @@ impl BridgeRuntime {
         })
     }
 
+    #[cfg(windows)]
+    async fn cancel_session(&self, session_id: String) -> Result<bool, String> {
+        if session_id.trim().is_empty() {
+            return Err("session id must not be empty".to_owned());
+        }
+        self.connect().await?;
+        let request_id = request_id("session-cancel");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "session.cancel".to_owned(),
+            payload: serde_json::json!({ "sessionId": session_id }),
+        };
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let response = exchange(client, &message, self.request_timeout).await?;
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session cancellation: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "session.cancelled" {
+            return Err(format!(
+                "unexpected session.cancel response: {}",
+                response.type_name
+            ));
+        }
+        response
+            .payload
+            .get("cancelled")
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(|| "session.cancelled response has no cancelled flag".to_owned())
+    }
+
     #[cfg(not(windows))]
     async fn submit_prompt(
         &self,
         _session_id: Option<String>,
         _content: String,
     ) -> Result<SessionSubmission, String> {
+        self.connect().await?;
+        unreachable!()
+    }
+
+    #[cfg(not(windows))]
+    async fn cancel_session(&self, _session_id: String) -> Result<bool, String> {
         self.connect().await?;
         unreachable!()
     }
@@ -637,6 +682,14 @@ pub async fn bridge_subscribe_session(
     cursor: Option<u64>,
 ) -> Result<(), String> {
     state.subscribe_session(app, session_id, cursor).await
+}
+
+#[tauri::command]
+pub async fn bridge_cancel_session(
+    state: State<'_, BridgeRuntime>,
+    session_id: String,
+) -> Result<bool, String> {
+    state.cancel_session(session_id).await
 }
 
 #[cfg(windows)]
