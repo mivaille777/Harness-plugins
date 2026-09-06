@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "id": "session-cancel-1",
+  "type": "session.cancel",
+  "payload": {
+    "sessionId": "session-1"
+  }
+}

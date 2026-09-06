@@ -13,7 +13,14 @@ import {
 function setup(now = 42_000) {
   const ctx = new Context()
   new SelectionContextService(ctx)
-  const router = new BridgeMessageRouter(ctx.selectionContext, {
+  const sessions = {
+    list: async () => [],
+    create: async () => 'session-created',
+    submit: async () => undefined,
+    cancel: () => true,
+    subscribe: async () => ({ dispose: () => undefined }),
+  }
+  const router = new BridgeMessageRouter(ctx.selectionContext, sessions, {
     pluginVersion: '0.1.0-test',
     now: () => now,
   })
@@ -61,9 +68,9 @@ describe('BridgeMessageRouter', () => {
     new SelectionContextService(clientContext)
     expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
   })
-  it('negotiates Protocol V1 and advertises only Task 4 capabilities', () => {
+  it('negotiates Protocol V1 and advertises session capabilities', async () => {
     const { router } = setup()
-    const response = router.handle(parseIpcMessage({
+    const response = await router.handle(parseIpcMessage({
       protocol: 1,
       id: 'hello-1',
       type: 'bridge.hello',
@@ -80,9 +87,9 @@ describe('BridgeMessageRouter', () => {
     expect(response.payload.capabilities).toEqual(BRIDGE_CAPABILITIES)
   })
 
-  it('returns a deterministic pong', () => {
+  it('returns a deterministic pong', async () => {
     const { router } = setup(99_999)
-    const response = router.handle(parseIpcMessage({
+    const response = await router.handle(parseIpcMessage({
       protocol: 1,
       id: 'ping-1',
       type: 'bridge.ping',
@@ -96,19 +103,19 @@ describe('BridgeMessageRouter', () => {
     })
   })
 
-  it('routes selection.update through ctx.selectionContext', () => {
+  it('routes selection.update through ctx.selectionContext', async () => {
     const { ctx, router } = setup()
-    const response = router.handle(selectionUpdate())
+    const response = await router.handle(selectionUpdate())
 
     expect(response.type).toBe('selection.updated')
     expect(ctx.selectionContext.current()?.id).toBe('selection-1')
     expect(ctx.selectionContext.current()?.selection.text).toBe('DeepSeek Harness selection context')
   })
 
-  it('returns the current immutable selection through the bridge', () => {
+  it('returns the current immutable selection through the bridge', async () => {
     const { router } = setup()
-    router.handle(selectionUpdate())
-    const response = router.handle(parseIpcMessage({
+    await router.handle(selectionUpdate())
+    const response = await router.handle(parseIpcMessage({
       protocol: 1,
       id: 'current-1',
       type: 'selection.current',
@@ -121,13 +128,13 @@ describe('BridgeMessageRouter', () => {
     expect(Object.isFrozen(response.payload.snapshot)).toBe(true)
   })
 
-  it('fails closed for Protocol V1 operations that Task 4 has not implemented', () => {
+  it('fails closed for Protocol V1 operations that remain unavailable', async () => {
     const { router } = setup()
-    const response = router.handle(parseIpcMessage({
+    const response = await router.handle(parseIpcMessage({
       protocol: 1,
       id: 'session-list-1',
-      type: 'session.list',
-      payload: {},
+      type: 'selection.expand',
+      payload: { snapshotId: 'snapshot-1', scope: 'page' },
     }))
 
     expect(response.type).toBe('error.response')

@@ -8,6 +8,7 @@ import {
   type IpcMessage,
 } from './protocol.js'
 import { BridgeMessageRouter } from './router.js'
+import { SelectionCompanionSessionService } from '../session/service.js'
 
 export const DEFAULT_SELECTION_COMPANION_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v1`
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30_000
@@ -38,7 +39,7 @@ declare module '@deepseek-ai/cordis' {
  * Business semantics remain in Harness services/router; this class only owns transport lifecycle.
  */
 export class SelectionCompanionBridgeService extends Service {
-  static inject = ['selectionContext']
+  static inject = ['selectionContext', 'selectionCompanionSessions']
 
   private readonly endpointValue: string
   private readonly enabledValue: boolean
@@ -64,7 +65,7 @@ export class SelectionCompanionBridgeService extends Service {
     if (!Number.isSafeInteger(this.maxClients) || this.maxClients <= 0) {
       throw new RangeError('maxClients must be a positive safe integer')
     }
-    this.router = new BridgeMessageRouter(ctx.selectionContext)
+    this.router = new BridgeMessageRouter(ctx.selectionContext, ctx.selectionCompanionSessions)
   }
 
   get endpoint(): string {
@@ -137,12 +138,21 @@ export class SelectionCompanionBridgeService extends Service {
       writes.catch(error => { socket.destroy(error) })
     }
 
+    const subscriptions: { dispose(): void }[] = []
     socket.on('data', chunk => {
       try {
         const messages = decoder.push(chunk)
         for (const message of messages) {
-          const response = this.router.handle(message)
-          write(response)
+          const queuedEvents: IpcMessage[] = []
+          let responseWritten = false
+          void this.router.handle(message, event => {
+            if (responseWritten) write(event)
+            else queuedEvents.push(event)
+          }, subscription => subscriptions.push(subscription)).then(response => {
+            write(response)
+            responseWritten = true
+            for (const event of queuedEvents) write(event)
+          }).catch(error => { write(this.errorResponse(error)) })
         }
       } catch (error) {
         const response = this.errorResponse(error)
@@ -164,6 +174,7 @@ export class SelectionCompanionBridgeService extends Service {
 
     socket.once('close', () => {
       decoder.reset()
+      for (const subscription of subscriptions) subscription.dispose()
       this.clients.delete(socket)
     })
   }

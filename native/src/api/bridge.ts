@@ -32,6 +32,11 @@ export interface CaptureStatus {
   readonly metrics: CaptureMetrics
 }
 
+export interface SessionSubmission {
+  readonly sessionId: string
+  readonly requestId: string
+}
+
 export function getBridgeStatus(): Promise<BridgeStatus> {
   return invoke<BridgeStatus>('bridge_status')
 }
@@ -62,4 +67,8 @@ export function resumeCapture(): Promise<CaptureStatus> {
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invoke<SelectionSnapshot | null>('bridge_current_selection')
+}
+
+export function submitSessionPrompt(sessionId: string | null, content: string): Promise<SessionSubmission> {
+  return invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content })
 }

@@ -38,6 +38,9 @@
     "test:native-ui": "pnpm --dir native test",
     "test:lens": "pnpm --dir native test",
     "test:lens:e2e": "node scripts/test-lens-e2e.mjs",
+    "test:session": "vitest run tests/session-service.spec.ts tests/bridge-server.spec.ts",
+    "test:session:replay": "vitest run tests/session-replay.spec.ts",
+    "test:session:e2e": "node scripts/test-session-e2e.mjs",
     "test:browser-accessibility": "cargo test --manifest-path native/src-tauri/Cargo.toml browser_accessibility",
     "test:browser-extension": "pnpm --dir browser-extension test",
     "test:browser-extension:e2e": "pnpm --dir browser-extension test:e2e",
@@ -87,10 +90,20 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-session-query": "^0.1.1-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.1.1-rc.2",
     "@types/node": "^22.20.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

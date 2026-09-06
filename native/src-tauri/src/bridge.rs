@@ -11,6 +11,13 @@ use crate::protocol::{
     IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSubmission {
+    pub session_id: String,
+    pub request_id: String,
+}
+
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v1";
 
 #[derive(Debug, Clone, Serialize)]
@@ -321,6 +328,96 @@ impl BridgeRuntime {
         Ok(payload.snapshot)
     }
 
+    #[cfg(windows)]
+    async fn submit_prompt(
+        &self,
+        session_id: Option<String>,
+        content: String,
+    ) -> Result<SessionSubmission, String> {
+        if content.trim().is_empty() {
+            return Err("session prompt must not be empty".to_owned());
+        }
+        self.connect().await?;
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let session_id = match session_id {
+            Some(id) => id,
+            None => {
+                let id = request_id("session-create");
+                let create = IpcMessage {
+                    protocol: IPC_PROTOCOL_VERSION,
+                    id: id.clone(),
+                    type_name: "session.create".to_owned(),
+                    payload: serde_json::json!({}),
+                };
+                let response = exchange(client, &create, self.request_timeout).await?;
+                ensure_response_id(&response, &id)?;
+                if response.type_name == "error.response" {
+                    return Err(format!(
+                        "Harness rejected session creation: {}",
+                        response.payload
+                    ));
+                }
+                if response.type_name != "session.created" {
+                    return Err(format!(
+                        "unexpected session.create response: {}",
+                        response.type_name
+                    ));
+                }
+                response
+                    .payload
+                    .get("sessionId")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| "session.created response has no sessionId".to_owned())?
+            }
+        };
+        let request_id = request_id("session-submit");
+        let submit = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "session.submit".to_owned(),
+            payload: serde_json::json!({
+                "sessionId": session_id,
+                "requestId": request_id,
+                "mode": "queue",
+                "content": [{ "type": "text", "text": content }]
+            }),
+        };
+        let response = exchange(client, &submit, self.request_timeout).await?;
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session submission: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "session.submitted" {
+            return Err(format!(
+                "unexpected session.submit response: {}",
+                response.type_name
+            ));
+        }
+        Ok(SessionSubmission {
+            session_id,
+            request_id,
+        })
+    }
+
+    #[cfg(not(windows))]
+    async fn submit_prompt(
+        &self,
+        _session_id: Option<String>,
+        _content: String,
+    ) -> Result<SessionSubmission, String> {
+        self.connect().await?;
+        unreachable!()
+    }
+
     #[cfg(not(windows))]
     async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
         self.connect().await?;
@@ -367,6 +464,15 @@ pub async fn bridge_current_selection(
     state: State<'_, BridgeRuntime>,
 ) -> Result<Option<SelectionSnapshot>, String> {
     state.current_selection().await
+}
+
+#[tauri::command]
+pub async fn bridge_submit_prompt(
+    state: State<'_, BridgeRuntime>,
+    session_id: Option<String>,
+    content: String,
+) -> Result<SessionSubmission, String> {
+    state.submit_prompt(session_id, content).await
 }
 
 #[cfg(windows)]

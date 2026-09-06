@@ -831,7 +831,7 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T02 | 自动检查通过待实测 | Codex | 本提交 | `docs/capture-reliability.md`、`pnpm test:capture`、`pnpm test:native-ui` |
 | T03 | 自动检查通过待实测 | Codex | 本提交 | `docs/bridge-transport.md`、`pnpm test:bridge`、`pnpm test:rust` |
 | T04 | 自动检查通过待实测 | Codex | 本提交 | `docs/selection-lens.md`、`pnpm test:lens` |
-| T05 | 待开始 | 待分配 | — | — |
+| T05 | 开发中：自动适配与提交检查通过，流式回答和真实宿主链路待验证 | Codex | 当前分支 | `docs/session-integration.md`、`pnpm test:session`、`pnpm test:session:replay` |
 | T06 | 待开始 | 待分配 | — | — |
 | T07 | 待开始 | 待分配 | — | — |
 | T08-A/B/C/D | 待开始，逐项选择 | 待分配 | — | — |

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
-const api = vi.hoisted(() => ({ getCaptureStatus: vi.fn(), getCurrentSelection: vi.fn(), pauseCapture: vi.fn(), resumeCapture: vi.fn() }))
+const api = vi.hoisted(() => ({ getCaptureStatus: vi.fn(), getCurrentSelection: vi.fn(), pauseCapture: vi.fn(), resumeCapture: vi.fn(), submitSessionPrompt: vi.fn() }))
 const hide = vi.hoisted(() => vi.fn())
 vi.mock('./api/bridge', () => api)
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide }) }))
@@ -10,8 +10,8 @@ const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransition
 const selection = { id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { pageAvailable: false }, capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 }
 
 describe('selection lens', () => {
-  beforeEach(() => { vi.clearAllMocks(); api.getCaptureStatus.mockResolvedValue(capture); api.getCurrentSelection.mockResolvedValue(selection); api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' }); api.resumeCapture.mockResolvedValue(capture) })
+  beforeEach(() => { vi.clearAllMocks(); api.getCaptureStatus.mockResolvedValue(capture); api.getCurrentSelection.mockResolvedValue(selection); api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' }); api.resumeCapture.mockResolvedValue(capture); api.submitSessionPrompt.mockResolvedValue({ sessionId: 'session-1', requestId: 'request-1' }) })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
-  it('does not submit while composing Chinese input and submits Enter after composition', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(screen.queryByText(/No model request/)).toBeNull(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); expect(await screen.findByText(/No model request/)).toBeInTheDocument() })
+  it('does not submit while composing Chinese input and submits Enter after composition', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(api.submitSessionPrompt).not.toHaveBeenCalled(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)); expect(await screen.findByText(/Request queued in Harness session session-1/)).toBeInTheDocument() })
   it('hides on Escape and keeps pause separate from Lens close', async () => { render(<App />); await screen.findByText('Fixture page'); fireEvent.keyDown(window, { key: 'Escape' }); expect(hide).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: 'Pause capture' })); await waitFor(() => expect(api.pauseCapture).toHaveBeenCalledTimes(1)) })
 })

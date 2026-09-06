@@ -29,6 +29,8 @@ pub const IPC_MESSAGE_TYPES: &[&str] = &[
     "session.submitted",
     "session.subscribe",
     "session.subscribed",
+    "session.cancel",
+    "session.cancelled",
     "agent.event",
     "error.response",
 ];
@@ -320,6 +322,19 @@ pub struct SessionSubscriptionPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCancelPayload {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCancelledPayload {
+    pub session_id: String,
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionDeliveryMode {
     Queue,
@@ -545,6 +560,14 @@ impl IpcMessage {
                 if let Some(cursor) = payload.cursor {
                     require_safe_integer(cursor, "cursor")?;
                 }
+            }
+            "session.cancel" => {
+                let payload: SessionCancelPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
+            }
+            "session.cancelled" => {
+                let payload: SessionCancelledPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
             }
             "agent.event" => {
                 let payload: AgentEventPayload = typed_payload(&self.payload)?;
@@ -775,6 +798,7 @@ mod tests {
         include_str!("../../../tests/protocol/bridge.hello.response.json"),
         include_str!("../../../tests/protocol/selection.update.request.json"),
         include_str!("../../../tests/protocol/session.submit.request.json"),
+        include_str!("../../../tests/protocol/session.cancel.request.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
         include_str!("../../../tests/protocol/error.response.json"),
     ];

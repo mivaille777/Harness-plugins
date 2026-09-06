@@ -20,6 +20,7 @@ pub fn run() {
             bridge::bridge_ping,
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
+            bridge::bridge_submit_prompt,
             capture::capture_status,
             capture::capture_pause,
             capture::capture_resume,

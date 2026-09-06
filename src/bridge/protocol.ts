@@ -23,6 +23,8 @@ export const IPC_MESSAGE_TYPES = [
   'session.submitted',
   'session.subscribe',
   'session.subscribed',
+  'session.cancel',
+  'session.cancelled',
   'agent.event',
   'error.response',
 ] as const
@@ -137,6 +139,8 @@ export type IpcMessage =
   | IpcEnvelope<'session.submitted', { readonly accepted: boolean; readonly requestId: string }>
   | IpcEnvelope<'session.subscribe', { readonly sessionId: string; readonly cursor?: number }>
   | IpcEnvelope<'session.subscribed', { readonly sessionId: string; readonly cursor?: number }>
+  | IpcEnvelope<'session.cancel', { readonly sessionId: string }>
+  | IpcEnvelope<'session.cancelled', { readonly sessionId: string; readonly cancelled: boolean }>
   | IpcEnvelope<'agent.event', AgentEventPayload>
   | IpcEnvelope<'error.response', {
       readonly code: IpcErrorCode
@@ -374,6 +378,10 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
     case 'session.subscribe':
     case 'session.subscribed':
       return z.object({ sessionId: nonEmptyString, cursor: nonNegativeSafeInteger.optional() }).strict().parse(payload)
+    case 'session.cancel':
+      return z.object({ sessionId: nonEmptyString }).strict().parse(payload)
+    case 'session.cancelled':
+      return z.object({ sessionId: nonEmptyString, cancelled: z.boolean() }).strict().parse(payload)
     case 'agent.event':
       return z.object({
         sessionId: nonEmptyString,

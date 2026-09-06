@@ -1,7 +1,8 @@
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import {
   SelectionCompanionBridgeService,
+  SelectionCompanionSessionService,
   SelectionContextService,
   apply,
   name,
@@ -16,12 +17,19 @@ describe('dsh-selection-companion bundle entry', () => {
     const previous = process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE
     process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE = '1'
     const ctx = new Context()
+    class RequiredHarnessService extends Service {
+      constructor(context: Context, key: string) { super(context, key) }
+    }
+    new RequiredHarnessService(ctx, 'agents')
+    new RequiredHarnessService(ctx, 'agentDefaultModel')
+    new RequiredHarnessService(ctx, 'sessionQuery')
     const plugin = vi.spyOn(ctx, 'plugin')
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
     try {
       await expect(apply(ctx)).resolves.toBeUndefined()
       expect(plugin).toHaveBeenCalledWith(SelectionContextService)
+      expect(plugin).toHaveBeenCalledWith(SelectionCompanionSessionService)
       expect(plugin).toHaveBeenCalledWith(SelectionCompanionBridgeService)
       expect(ctx.selectionContext).toBeDefined()
       expect(ctx.selectionContext.current()).toBeUndefined()

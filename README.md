@@ -34,8 +34,8 @@ dsh-selection-companion Cordis plugin
 BridgeMessageRouter
         ↓
 ctx.selectionContext
-        ↓ later tasks
-Harness Session / Agent tools
+        ↓
+Harness Session / Agent services
 ```
 
 The Native Companion does **not** call an LLM, write Harness Session files directly, or maintain a second conversation history.
@@ -307,7 +307,17 @@ cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
 
-The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Session submission is deliberately unavailable until T05; see [Selection Lens](docs/selection-lens.md) for input, focus, and geometry limits.
+The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action now queues one durable Harness user message, creating a session on first use and reusing it for later prompts. The native response stream is not rendered yet; see [session integration](docs/session-integration.md) and [Selection Lens](docs/selection-lens.md) for the current limits.
+
+Session checks:
+
+```powershell
+pnpm test:session
+pnpm test:session:replay
+pnpm test:session:e2e
+```
+
+`test:session:e2e` deliberately returns exit code 2 until an isolated `dsh` profile, configured model provider, and Windows named-pipe evidence are supplied.
 
 `pnpm test:bridge:integration` deliberately reports unverified until it exercises the real Node/Rust named-pipe path on Windows. The bridge has bounded request exchanges and client admission; see [bridge transport limits](docs/bridge-transport.md) for its retry and access-control limits.
 
@@ -461,7 +471,7 @@ The optional Browser DOM extension has its own separate checks and is not a Task
 - generic Windows UIA provider for arbitrary desktop applications
 - Word COM provider
 - lazy full-page context expansion
-- SessionController prompt/follow integration
+- multiplexed native response streaming, request-to-turn correlation, and reconnect recovery
 - Agent `selection_current` / `selection_read_context` tools
 - prebuilt Windows installer / binary packaging
 
