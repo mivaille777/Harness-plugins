@@ -452,6 +452,29 @@ pnpm test:session:e2e
 必要宿主改动单独限定范围并满足架构、Agent Note、SDK 和快照规则。交付完整用户闭环证据、回放材料、依赖说明及实际检查结果。不要自动推送、合并或发布。
 ```
 
+#### T05 后续执行清单（基线：`98b7acf`）
+
+`98b7acf` 已完成 Harness 服务依赖声明、会话创建/恢复、`queue` 与 `steer` 提交、五分钟请求幂等、取消消息、协议层订阅，以及 Lens 的固定材料提交。它没有实现 Native 事件流读取、回答渲染、工具绑定材料、真实模型 e2e。后续必须按以下顺序完成；每项独立提交，不能把“请求已入队”写成“已得到回答”。
+
+| 子任务 | 目的与完成定义 | 实现边界 | 自动验证 | 实机验证 |
+|---|---|---|---|---|
+| T05-A | 在同一 session 中可靠取得持续事件。`session.subscribed` 必须先于任何重放事件，连接关闭后所有订阅释放。 | Native 使用独立订阅管道或经审阅的单连接多路复用器；请求回复和 `agent.event` 由 request id/帧类型分派，禁止两个读取者竞争同一管道。TS server 维持写入顺序并在 socket close 时释放 disposer。 | 新增 `pnpm test:session:transport`：响应先行、分片帧、多订阅、关闭释放、错误帧、超时。保留 `pnpm test:bridge`。 | Windows 命名管道上连续发送 100 个受控事件，无串帧、泄漏或悬挂。 |
+| T05-B | 将每个 Lens 请求与其所属 turn/回答严格关联。迟到片段、旧 session、取消后事件都不得覆盖新回答。 | 设计并持久化 request-to-message/turn 关联；只能基于宿主事件中可重建的事实关联。若 `0.1.1-rc.2` 没有足够事件字段，停止在插件侧推断，改为独立 Harness 宿主改动。恢复订阅使用已确认 cursor。 | 扩展 `pnpm test:session:replay`：双 session、重复 requestId、取消/完成竞态、重连 cursor、TTL 到期及异常恢复。 | 生成时切换选区、关闭再打开 Lens、断开 bridge 后重连，核对回答未串料。 |
+| T05-C | Lens 显示回答、运行状态、错误和停止入口，且保留用户草稿和固定快照。 | 新增显式 `idle/submitting/streaming/completed/cancelled/error/approval-required` 状态；仅在 sessionId 与 requestId 匹配时追加可见文本。停止调用 `session.cancel`，不影响采集暂停。流式文本维持用户滚动位置，aria-live 仅播报状态转换。 | 新增 `pnpm test:lens:session`：中文输入法、双击、停止、迟到事件、错误重试、焦点与 Esc。运行 `pnpm test:native-ui`。 | Narrator、125%/200% DPI、窄窗口、长回答及中英文输入下完成解释、追问、停止。 |
+| T05-D | 向 Agent 提供会话绑定的选区工具，并保证模型的工具读取不会拿到其他会话的新选区。 | 在 Agent 创建/恢复时将不可变 snapshot 绑定到该 Agent scope；注册审阅后的 `selection_current`/`selection_read_context` 工具。工具只读取该 session 的持久材料；范围扩展留给 T06。使用 Harness 审批与工具结果日志。 | 新增 `pnpm test:session:tools`：跨 session 隔离、快照清除后重放、工具审批、恶意网页文本。 | 真实 profile 中核对工具调用、审批 UI 与 session log 可重建输入。 |
+| T05-E | 取得可审查的真实闭环证据。 | 使用隔离 `DSH_HOME`、已安装的打包 bundle、非敏感固定网页 fixture 和显式配置的模型凭据；不改动用户日常 profile。保存命令、版本、SHA、日志与截图路径，密钥不入库。 | `pnpm test:session:e2e` 仅在 `DEEPSEEK_API_KEY` 和 Windows 环境齐全时执行；前置缺失时必须以明确 skip/exit 2 报告。 | 浏览器选区 → Lens 解释 → 回答 → 追问 → 完整 Harness 会话历史 → 重启后回放；每项记录 PASS/FAIL。 |
+
+**T05 完成门槛。** 只有 T05-A 至 T05-E 都有对应证据，且 `pnpm check:task5`、`pnpm test:session`、`pnpm test:session:replay`、新增会话传输/工具/Lens 测试通过，才可把 T05 状态改为“自动检查通过待实测”或“已验收”。没有真实模型与 Windows 证据时，状态保持“开发中”。
+
+**下一位 Codex 提示词。**
+
+```text
+从 Harness-plugins 的 feat/t05-session-integration 分支和提交 98b7acf 开始完成 T05。先读 docs/session-integration.md、harness-plugins task.md 的“T05 后续执行清单”，并确认当前 dsh 版本实际导出的 Agent、Session、SessionQuery 和事件 API。
+先实现 T05-A 的 Native 事件读取与严格帧分派，再实现 T05-B 的 request/turn 关联；禁止让两个读取者竞争一条 named pipe，也禁止仅凭“下一条 assistant 消息”猜测归属。每个订阅在连接关闭时释放，重放事件必须晚于订阅确认。
+随后实现 T05-C Lens 状态与停止，并为 T05-D 使用 session 绑定的不可变材料注册工具。若宿主事件没有可重建的关联字段，不要在插件中创造隐式关联；写出最小独立 Harness 修改需求、依赖版本和所需 SDK/快照更新。
+新增可失败的 transport、replay、Lens 和工具测试；运行 pnpm check:task5、pnpm test:session、pnpm test:session:replay，以及新增命令。只有提供隔离 profile、Windows 和显式模型配置时才运行 test:session:e2e，并将密钥缺失记为未验证。更新任务状态、文档和证据，不要把入队状态描述为回答完成。
+```
+
 ### T06：按需上下文与来源核查
 
 **目的。** 在降低信息缺失的同时控制发送范围，让用户理解回答依据并能主动补充材料。
@@ -831,7 +854,7 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T02 | 自动检查通过待实测 | Codex | 本提交 | `docs/capture-reliability.md`、`pnpm test:capture`、`pnpm test:native-ui` |
 | T03 | 自动检查通过待实测 | Codex | 本提交 | `docs/bridge-transport.md`、`pnpm test:bridge`、`pnpm test:rust` |
 | T04 | 自动检查通过待实测 | Codex | 本提交 | `docs/selection-lens.md`、`pnpm test:lens` |
-| T05 | 开发中：自动适配与提交检查通过，流式回答和真实宿主链路待验证 | Codex | 当前分支 | `docs/session-integration.md`、`pnpm test:session`、`pnpm test:session:replay` |
+| T05 | 开发中：基础适配和入队已完成；T05-A 至 T05-E 待执行 | Codex | `98b7acf` | `docs/session-integration.md`、本文件“T05 后续执行清单” |
 | T06 | 待开始 | 待分配 | — | — |
 | T07 | 待开始 | 待分配 | — | — |
 | T08-A/B/C/D | 待开始，逐项选择 | 待分配 | — | — |
