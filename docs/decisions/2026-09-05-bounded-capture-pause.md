@@ -6,7 +6,7 @@ Keep one unpublished native selection and replace it with the newest capture dur
 
 ## Consequences
 
-The runtime cannot grow a queue while Harness is slow or disconnected, and reconnecting cannot silently resume user-paused capture. An already published immutable snapshot remains owned by Harness because Protocol V1 does not define a clear lifecycle message. The companion reports capture state and aggregate counters without logging selected text or URLs. Startup configuration supplies timing, local context limits, and exact source exclusions.
+The runtime cannot grow a queue while Harness is slow or disconnected, and reconnecting cannot silently resume user-paused capture. An already published immutable snapshot remains owned by Harness because Protocol V2 does not define a clear lifecycle message. The companion reports capture state and aggregate counters without logging selected text or URLs. Startup configuration supplies timing, local context limits, and exact source exclusions.
 
 ## Alternatives
 

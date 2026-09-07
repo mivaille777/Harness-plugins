@@ -1,7 +1,7 @@
 import { z, ZodError } from 'zod'
 import { normalizeSelectionSnapshot, type SelectionSnapshot } from '../context/snapshot.js'
 
-export const IPC_PROTOCOL_VERSION = 1 as const
+export const IPC_PROTOCOL_VERSION = 2 as const
 export const IPC_MAX_FRAME_BYTES = 1024 * 1024
 
 export const IPC_MESSAGE_TYPES = [
@@ -105,6 +105,7 @@ export interface AgentEventPayload {
   readonly sessionId: string
   readonly subscriptionId: string
   readonly requestId?: string
+  readonly requestIds?: readonly string[]
   readonly event: {
     readonly kind: AgentEventKind
     readonly data: {
@@ -141,7 +142,13 @@ export type IpcMessage =
       readonly mode: SessionDeliveryMode
       readonly content: readonly PromptTextPart[]
     }>
-  | IpcEnvelope<'session.submitted', { readonly accepted: boolean; readonly requestId: string }>
+  | IpcEnvelope<'session.submitted', {
+      readonly accepted: boolean
+      readonly requestId: string
+      readonly messageId: string
+      readonly delivery: 'queued' | 'steered'
+      readonly duplicate: boolean
+    }>
   | IpcEnvelope<'session.subscribe', { readonly sessionId: string; readonly cursor?: number }>
   | IpcEnvelope<'session.subscribed', { readonly sessionId: string; readonly subscriptionId: string; readonly cursor?: number }>
   | IpcEnvelope<'session.cancel', { readonly sessionId: string }>
@@ -379,7 +386,13 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         content: z.array(z.object({ type: z.literal('text'), text: nonEmptyString }).strict()).min(1),
       }).strict().parse(payload)
     case 'session.submitted':
-      return z.object({ accepted: z.boolean(), requestId: nonEmptyString }).strict().parse(payload)
+      return z.object({
+        accepted: z.literal(true),
+        requestId: nonEmptyString,
+        messageId: nonEmptyString,
+        delivery: z.enum(['queued', 'steered']),
+        duplicate: z.boolean(),
+      }).strict().parse(payload)
     case 'session.subscribe':
       return z.object({ sessionId: nonEmptyString, cursor: nonNegativeSafeInteger.optional() }).strict().parse(payload)
     case 'session.subscribed':
@@ -393,6 +406,7 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         sessionId: nonEmptyString,
         subscriptionId: nonEmptyString,
         requestId: nonEmptyString.optional(),
+        requestIds: z.array(nonEmptyString).min(1).optional(),
         event: z.object({
           kind: agentEventKindSchema,
           data: z.object({

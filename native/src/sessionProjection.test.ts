@@ -120,4 +120,21 @@ describe('projectSessionEvent', () => {
     }))
     expect(transient.lastCursor).toBe(4)
   })
+
+  it('accepts output from a shared turn containing the active request', () => {
+    const state = reduce([event(1, 'assistant-delta', {
+      turn: 5, step: 1, value: { type: 'text-delta', index: 0, text: 'shared answer' },
+    }, { requestId: undefined, requestIds: ['request-0', 'request-1'] })])
+    expect(state.answer).toBe('shared answer')
+  })
+
+  it('keeps a cancellation terminal when a late token arrives', () => {
+    const state = reduce([
+      event(1, 'status', { status: 'turn-end', turn: 1, reason: { kind: 'aborted', cause: { kind: 'user' } } }),
+      event(2, 'assistant-delta', {
+        turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'late' },
+      }),
+    ])
+    expect(state).toMatchObject({ phase: 'cancelled', answer: '', lastCursor: 2 })
+  })
 })

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-pub const IPC_PROTOCOL_VERSION: u32 = 1;
+pub const IPC_PROTOCOL_VERSION: u32 = 2;
 pub const IPC_MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const IPC_FRAME_HEADER_BYTES: usize = 4;
 pub const DEFAULT_IPC_REQUEST_TIMEOUT_MS: u64 = 30_000;
@@ -311,6 +311,16 @@ pub struct SessionSubmitPayload {
 pub struct SessionSubmittedPayload {
     pub accepted: bool,
     pub request_id: String,
+    pub message_id: String,
+    pub delivery: SessionDeliveryReceipt,
+    pub duplicate: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionDeliveryReceipt {
+    Queued,
+    Steered,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -356,6 +366,8 @@ pub struct AgentEventPayload {
     pub subscription_id: String,
     #[serde(default)]
     pub request_id: Option<String>,
+    #[serde(default)]
+    pub request_ids: Option<Vec<String>>,
     pub event: AgentEvent,
 }
 
@@ -563,7 +575,13 @@ impl IpcMessage {
             }
             "session.submitted" => {
                 let payload: SessionSubmittedPayload = typed_payload(&self.payload)?;
+                if !payload.accepted {
+                    return Err(ProtocolError::InvalidMessage(
+                        "session.submitted accepted must be true".into(),
+                    ));
+                }
                 require_text(&payload.request_id, "requestId")?;
+                require_text(&payload.message_id, "messageId")?;
             }
             "session.subscribe" => {
                 let payload: SessionSubscriptionPayload = typed_payload(&self.payload)?;
@@ -597,6 +615,16 @@ impl IpcMessage {
                 require_text(&payload.subscription_id, "subscriptionId")?;
                 if let Some(request_id) = &payload.request_id {
                     require_text(request_id, "requestId")?;
+                }
+                if let Some(request_ids) = &payload.request_ids {
+                    if request_ids.is_empty() {
+                        return Err(ProtocolError::InvalidMessage(
+                            "requestIds must not be empty".into(),
+                        ));
+                    }
+                    for request_id in request_ids {
+                        require_text(request_id, "requestIds")?;
+                    }
                 }
                 require_safe_integer(payload.event.data.cursor, "event.data.cursor")?;
             }
@@ -822,6 +850,7 @@ mod tests {
         include_str!("../../../tests/protocol/bridge.hello.response.json"),
         include_str!("../../../tests/protocol/selection.update.request.json"),
         include_str!("../../../tests/protocol/session.submit.request.json"),
+        include_str!("../../../tests/protocol/session.submitted.response.json"),
         include_str!("../../../tests/protocol/session.cancel.request.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
         include_str!("../../../tests/protocol/error.response.json"),
@@ -832,6 +861,8 @@ mod tests {
         include_str!("../../../tests/protocol/invalid/selection.update.unknown-field.json"),
         include_str!("../../../tests/protocol/invalid/session.subscribe.negative-cursor.json"),
         include_str!("../../../tests/protocol/invalid/session.submit.empty-content.json"),
+        include_str!("../../../tests/protocol/invalid/session.submitted.missing-message-id.json"),
+        include_str!("../../../tests/protocol/invalid/agent.event.missing-persistence.json"),
     ];
 
     #[test]
@@ -853,13 +884,13 @@ mod tests {
 
     #[test]
     fn rejects_protocol_mismatch_and_unknown_message_type() {
-        let mismatch = r#"{"protocol":2,"id":"x","type":"bridge.ping","payload":{"sentAt":1}}"#;
+        let mismatch = r#"{"protocol":1,"id":"x","type":"bridge.ping","payload":{"sentAt":1}}"#;
         assert!(matches!(
             IpcMessage::from_json(mismatch),
-            Err(ProtocolError::ProtocolMismatch(2))
+            Err(ProtocolError::ProtocolMismatch(1))
         ));
 
-        let unknown = r#"{"protocol":1,"id":"x","type":"unknown.method","payload":{}}"#;
+        let unknown = r#"{"protocol":2,"id":"x","type":"unknown.method","payload":{}}"#;
         assert!(matches!(
             IpcMessage::from_json(unknown),
             Err(ProtocolError::UnknownMessageType(_))

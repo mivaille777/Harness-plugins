@@ -36,6 +36,20 @@ export interface CaptureStatus {
 export interface SessionSubmission {
   readonly sessionId: string
   readonly requestId: string
+  readonly messageId: string
+  readonly delivery: 'queued' | 'steered'
+  readonly duplicate: boolean
+}
+
+export class SubmissionUnknownError extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly requestId: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'SubmissionUnknownError'
+  }
 }
 
 /** A durable Harness event delivered over the dedicated session pipe. */
@@ -43,6 +57,7 @@ export interface SessionAgentEvent {
   readonly sessionId: string
   readonly subscriptionId: string
   readonly requestId?: string
+  readonly requestIds?: readonly string[]
   readonly event?: {
     readonly kind: AgentEventKind
     readonly data: {
@@ -86,8 +101,15 @@ export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invoke<SelectionSnapshot | null>('bridge_current_selection')
 }
 
-export function submitSessionPrompt(sessionId: string | null, content: string): Promise<SessionSubmission> {
-  return invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content })
+export async function submitSessionPrompt(sessionId: string | null, content: string, requestId: string): Promise<SessionSubmission> {
+  try {
+    return await invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId })
+  } catch (error) {
+    const message = String(error)
+    const match = /^SUBMISSION_UNKNOWN\|([^|]+)\|([^|]+)\|(.*)$/s.exec(message)
+    if (match !== null) throw new SubmissionUnknownError(match[1]!, match[2]!, match[3]!)
+    throw error
+  }
 }
 
 /** Opens a pipe owned solely by the event stream for one Harness session. */

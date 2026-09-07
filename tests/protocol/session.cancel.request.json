@@ -1,5 +1,5 @@
 {
-  "protocol": 1,
+  "protocol": 2,
   "id": "session-cancel-1",
   "type": "session.cancel",
   "payload": {

@@ -125,12 +125,12 @@ export class BridgeMessageRouter {
         return { protocol: IPC_PROTOCOL_VERSION, id: message.id, type: 'session.created', payload: { sessionId } }
       }
       case 'session.submit': {
-        await this.sessions.submit(message.payload.sessionId, message.payload.requestId, message.payload.mode, message.payload.content)
+        const result = await this.sessions.submit(message.payload.sessionId, message.payload.requestId, message.payload.mode, message.payload.content)
         return {
           protocol: IPC_PROTOCOL_VERSION,
           id: message.id,
           type: 'session.submitted',
-          payload: { accepted: true, requestId: message.payload.requestId },
+          payload: { accepted: true, ...result },
         }
       }
       case 'session.subscribe': {
@@ -158,7 +158,7 @@ export class BridgeMessageRouter {
         return this.error(
           message.id,
           'BRIDGE_UNAVAILABLE',
-          `${message.type} is defined by Protocol V1 but is not available in the Task 4 bridge`,
+          `${message.type} is defined by Protocol V${IPC_PROTOCOL_VERSION} but is not available in the Task 4 bridge`,
         )
     }
   }
@@ -172,6 +172,7 @@ export class BridgeMessageRouter {
         sessionId,
         subscriptionId: id,
         ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+        ...(event.requestIds === undefined ? {} : { requestIds: event.requestIds }),
         event: { kind: event.kind, data: { cursor: event.cursor, persistent: event.persistent, value: event.data } },
       },
     }

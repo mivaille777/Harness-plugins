@@ -20,9 +20,12 @@ use crate::protocol::{
 pub struct SessionSubmission {
     pub session_id: String,
     pub request_id: String,
+    pub message_id: String,
+    pub delivery: String,
+    pub duplicate: bool,
 }
 
-pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v1";
+pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v2";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -546,9 +549,13 @@ impl BridgeRuntime {
         &self,
         session_id: Option<String>,
         content: String,
+        logical_request_id: String,
     ) -> Result<SessionSubmission, String> {
         if content.trim().is_empty() {
             return Err("session prompt must not be empty".to_owned());
+        }
+        if logical_request_id.trim().is_empty() {
+            return Err("logical request id must not be empty".to_owned());
         }
         self.connect().await?;
         let mut inner = self.inner.lock().await;
@@ -589,20 +596,37 @@ impl BridgeRuntime {
                     .ok_or_else(|| "session.created response has no sessionId".to_owned())?
             }
         };
-        let request_id = request_id("session-submit");
+        let transport_id = request_id("session-submit");
         let submit = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
-            id: request_id.clone(),
+            id: transport_id.clone(),
             type_name: "session.submit".to_owned(),
             payload: serde_json::json!({
                 "sessionId": session_id,
-                "requestId": request_id,
+                "requestId": logical_request_id,
                 "mode": "queue",
                 "content": [{ "type": "text", "text": content }]
             }),
         };
-        let response = exchange(client, &submit, self.request_timeout).await?;
-        ensure_response_id(&response, &request_id)?;
+        let response = match exchange(client, &submit, self.request_timeout).await {
+            Ok(response) => response,
+            Err(error) => {
+                return Err(mark_submission_unknown(
+                    &mut inner,
+                    &session_id,
+                    &logical_request_id,
+                    error,
+                ));
+            }
+        };
+        if let Err(error) = ensure_response_id(&response, &transport_id) {
+            return Err(mark_submission_unknown(
+                &mut inner,
+                &session_id,
+                &logical_request_id,
+                error,
+            ));
+        }
         if response.type_name == "error.response" {
             return Err(format!(
                 "Harness rejected session submission: {}",
@@ -610,14 +634,43 @@ impl BridgeRuntime {
             ));
         }
         if response.type_name != "session.submitted" {
-            return Err(format!(
-                "unexpected session.submit response: {}",
-                response.type_name
+            let error = format!("unexpected session.submit response: {}", response.type_name);
+            return Err(mark_submission_unknown(
+                &mut inner,
+                &session_id,
+                &logical_request_id,
+                error,
+            ));
+        }
+        let submitted: crate::protocol::SessionSubmittedPayload =
+            match serde_json::from_value(response.payload) {
+                Ok(submitted) => submitted,
+                Err(error) => {
+                    return Err(mark_submission_unknown(
+                        &mut inner,
+                        &session_id,
+                        &logical_request_id,
+                        format!("invalid session.submitted payload: {error}"),
+                    ));
+                }
+            };
+        if submitted.request_id != logical_request_id {
+            return Err(mark_submission_unknown(
+                &mut inner,
+                &session_id,
+                &logical_request_id,
+                "session.submitted response has a different requestId",
             ));
         }
         Ok(SessionSubmission {
             session_id,
-            request_id,
+            request_id: submitted.request_id,
+            message_id: submitted.message_id,
+            delivery: match submitted.delivery {
+                crate::protocol::SessionDeliveryReceipt::Queued => "queued".to_owned(),
+                crate::protocol::SessionDeliveryReceipt::Steered => "steered".to_owned(),
+            },
+            duplicate: submitted.duplicate,
         })
     }
 
@@ -665,6 +718,7 @@ impl BridgeRuntime {
         &self,
         _session_id: Option<String>,
         _content: String,
+        _logical_request_id: String,
     ) -> Result<SessionSubmission, String> {
         self.connect().await?;
         unreachable!()
@@ -733,8 +787,9 @@ pub async fn bridge_submit_prompt(
     state: State<'_, BridgeRuntime>,
     session_id: Option<String>,
     content: String,
+    request_id: String,
 ) -> Result<SessionSubmission, String> {
-    state.submit_prompt(session_id, content).await
+    state.submit_prompt(session_id, content, request_id).await
 }
 
 #[cfg(windows)]
@@ -885,8 +940,22 @@ fn ensure_response_id(response: &IpcMessage, request_id: &str) -> Result<(), Str
     ))
 }
 
+#[cfg(windows)]
+fn mark_submission_unknown(
+    inner: &mut BridgeInner,
+    session_id: &str,
+    logical_request_id: &str,
+    error: impl std::fmt::Display,
+) -> String {
+    let detail = error.to_string();
+    inner.connected = false;
+    inner.client = None;
+    inner.last_error = Some(detail.clone());
+    format!("SUBMISSION_UNKNOWN|{session_id}|{logical_request_id}|{detail}")
+}
+
 fn request_id(prefix: &str) -> String {
-    format!("native-{prefix}-{}", now_millis())
+    format!("native-{prefix}-{}", uuid::Uuid::new_v4())
 }
 
 fn now_millis() -> u64 {
@@ -902,7 +971,99 @@ mod tests {
 
     #[test]
     fn default_pipe_matches_harness_transport() {
-        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v1");
+        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v2");
+    }
+
+    #[test]
+    fn request_ids_do_not_depend_on_clock_resolution() {
+        assert_ne!(request_id("submit"), request_id("submit"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn reports_unknown_after_submit_frame_is_written_and_reply_disconnects() {
+        use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        async fn read_frame(reader: &mut (impl AsyncRead + Unpin)) -> IpcMessage {
+            let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+            reader.read_exact(&mut header).await.unwrap();
+            let declared = u32::from_be_bytes(header) as usize;
+            let mut body = vec![0_u8; declared];
+            reader.read_exact(&mut body).await.unwrap();
+            let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+            frame.extend_from_slice(&header);
+            frame.extend_from_slice(&body);
+            crate::protocol::decode_frame(&frame).unwrap()
+        }
+
+        async fn write_frame(writer: &mut (impl AsyncWrite + Unpin), message: &IpcMessage) {
+            let frame = crate::protocol::encode_frame(message).unwrap();
+            writer.write_all(&frame).await.unwrap();
+            writer.flush().await.unwrap();
+        }
+
+        let endpoint = format!(
+            r"\\.\pipe\dsh-selection-companion-unknown-{}",
+            uuid::Uuid::new_v4()
+        );
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&endpoint)
+            .unwrap();
+        let server_task = tokio::spawn(async move {
+            server.connect().await.unwrap();
+            let hello = read_frame(&mut server).await;
+            write_frame(
+                &mut server,
+                &IpcMessage {
+                    protocol: IPC_PROTOCOL_VERSION,
+                    id: hello.id,
+                    type_name: "bridge.hello.result".to_owned(),
+                    payload: serde_json::json!({
+                        "protocol": IPC_PROTOCOL_VERSION,
+                        "server": { "name": "submit-unknown-test", "version": "0.1.0" },
+                        "capabilities": ["session"]
+                    }),
+                },
+            )
+            .await;
+            read_frame(&mut server).await
+        });
+        let runtime = BridgeRuntime {
+            endpoint,
+            request_timeout: std::time::Duration::from_secs(2),
+            inner: Mutex::new(BridgeInner {
+                connected: false,
+                server_version: None,
+                last_error: None,
+                last_latency_ms: None,
+                client: None,
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+        };
+
+        let failure = runtime
+            .submit_prompt(
+                Some("session-unknown".to_owned()),
+                "fixed prompt".to_owned(),
+                "request-unknown".to_owned(),
+            )
+            .await
+            .unwrap_err();
+        let submitted = server_task.await.unwrap();
+
+        assert_eq!(submitted.type_name, "session.submit");
+        assert_eq!(
+            submitted
+                .payload
+                .get("requestId")
+                .and_then(serde_json::Value::as_str),
+            Some("request-unknown")
+        );
+        assert!(failure.starts_with("SUBMISSION_UNKNOWN|session-unknown|request-unknown|"));
+        assert!(!runtime.status().await.connected);
     }
 
     #[tokio::test]

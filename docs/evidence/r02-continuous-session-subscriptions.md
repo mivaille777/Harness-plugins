@@ -4,7 +4,7 @@ Date: 2026-09-07
 
 Repository and branch: `mivaille777/Harness-plugins`, `feat/t05-session-integration`
 
-Verification commit: this document's commit
+Introduced by commit: `c2e685e`
 
 Environment: Windows, Node.js `v24.11.1`, pnpm `11.7.0`, rustc `1.97.1`
 

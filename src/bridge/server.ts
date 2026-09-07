@@ -10,7 +10,7 @@ import {
 import { BridgeMessageRouter } from './router.js'
 import { SelectionCompanionSessionService } from '../session/service.js'
 
-export const DEFAULT_SELECTION_COMPANION_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v1`
+export const DEFAULT_SELECTION_COMPANION_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v2`
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BRIDGE_CLIENTS = 4
 export const DEFAULT_MAX_PENDING_WRITE_BYTES = 4 * 1024 * 1024

@@ -3,7 +3,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
 import { SelectionCompanionSessionService } from '../src/session/service.js'
 
-function setup(now = 10_000) {
+function setup(now: number | (() => number) = 10_000, initialEvents: SessionEvent[] = []) {
   const ctx = new Context()
   const runtime = ctx as unknown as Record<string, unknown>
   const agents = new Map<string, Record<string, unknown>>()
@@ -11,7 +11,7 @@ function setup(now = 10_000) {
   const steer = vi.fn()
   const cancel = vi.fn()
   const makeAgent = (id: string) => ({
-    id: SessionId(id), status: 'idle', session: { events: [] }, followup, steer, cancel,
+    id: SessionId(id), status: 'idle', session: { events: initialEvents }, followup, steer, cancel,
   })
   runtime.agents = {
     get: (id: string) => agents.get(id),
@@ -31,7 +31,10 @@ function setup(now = 10_000) {
     listSessions: async () => [{ header: { id: SessionId('persisted-session') } }],
     readSession: async (id: string) => ({ header: { id }, events: [] }),
   }
-  const service = new SelectionCompanionSessionService(ctx, { now: () => now, submissionRetentionMs: 100 })
+  const service = new SelectionCompanionSessionService(ctx, {
+    now: typeof now === 'function' ? now : () => now,
+    submissionRetentionMs: 100,
+  })
   return { ctx, agents, followup, steer, cancel, service }
 }
 
@@ -43,19 +46,70 @@ describe('SelectionCompanionSessionService', () => {
     expect(id).toMatch(/^selection-companion-/)
   })
 
-  it('records one normal Harness user message and deduplicates its request id', async () => {
+  it('records one normal Harness user message and deduplicates the same request', async () => {
     const { service, followup } = setup()
     const sessionId = await service.create()
-    await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }])
-    await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'must not duplicate' }])
+    const first = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }])
+    const duplicate = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }])
     expect(followup).toHaveBeenCalledTimes(1)
+    expect(duplicate).toEqual(first)
     expect(followup.mock.calls[0]?.[0]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'Explain this fixed selection.' }],
-      source: { kind: 'selection-companion', requestId: 'request-1' },
+      source: {
+        kind: 'selection-companion',
+        requestId: 'request-1',
+        deliveryMode: 'queue',
+        contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
     })
+    await expect(service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'must conflict' }]))
+      .rejects.toThrow('different content or delivery mode')
+    await expect(service.submit(sessionId, 'request-1', 'steer', [{ type: 'text', text: 'Explain this fixed selection.' }]))
+      .rejects.toThrow('different content or delivery mode')
     await expect(service.submit('another-session', 'request-1', 'queue', [{ type: 'text', text: 'x' }]))
       .rejects.toThrow('belongs to another session')
+  })
+
+  it('shares one in-flight submission across concurrent calls', async () => {
+    let now = 1_000
+    const { service, followup } = setup(() => now)
+    const sessionId = await service.create()
+    const content = [{ type: 'text' as const, text: 'One logical submission.' }]
+    const firstPending = service.submit(sessionId, 'request-concurrent', 'queue', content)
+    now += 101
+    const secondPending = service.submit(sessionId, 'request-concurrent', 'queue', content)
+    const [first, second] = await Promise.all([firstPending, secondPending])
+    expect(first).toEqual(second)
+    expect(followup).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers a persisted request receipt after service restart', async () => {
+    const firstRuntime = setup()
+    const sessionId = await firstRuntime.service.create()
+    const accepted = await firstRuntime.service.submit(sessionId, 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }])
+    const message = firstRuntime.followup.mock.calls[0]?.[0]
+    const persisted = [{
+      seq: 1,
+      time: 1,
+      type: 'agent/inbox/spliced',
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    } as SessionEvent]
+    const restarted = setup(20_000, persisted)
+    const duplicate = await restarted.service.submit('persisted-session', 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }])
+    expect(duplicate).toEqual({ ...accepted, duplicate: true })
+    expect(restarted.followup).not.toHaveBeenCalled()
+  })
+
+  it('expires only the in-memory receipt and rechecks durable history', async () => {
+    let now = 1_000
+    const { service, followup } = setup(() => now)
+    const sessionId = await service.create()
+    const content = [{ type: 'text' as const, text: 'Retention fixture.' }]
+    await service.submit(sessionId, 'request-expiring', 'queue', content)
+    now += 101
+    await service.submit(sessionId, 'request-expiring', 'queue', content)
+    expect(followup).toHaveBeenCalledTimes(2)
   })
 
   it('uses the host steering operation only when explicitly requested and cancels a live session', async () => {
@@ -90,7 +144,7 @@ describe('SelectionCompanionSessionService', () => {
 
     expect(received).toEqual([
       { cursor: 1, persistent: true, kind: 'status', data: { status: 'running', turn: 1 } },
-      { cursor: 2, persistent: true, requestId: 'request-race', kind: 'status', data: { status: 'queued', turn: 1 } },
+      { cursor: 2, persistent: true, requestId: 'request-race', requestIds: ['request-race'], kind: 'status', data: { status: 'queued', turn: 1 } },
     ])
     emit('session/event', session, event(3, 'assistant/chunk', {
       turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'live' },

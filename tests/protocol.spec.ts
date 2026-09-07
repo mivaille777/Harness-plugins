@@ -59,17 +59,17 @@ describe('IPC message validation', () => {
 
   it('rejects protocol mismatch before dispatch', () => {
     expect(() => parseIpcMessage({
-      protocol: 2,
+      protocol: 1,
       id: 'hello-2',
       type: 'bridge.ping',
       payload: { sentAt: 1 },
-    })).toThrow('unsupported IPC protocol 2')
+    })).toThrow('unsupported IPC protocol 1; expected 2')
   })
 
   it('rejects unknown message types', () => {
     try {
       parseIpcMessage({
-        protocol: 1,
+        protocol: 2,
         id: 'unknown-1',
         type: 'unknown.method',
         payload: {},
@@ -83,7 +83,7 @@ describe('IPC message validation', () => {
 
   it('rejects unknown selection fields at the IPC boundary', () => {
     expect(() => parseIpcMessage({
-      protocol: 1,
+      protocol: 2,
       id: 'selection-1',
       type: 'selection.update',
       payload: {
@@ -133,9 +133,9 @@ describe('IPC length-prefixed framing', () => {
       .toThrow('declares')
   })
 
-  it('rejects payloads larger than the v1 one-megabyte limit', () => {
+  it('rejects payloads larger than the v2 one-megabyte limit', () => {
     const oversized: IpcMessage = {
-      protocol: 1,
+      protocol: 2,
       id: 'large-1',
       type: 'session.submit',
       payload: {

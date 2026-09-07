@@ -25,9 +25,9 @@ TextPattern.GetSelection()
 SelectionSnapshot
         ↓
 Tauri / Rust Native Companion
-        ↓ Protocol V1
+        ↓ Protocol V2
 Windows Named Pipe
-\\.\pipe\dsh-selection-companion-v1
+\\.\pipe\dsh-selection-companion-v2
         ↓
 dsh-selection-companion Cordis plugin
         ↓
@@ -60,11 +60,11 @@ Completed:
 
 ## Task 3 — versioned TypeScript ↔ Rust IPC
 
-Protocol V1:
+Protocol V2:
 
 ```json
 {
-  "protocol": 1,
+  "protocol": 2,
   "id": "request-id",
   "type": "selection.update",
   "payload": {}
@@ -86,6 +86,12 @@ bridge.hello
 bridge.ping
 selection.update
 selection.current
+session.list
+session.create
+session.submit
+session.subscribe
+session.cancel
+agent.event
 ```
 
 `BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
@@ -301,13 +307,17 @@ pnpm test:bridge
 pnpm test:bridge:integration
 pnpm test:native-ui
 pnpm test:lens
+pnpm test:lens:session
+pnpm test:session
+pnpm test:session:transport
+pnpm test:session:replay
 pnpm test:browser-accessibility
 pnpm test:capture
 cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
 
-The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action now queues one durable Harness user message, creating a session on first use and reusing it for later prompts. The native response stream is not rendered yet; see [session integration](docs/session-integration.md) and [Selection Lens](docs/selection-lens.md) for the current limits.
+The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action queues one durable Harness user message, creating a session on first use and reusing it for later prompts. The Lens subscribes on a dedicated pipe, renders correlated answer text, tracks the host turn terminal state, preserves shared-turn request identities, and offers safe recovery when a submit reply is unknown. See [session integration](docs/session-integration.md) and [Selection Lens](docs/selection-lens.md) for the current limits.
 
 Session checks:
 
@@ -319,7 +329,7 @@ pnpm test:session:e2e
 
 `test:session:e2e` deliberately returns exit code 2 until an isolated `dsh` profile, configured model provider, and Windows named-pipe evidence are supplied.
 
-`pnpm test:bridge:integration` deliberately reports unverified until it exercises the real Node/Rust named-pipe path on Windows. The bridge has bounded request exchanges and client admission; see [bridge transport limits](docs/bridge-transport.md) for its retry and access-control limits.
+`pnpm test:bridge:integration` exercises the production Node transport and compiled Rust probe over a unique Windows Named Pipe. It sends 100 ordered events while ping and submit run on the request pipe, then verifies clients and listeners return to zero. It exits 2 on non-Windows systems. The bridge has bounded request exchanges and client admission; see [bridge transport limits](docs/bridge-transport.md) for its retry and access-control limits.
 
 Rust formatting:
 
@@ -374,7 +384,7 @@ Expected logs include:
 
 ```text
 [selection-companion] plugin loaded!
-selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v1
+selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v2
 ```
 
 ### 3. Start Native Companion
@@ -471,8 +481,10 @@ The optional Browser DOM extension has its own separate checks and is not a Task
 - generic Windows UIA provider for arbitrary desktop applications
 - Word COM provider
 - lazy full-page context expansion
-- multiplexed native response streaming, request-to-turn correlation, and reconnect recovery
 - Agent `selection_current` / `selection_read_context` tools
+- Lens approval / ask-user interaction
+- persisted Lens session selection and complete Harness history navigation
+- real-model session e2e runner and visible Tauri interaction evidence
 - prebuilt Windows installer / binary packaging
 
 ## DeepSeek Harness ecosystem contract

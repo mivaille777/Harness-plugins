@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_errors_remain_protocol_v1_messages() {
+    fn protocol_errors_remain_protocol_v2_messages() {
         let response = protocol_error_response(
             "bad-1".to_owned(),
             ProtocolError::UnknownMessageType("bad.type".to_owned()),

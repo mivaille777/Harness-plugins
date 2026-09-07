@@ -37,7 +37,7 @@
     "test:capture:windows": "node scripts/test-capture-windows.mjs",
     "test:native-ui": "pnpm --dir native test",
     "test:lens": "pnpm --dir native test",
-    "test:lens:session": "pnpm --dir native exec vitest run src/sessionProjection.test.ts src/App.test.tsx",
+    "test:lens:session": "pnpm --dir native exec vitest run src/sessionProjection.test.ts src/App.test.tsx src/api/bridge.test.ts",
     "test:lens:e2e": "node scripts/test-lens-e2e.mjs",
     "test:session": "vitest run tests/session-service.spec.ts tests/bridge-server.spec.ts",
     "test:session:transport": "vitest run tests/session-transport.spec.ts",

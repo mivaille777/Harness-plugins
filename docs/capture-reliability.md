@@ -2,7 +2,7 @@
 
 The native companion keeps at most one unpublished selection. A UI Automation event enters a capacity-one trigger channel, and a capture result replaces the latest unpublished value. The publisher reads that latest value only after the bridge is ready. This policy applies only before a selection is sent to Harness. It never replaces a selection that a user has already submitted to a later session flow.
 
-The native diagnostics surface exposes a capture phase, queue depth, timestamps, error summary, and counters. It does not expose selected text or full URLs. A phase of `noSelection`, `notApplicable`, `excluded`, or `error` is status for the local capture runtime. Protocol V1 has no selection-clear message, so those phases do not delete an immutable snapshot already stored in Harness.
+The native diagnostics surface exposes a capture phase, queue depth, timestamps, error summary, and counters. It does not expose selected text or full URLs. A phase of `noSelection`, `notApplicable`, `excluded`, or `error` is status for the local capture runtime. Protocol V2 has no selection-clear message, so those phases do not delete an immutable snapshot already stored in Harness.
 
 ## Pause and lifecycle
 

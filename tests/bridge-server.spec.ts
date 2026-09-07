@@ -16,7 +16,7 @@ function setup(now = 42_000) {
   const sessions = {
     list: async () => [],
     create: async () => 'session-created',
-    submit: async () => undefined,
+    submit: async () => ({ requestId: 'request-test', messageId: 'message-test', delivery: 'queued' as const, duplicate: false }),
     cancel: () => true,
     subscribe: async () => ({ dispose: () => undefined }),
   }
@@ -29,7 +29,7 @@ function setup(now = 42_000) {
 
 function selectionUpdate() {
   return parseIpcMessage({
-    protocol: 1,
+    protocol: 2,
     id: 'selection-update-1',
     type: 'selection.update',
     payload: {
@@ -68,21 +68,21 @@ describe('BridgeMessageRouter', () => {
     new SelectionContextService(clientContext)
     expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
   })
-  it('negotiates Protocol V1 and advertises session capabilities', async () => {
+  it('negotiates Protocol V2 and advertises session capabilities', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 1,
+      protocol: 2,
       id: 'hello-1',
       type: 'bridge.hello',
       payload: {
         client: { name: 'native-test', version: '0.1.0', platform: 'windows' },
-        supportedProtocols: [1],
+        supportedProtocols: [2],
       },
     }))
 
     expect(response.type).toBe('bridge.hello.result')
     if (response.type !== 'bridge.hello.result') throw new Error('unexpected response')
-    expect(response.payload.protocol).toBe(1)
+    expect(response.payload.protocol).toBe(2)
     expect(response.payload.server.version).toBe('0.1.0-test')
     expect(response.payload.capabilities).toEqual(BRIDGE_CAPABILITIES)
   })
@@ -90,7 +90,7 @@ describe('BridgeMessageRouter', () => {
   it('returns a deterministic pong', async () => {
     const { router } = setup(99_999)
     const response = await router.handle(parseIpcMessage({
-      protocol: 1,
+      protocol: 2,
       id: 'ping-1',
       type: 'bridge.ping',
       payload: { sentAt: 12_345 },
@@ -116,7 +116,7 @@ describe('BridgeMessageRouter', () => {
     const { router } = setup()
     await router.handle(selectionUpdate())
     const response = await router.handle(parseIpcMessage({
-      protocol: 1,
+      protocol: 2,
       id: 'current-1',
       type: 'selection.current',
       payload: {},
@@ -128,10 +128,37 @@ describe('BridgeMessageRouter', () => {
     expect(Object.isFrozen(response.payload.snapshot)).toBe(true)
   })
 
-  it('fails closed for Protocol V1 operations that remain unavailable', async () => {
+  it('returns the durable message receipt for a submitted request', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 1,
+      protocol: 2,
+      id: 'submit-transport-1',
+      type: 'session.submit',
+      payload: {
+        sessionId: 'session-1',
+        requestId: 'request-test',
+        mode: 'queue',
+        content: [{ type: 'text', text: 'Explain the fixed material.' }],
+      },
+    }))
+    expect(response).toEqual({
+      protocol: 2,
+      id: 'submit-transport-1',
+      type: 'session.submitted',
+      payload: {
+        accepted: true,
+        requestId: 'request-test',
+        messageId: 'message-test',
+        delivery: 'queued',
+        duplicate: false,
+      },
+    })
+  })
+
+  it('fails closed for Protocol V2 operations that remain unavailable', async () => {
+    const { router } = setup()
+    const response = await router.handle(parseIpcMessage({
+      protocol: 2,
       id: 'session-list-1',
       type: 'selection.expand',
       payload: { snapshotId: 'snapshot-1', scope: 'page' },

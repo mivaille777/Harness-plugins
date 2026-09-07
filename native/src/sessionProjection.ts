@@ -106,12 +106,14 @@ export function projectSessionEvent(
   if (incoming.error !== undefined) {
     return { ...state, phase: 'connection-lost', error: incoming.error }
   }
-  if (incoming.requestId !== active.requestId || incoming.event === undefined) return state
+  const matchesRequest = incoming.requestId === active.requestId || incoming.requestIds?.includes(active.requestId) === true
+  if (!matchesRequest || incoming.event === undefined) return state
   if (incoming.event.data.persistent && state.lastCursor !== null && incoming.event.data.cursor <= state.lastCursor) return state
 
   const next = incoming.event.data.persistent
     ? { ...state, lastCursor: incoming.event.data.cursor }
     : state
+  if (['completed', 'cancelled', 'error'].includes(state.phase)) return next
   switch (incoming.event.kind) {
     case 'assistant-delta': {
       const step = stepValue(incoming.event.data.value)

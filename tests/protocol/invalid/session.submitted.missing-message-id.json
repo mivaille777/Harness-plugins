@@ -1,0 +1,11 @@
+{
+  "protocol": 2,
+  "id": "submit-invalid-1",
+  "type": "session.submitted",
+  "payload": {
+    "accepted": true,
+    "requestId": "request-1",
+    "delivery": "queued",
+    "duplicate": false
+  }
+}

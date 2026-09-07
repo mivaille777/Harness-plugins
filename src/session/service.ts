@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type { AgentEventKind, SessionDeliveryMode, SessionSummary } from '../bridge/protocol.js'
@@ -13,6 +13,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'selection-companion': {
       readonly kind: 'selection-companion'
       readonly requestId: string
+      readonly deliveryMode: SessionDeliveryMode
+      readonly contentDigest: string
     }
   }
 }
@@ -23,6 +25,7 @@ export interface SessionAgentEvent {
   readonly cursor: number
   readonly persistent: boolean
   readonly requestId?: string
+  readonly requestIds?: readonly string[]
   readonly kind: AgentEventKind
   readonly data: unknown
 }
@@ -30,7 +33,7 @@ export interface SessionAgentEvent {
 /** Maps durable selection request messages to their enclosing Harness turn. */
 export class RequestTurnTracker {
   private openTurn: number | undefined
-  private readonly requests = new Map<number, string>()
+  private readonly requests = new Map<number, string[]>()
 
   project(event: SessionEvent): SessionAgentEvent {
     switch (event.type) {
@@ -39,11 +42,14 @@ export class RequestTurnTracker {
         return { cursor: event.seq, persistent: true, kind: 'status', data: { status: 'running', turn: event.data.turn } }
       case 'user/message': {
         if (event.data.source.kind === 'selection-companion' && this.openTurn !== undefined) {
-          this.requests.set(this.openTurn, event.data.source.requestId)
+          const requestIds = this.requests.get(this.openTurn) ?? []
+          if (!requestIds.includes(event.data.source.requestId)) requestIds.push(event.data.source.requestId)
+          this.requests.set(this.openTurn, requestIds)
           return {
             cursor: event.seq,
             persistent: true,
             requestId: event.data.source.requestId,
+            requestIds: [...requestIds],
             kind: 'status',
             data: { status: 'queued', turn: this.openTurn },
           }
@@ -79,8 +85,17 @@ export class RequestTurnTracker {
     kind: AgentEventKind,
     data: unknown,
   ): SessionAgentEvent {
-    const requestId = this.requests.get(turn)
-    return { cursor, persistent: true, ...(requestId === undefined ? {} : { requestId }), kind, data }
+    const requestIds = this.requests.get(turn)
+    return {
+      cursor,
+      persistent: true,
+      ...(requestIds === undefined || requestIds.length === 0 ? {} : {
+        requestIds: [...requestIds],
+        ...(requestIds.length === 1 ? { requestId: requestIds[0] } : {}),
+      }),
+      kind,
+      data,
+    }
   }
 
   private withStep(
@@ -105,7 +120,16 @@ export interface SelectionCompanionSessionOptions {
 
 interface SubmissionReceipt {
   readonly sessionId: string
-  readonly expiresAt: number
+  readonly fingerprint: string
+  expiresAt?: number
+  readonly result: Promise<SessionSubmissionResult>
+}
+
+export interface SessionSubmissionResult {
+  readonly requestId: string
+  readonly messageId: string
+  readonly delivery: 'queued' | 'steered'
+  readonly duplicate: boolean
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -165,22 +189,65 @@ export class SelectionCompanionSessionService extends Service {
     requestId: string,
     mode: SessionDeliveryMode,
     content: readonly ContentBlock[],
-  ): Promise<void> {
+  ): Promise<SessionSubmissionResult> {
     this.expireSubmissions()
+    const fingerprint = submissionFingerprint(mode, content)
     const previous = this.submissions.get(requestId)
     if (previous !== undefined) {
       if (previous.sessionId !== sessionId) throw new Error(`requestId ${requestId} belongs to another session`)
-      return
+      if (previous.fingerprint !== fingerprint) throw new Error(`requestId ${requestId} was submitted with different content or delivery mode`)
+      return previous.result
     }
 
+    const result = this.acceptSubmission(sessionId, requestId, mode, content, fingerprint)
+    const receipt: SubmissionReceipt = {
+      sessionId,
+      fingerprint,
+      result,
+    }
+    this.submissions.set(requestId, receipt)
+    try {
+      const accepted = await result
+      receipt.expiresAt = this.now() + this.submissionRetentionMs
+      return accepted
+    } catch (error) {
+      if (this.submissions.get(requestId) === receipt) this.submissions.delete(requestId)
+      throw error
+    }
+  }
+
+  private async acceptSubmission(
+    sessionId: string,
+    requestId: string,
+    mode: SessionDeliveryMode,
+    content: readonly ContentBlock[],
+    fingerprint: string,
+  ): Promise<SessionSubmissionResult> {
     const agent = await this.resolveAgent(sessionId)
+    const durable = findDurableSubmission(agent.session.events, requestId)
+    if (durable !== undefined) {
+      if (durable.source.contentDigest !== fingerprint || durable.source.deliveryMode !== mode) {
+        throw new Error(`requestId ${requestId} was persisted with different content or delivery mode`)
+      }
+      return {
+        requestId,
+        messageId: String(durable.id),
+        delivery: mode === 'queue' ? 'queued' : 'steered',
+        duplicate: true,
+      }
+    }
     const message = createUserMessage({
       content: [...content],
-      source: { kind: 'selection-companion', requestId },
+      source: { kind: 'selection-companion', requestId, deliveryMode: mode, contentDigest: fingerprint },
     })
     if (mode === 'queue') agent.followup(message)
     else agent.steer(message)
-    this.submissions.set(requestId, { sessionId, expiresAt: this.now() + this.submissionRetentionMs })
+    return {
+      requestId,
+      messageId: String(message.id),
+      delivery: mode === 'queue' ? 'queued' : 'steered',
+      duplicate: false,
+    }
   }
 
   cancel(sessionId: string): boolean {
@@ -284,8 +351,38 @@ export class SelectionCompanionSessionService extends Service {
   private expireSubmissions(): void {
     const now = this.now()
     for (const [id, submission] of this.submissions) {
-      if (submission.expiresAt <= now) this.submissions.delete(id)
+      if (submission.expiresAt !== undefined && submission.expiresAt <= now) this.submissions.delete(id)
     }
   }
 
+}
+
+function submissionFingerprint(mode: SessionDeliveryMode, content: readonly ContentBlock[]): string {
+  return createHash('sha256').update(JSON.stringify({ mode, content })).digest('hex')
+}
+
+interface DurableSelectionMessage extends UserMessage {
+  readonly source: {
+    readonly kind: 'selection-companion'
+    readonly requestId: string
+    readonly deliveryMode: SessionDeliveryMode
+    readonly contentDigest: string
+  }
+}
+
+function isDurableSelectionMessage(message: UserMessage, requestId: string): message is DurableSelectionMessage {
+  return message.source.kind === 'selection-companion' && message.source.requestId === requestId
+}
+
+function findDurableSubmission(events: readonly SessionEvent[], requestId: string): DurableSelectionMessage | undefined {
+  for (const event of events) {
+    if (event.type === 'user/message' && isDurableSelectionMessage(event.data, requestId)) {
+      return event.data
+    }
+    if (event.type === 'agent/inbox/spliced') {
+      const match = event.data.inserted.find(message => isDurableSelectionMessage(message, requestId))
+      if (match !== undefined && isDurableSelectionMessage(match, requestId)) return match
+    }
+  }
+  return undefined
 }

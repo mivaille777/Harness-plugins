@@ -28,7 +28,10 @@ let submitted = 0
 const sessions = {
   async list() { return [] },
   async create() { return 'session-integration' },
-  async submit() { submitted += 1 },
+  async submit() {
+    submitted += 1
+    return { requestId: 'request-integration', messageId: 'message-integration', delivery: 'queued', duplicate: false }
+  },
   cancel() { return true },
   async subscribe(_sessionId, _cursor, listener) {
     listeners.add(listener)

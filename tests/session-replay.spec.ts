@@ -30,6 +30,7 @@ describe('selection companion session replay fixture', () => {
       cursor: 2,
       persistent: true,
       requestId: 'request-4',
+      requestIds: ['request-4'],
       kind: 'status',
       data: { status: 'queued', turn: 4 },
     })
@@ -38,6 +39,7 @@ describe('selection companion session replay fixture', () => {
         cursor: 3,
         persistent: true,
         requestId: 'request-4',
+        requestIds: ['request-4'],
         kind: 'assistant-delta',
         data: { turn: 4, step: 1, value: { type: 'text-delta', index: 0, text: 'first' } },
       })
@@ -46,6 +48,7 @@ describe('selection companion session replay fixture', () => {
         cursor: 4,
         persistent: true,
         requestId: 'request-4',
+        requestIds: ['request-4'],
         kind: 'status',
         data: { status: 'turn-end', turn: 4, reason: { kind: 'completed' } },
       })
@@ -62,8 +65,29 @@ describe('selection companion session replay fixture', () => {
         cursor: 8,
         persistent: true,
         requestId: 'request-5',
+        requestIds: ['request-5'],
         kind: 'assistant-complete',
         data: { turn: 5, step: 1, value: { id: 'answer-5' } },
       })
+  })
+
+  it('keeps every selection request associated with a shared steer turn', () => {
+    const tracker = new RequestTurnTracker()
+    const event = (seq: number, type: string, data: unknown): SessionEvent => (
+      { seq, time: seq, type, data } as SessionEvent
+    )
+    tracker.project(event(1, 'turn/start', { turn: 9 }))
+    tracker.project(event(2, 'user/message', {
+      id: 'message-a', role: 'user', content: [], source: { kind: 'selection-companion', requestId: 'request-a' },
+    }))
+    tracker.project(event(3, 'user/message', {
+      id: 'message-b', role: 'user', content: [], source: { kind: 'selection-companion', requestId: 'request-b' },
+    }))
+    expect(tracker.project(event(4, 'assistant/chunk', {
+      turn: 9, step: 1, chunk: { type: 'text-delta', index: 0, text: 'shared' },
+    }))).toMatchObject({
+      requestIds: ['request-a', 'request-b'],
+      kind: 'assistant-delta',
+    })
   })
 })

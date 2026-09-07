@@ -1,11 +1,12 @@
 {
-  "protocol": 1,
+  "protocol": 2,
   "id": "event-1",
   "type": "agent.event",
   "payload": {
     "sessionId": "session-demo",
     "subscriptionId": "subscription-demo",
     "requestId": "selreq-demo",
+    "requestIds": ["selreq-demo", "selreq-steer"],
     "event": {
       "kind": "assistant-delta",
       "data": {

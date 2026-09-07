@@ -9,14 +9,14 @@ import {
   SelectionContextService,
   type IpcMessage,
 } from '../src/index.js'
-import type { SessionAgentEvent, SessionSubscription } from '../src/session/service.js'
+import type { SessionAgentEvent, SessionSubmissionResult, SessionSubscription } from '../src/session/service.js'
 
 interface TestSessions {
   readonly listeners: Set<(event: SessionAgentEvent) => void>
   readonly disposed: { value: number }
   list(): Promise<readonly []>
   create(): Promise<string>
-  submit(): Promise<void>
+  submit(): Promise<SessionSubmissionResult>
   cancel(): boolean
   subscribe(sessionId: string, cursor: number | undefined, listener: (event: SessionAgentEvent) => void): Promise<SessionSubscription>
 }
@@ -29,7 +29,7 @@ function createSessions(): TestSessions {
     disposed,
     async list() { return [] },
     async create() { return 'session-transport' },
-    async submit() {},
+    async submit() { return { requestId: 'request-test', messageId: 'message-test', delivery: 'queued', duplicate: false } },
     cancel() { return true },
     async subscribe(_sessionId, cursor, listener) {
       listeners.add(listener)
@@ -46,7 +46,7 @@ function createSessions(): TestSessions {
 
 function subscribeMessage(id: string, cursor?: number): IpcMessage {
   return {
-    protocol: 1,
+    protocol: 2,
     id,
     type: 'session.subscribe',
     payload: { sessionId: 'session-transport', ...(cursor === undefined ? {} : { cursor }) },

@@ -2,7 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
-const api = vi.hoisted(() => ({ getCaptureStatus: vi.fn(), getCurrentSelection: vi.fn(), pauseCapture: vi.fn(), resumeCapture: vi.fn(), submitSessionPrompt: vi.fn(), subscribeSession: vi.fn(), cancelSession: vi.fn() }))
+const api = vi.hoisted(() => {
+  class SubmissionUnknownError extends Error {
+    constructor(readonly sessionId: string, readonly requestId: string, message: string) { super(message) }
+  }
+  return { getCaptureStatus: vi.fn(), getCurrentSelection: vi.fn(), pauseCapture: vi.fn(), resumeCapture: vi.fn(), submitSessionPrompt: vi.fn(), subscribeSession: vi.fn(), cancelSession: vi.fn(), SubmissionUnknownError }
+})
 const hide = vi.hoisted(() => vi.fn())
 const eventApi = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: unknown }) => void),
@@ -69,14 +74,72 @@ describe('selection lens', () => {
     const firstSubscription = api.subscribeSession.mock.calls[0]?.[1]
     eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: firstSubscription, requestId: 'request-1', event: { kind: 'assistant-delta', data: { cursor: 3, persistent: true, value: { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'first' } } } } } })
     expect(await screen.findByText('first')).toBeInTheDocument()
+    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: firstSubscription, requestId: 'request-1', event: { kind: 'status', data: { cursor: 4, persistent: true, value: { status: 'turn-end', turn: 1, reason: { kind: 'completed' } } } } } })
+    expect(await screen.findByText('Answer complete')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
     await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(2))
-    expect(api.subscribeSession.mock.calls[1]).toEqual(['session-1', expect.any(String), 3])
+    expect(api.subscribeSession.mock.calls[1]).toEqual(['session-1', expect.any(String), 4])
+    expect(api.submitSessionPrompt.mock.calls[0]?.[2]).not.toBe(api.submitSessionPrompt.mock.calls[1]?.[2])
     const secondSubscription = api.subscribeSession.mock.calls[1]?.[1]
-    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: firstSubscription, requestId: 'request-1', event: { kind: 'assistant-delta', data: { cursor: 4, persistent: true, value: { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'stale' } } } } } })
+    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: firstSubscription, requestId: 'request-1', event: { kind: 'assistant-delta', data: { cursor: 5, persistent: true, value: { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'stale' } } } } } })
     expect(screen.queryByText('stale')).not.toBeInTheDocument()
-    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: secondSubscription, requestId: 'request-2', event: { kind: 'assistant-delta', data: { cursor: 4, persistent: true, value: { turn: 2, step: 1, value: { type: 'text-delta', index: 0, text: 'second' } } } } } })
+    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId: secondSubscription, requestId: 'request-2', event: { kind: 'assistant-delta', data: { cursor: 5, persistent: true, value: { turn: 2, step: 1, value: { type: 'text-delta', index: 0, text: 'second' } } } } } })
     expect(await screen.findByText('second')).toBeInTheDocument()
+  })
+  it('locks duplicate actions before the first submission settles', async () => {
+    let finishSubmit: ((value: { sessionId: string; requestId: string }) => void) | undefined
+    api.submitSessionPrompt.mockImplementationOnce(() => new Promise(resolve => { finishSubmit = resolve }))
+    render(<App />)
+    const explain = await screen.findByRole('button', { name: 'Explain' })
+    fireEvent.click(explain)
+    fireEvent.click(explain)
+    expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)
+    finishSubmit?.({ sessionId: 'session-1', requestId: 'request-1' })
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
+  })
+  it('retries an unknown submission with the same logical request identity', async () => {
+    api.submitSessionPrompt
+      .mockRejectedValueOnce(new api.SubmissionUnknownError('session-recovered', 'request-recovered', 'reply lost'))
+      .mockResolvedValueOnce({ sessionId: 'session-recovered', requestId: 'request-recovered', messageId: 'message-recovered', delivery: 'queued', duplicate: true })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(await screen.findByText('Submission status unknown')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Explain' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Translate' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use latest selection' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
+    await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(2))
+    expect(api.submitSessionPrompt.mock.calls[1]?.[0]).toBe('session-recovered')
+    expect(api.submitSessionPrompt.mock.calls[1]?.[2]).toBe('request-recovered')
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
+  })
+  it('keeps a completed turn when the cancellation reply arrives late', async () => {
+    let finishCancel: ((cancelled: boolean) => void) | undefined
+    api.cancelSession.mockImplementationOnce(() => new Promise(resolve => { finishCancel = resolve }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
+    const subscriptionId = api.subscribeSession.mock.calls[0]?.[1]
+    fireEvent.click(screen.getByRole('button', { name: 'Stop session' }))
+    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId, requestId: 'request-1', event: { kind: 'status', data: { cursor: 5, persistent: true, value: { status: 'turn-end', turn: 1, reason: { kind: 'completed' } } } } } })
+    expect(await screen.findByText('Answer complete')).toBeInTheDocument()
+    finishCancel?.(false)
+    await waitFor(() => expect(screen.queryByText('Request failed')).not.toBeInTheDocument())
+    expect(screen.getByText('Answer complete')).toBeInTheDocument()
+  })
+  it('keeps a completed turn when cancellation rejects after completion', async () => {
+    let rejectCancel: ((error: Error) => void) | undefined
+    api.cancelSession.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectCancel = reject }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
+    const subscriptionId = api.subscribeSession.mock.calls[0]?.[1]
+    fireEvent.click(screen.getByRole('button', { name: 'Stop session' }))
+    eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId, requestId: 'request-1', event: { kind: 'status', data: { cursor: 5, persistent: true, value: { status: 'turn-end', turn: 1, reason: { kind: 'completed' } } } } } })
+    expect(await screen.findByText('Answer complete')).toBeInTheDocument()
+    rejectCancel?.(new Error('cancel reply lost'))
+    await waitFor(() => expect(screen.queryByText('Error: cancel reply lost')).not.toBeInTheDocument())
+    expect(screen.getByText('Answer complete')).toBeInTheDocument()
   })
 })
