@@ -1,6 +1,6 @@
 # DeepSeek Harness 完整交互开发计划
 
-编写日期：2026-09-07。核查基线：Harness-plugins 的 `feat/t05-session-integration`，提交 `1827bff`。本文是后续开发要求，不代表功能已完成或实机测试已通过。
+编写日期：2026-09-07。原始核查基线为 Harness-plugins 的 `feat/t05-session-integration` 提交 `1827bff`；当前已推送执行基线为 `c2e685e`。R03 在工作区中开发，只有完成本节规定的检查并形成证据提交后才能更新执行基线。本文是后续开发要求，不代表未列出证据的功能或实机测试已经通过。
 
 本文是根目录 [harness-plugins task.md](../harness-plugins%20task.md) 中 T05 的详细执行补充，并衔接 T06～T11。有关 T05-A～C 的完成状态、T05-D 的阻塞判断以及后续执行顺序，以本次核查后的本文为准；原任务的隐私、架构及产品目标继续适用。
 
@@ -23,17 +23,18 @@
 
 | 项目 | 核查结果 | 对后续开发的约束 |
 |---|---|---|
-| 会话与 IPC | 已有创建、提交、订阅、取消的基础代码 | 不从头重写；补齐生命周期、并发与错误语义 |
-| T05-A～C | 有已推送实现，但关键异常路径未覆盖 | 状态为“部分实现，待修复和验收” |
+| 会话与 IPC | 已有创建、提交、订阅、取消、连续事件回放和 Native 订阅代次 | 不从头重写；继续补齐请求身份、审批、历史和真实闭环 |
+| T05-A | R02 已通过自动检查和实际 Windows Named Pipe 测试 | 保留真实管道证据；后续协议变化必须重跑受影响的契约与管道测试 |
+| T05-B/C | R01 已完成回答投影自动检查；R03 正在实现请求身份、去重、未知提交恢复和取消竞态 | R03 未形成验证提交前仍是“开发中” |
 | 工具包 | `npm.cmd view @deepseek-ai/dsh-tools@0.1.1-rc.2 version` 返回 `0.1.1-rc.2` | 本地未安装不等于宿主不存在该能力 |
 | Agent 组合 | 已安装 Agent 类型提供 `create/resume` 的 `setup(agentCtx)`，文档明确包含 scoped tools | 先验证同版本工具包与 profile 组合，再判断是否需要宿主修改 |
 | 工具源码 | 本地 Harness `packages/core/tools/src/index.ts` 有作用域 `register` 及 disposer | 本地源码版本为另一版本，不能直接假定与 rc.2 完全兼容 |
-| 回放测试 | 本次运行 2 项通过，其中包含手写 fixture 和投影测试 | 尚不是实际持久化、重启和模型请求的完整回放 |
-| 传输测试 | 本次运行 3 项通过，使用 TCP 和替代会话服务 | 尚不能证明 Rust↔Node 的 Windows Named Pipe 可用 |
-| Native UI 测试 | 本次运行 3 项通过 | 未覆盖回答流、结束原因、重复提交、取消竞态和审批 |
+| 回放测试 | R01/R02 已覆盖回答投影、连续订阅、cursor 和双 session 的无密钥场景 | 尚不是实际持久化、进程重启和真实模型请求的完整回放 |
+| 传输测试 | R02 已用真实 Node 服务与 Rust 客户端在 Windows Named Pipe 连续传递 100 个事件并并发执行请求 | R03 或后续修改提交/回执协议时必须重跑该测试 |
+| Native UI 测试 | R01 已覆盖回答正文、结束原因、连接错误和 listener 生命周期；R03 正在补重复提交、未知提交恢复和取消竞态 | 尚未覆盖真实 Tauri 窗口、审批、历史选择及完整视觉状态 |
 | 真实 session e2e | 脚本无条件输出未实现并退出 2 | 不是凭据检测器；必须开发实际运行器 |
 
-本次发现的具体缺陷：`App.tsx` 把所有带 reason 的状态视为取消，把 step 级 assistant message 视为请求完成，未区分 text-delta 与 reasoning-delta，未用完整 assistant message 补齐重放输出；原生连接错误缺少 requestId，会被 UI 请求过滤丢弃。`service.ts` 先读日志再订阅，存在事件遗漏窗口；一个 turn 只保存一个请求 ID；幂等检查跨越 await，无法防止并发重复请求。`server.ts` 需处理 socket 关闭后才返回的订阅 disposer；Native 需审查订阅替换、断开和清理竞态。
+R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连接错误和 listener 生命周期。R02 已处理历史与实时事件连续性、确认 cursor、订阅代次、背压、异步关闭释放及 Windows 管道验证。当前最高优先级是完成 R03：一个 turn 的多请求归属、并发幂等、持久回执、未知提交安全恢复、全局唯一 ID 和完成/取消竞态仍须以最终测试与证据确认。之后才进入工具、审批、历史和真实模型闭环。
 
 ## 3. 执行顺序、责任与统一规则
 
@@ -41,7 +42,7 @@
 |---|---|---|---|---|---|
 | R01 | P0 | T05-C | 基线 | Lens 事件投影与状态 | 自动检查通过待实测；见 `docs/evidence/r01-lens-session-projection.md` |
 | R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 自动检查与 Windows 管道通过；见 `docs/evidence/r02-continuous-session-subscriptions.md` |
-| R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 待开发 |
+| R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 开发中；实现已起草，待 focused checks、文档、证据提交与推送 |
 | R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 待开发 |
 | R05 | P0 | T05-C/D | R01～R04；可提前核查宿主 API | 审批和 ask-user 交互 | 待开发 |
 | R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 待开发 |
@@ -55,6 +56,38 @@
 协议变更同时修改 TS、Rust、正反例 fixture 和文档；明确新增字段、错误码和版本兼容策略。部署参数通过配置校验，禁止靠测试专用常量代替产品配置。异步资源应有 owner、释放点、断开后的行为及失败时清理证据。
 
 每项开发必须提供：变更目的、修改文件、宿主版本、失败用例、修复后的结果、实际命令及退出码、剩余未验证项。针对功能执行 focused checks；只有集成候选或必要回归才运行任务级聚合。禁止复制历史通过结果作为当前提交证据。
+
+### 3.1 从当前基线到完整交互的交付包
+
+后续 Codex 按下表领取一个边界完整的交付包。每个交付包包含实现、行为测试、协议或用户文档、证据记录和一个可审阅提交。除表中明确允许的准备工作外，下游任务不能以未提交的上游工作区作为依赖。
+
+| 交付包 | 直接目标 | 必须交付 | 最小验证门槛 | 完成后解锁 |
+|---|---|---|---|---|
+| P03 / R03 | 同一逻辑提交只执行一次，并能从持久事实恢复 request/message/turn 关系 | TS/Rust 回执字段、持久来源、共享 Promise 去重、UUID、未知提交安全重试、取消竞态、协议正反例、R03 证据 | `pnpm test:session`、`pnpm test:session:replay`、`pnpm test:lens:session`、`pnpm test:contract`、受影响时 `pnpm test:bridge:integration` | R04 的材料身份；R06 的可靠恢复 |
+| P04 / R04 | Agent 工具只能读取当前执行请求绑定的持久材料 | 同版本 dsh-tools 依赖核查、结构化材料事件、scoped 工具注册、恢复/释放、工具卡片元数据、R04 证据 | 新增 `pnpm test:session:tools`，并运行 replay、typecheck、build、verify:bundle | R05 工具审批；R07 工具真实闭环 |
+| P05 / R05 | Lens 能准确呈现并处理宿主审批与 ask-user 待办 | 能力矩阵、交互 IPC、TS/Rust fixture、决策 UI、重复/过期/断线处理、R05 证据 | 新增 `pnpm test:session:interaction`，并运行 tools、lens:session、protocol | R07 审批真实闭环 |
+| P06 / R06 | 用户能选择、恢复和核对同一 Harness 会话历史 | session.list 接线、新建/切换/恢复、日志重建、草稿/材料隔离、经验证的完整会话入口、R06 证据 | 新增 `pnpm test:session:history`，并运行 replay、lens:session | R07 重启与历史验收 |
+| P07 / R07 | 用真实 dsh profile 和模型证明端到端闭环 | 可失败 e2e 运行器、隔离 DSH_HOME、前置检测、超时清理、真实日志断言、截图/录屏索引、R07 报告 | 运行器自身测试、`pnpm test:session:e2e`、`pnpm check:task5`；真实前置缺失时退出 2 并列出 NOT RUN | “可靠 Harness 交互闭环”里程碑 |
+| P08-A / T06 | 用户可控制材料范围并核查回答来源 | 授权范围、revision 校验、预算/截断、来源 UI、安全渲染、失败降级 | 新增 `pnpm test:context-expansion`，并更新 replay | 可信的上下文扩展 |
+| P08-B / T07 | 完成中文、本地化、可访问性、设计系统与视觉状态 | 类型化设计变量、双主题、键盘/焦点、稳定滚动、响应式布局、错误/空/审批状态视觉基线 | 新增 `pnpm test:ui:a11y`、`pnpm test:ui:visual`，运行 Lens 原生 e2e；人工核查 Narrator、DPI、多屏 | 可日常使用的 Lens 界面 |
+| P08-C / T09 | 证明本地响应性能与被测场景中的“感知增强”效果 | 冻结的评估方法、性能基线、匿名任务数据、正确率/耗时/误触/负荷报告 | 新增 `pnpm test:perf`、`pnpm test:human-factors:fixtures`、`pnpm report:human-factors` | 有限范围的人因结论 |
+| P08-D / T10 | 在干净 Windows 环境完成安装、诊断、升级和卸载 | 安装产物、profile 版本核查、可操作诊断、数据保留/清理规则、安装证据 | 新增 `pnpm test:installer`，执行隔离环境 smoke | 发布候选 |
+| P08-E / T11 | 用同一候选 SHA 汇总发布证据 | 兼容矩阵、已知限制、测试报告、证据索引、发布候选清单 | 新增 `pnpm check:release`；所有必需证据指向同一候选 SHA | 用户授权后的发布操作 |
+
+T08 的 Word、PDF 或其他应用 Provider 是可选并行包。只有用户明确选择目标应用、测试环境和支持范围后才进入首个发布候选；未完成的可选 Provider 不阻塞浏览器闭环，也不能写入支持列表。
+
+### 3.2 单个交付包的 Codex 执行规则
+
+1. 开始前读取当前 `git status`、HEAD、目标章节、相关源码和测试，确认前置任务的证据提交可达；保留用户已有修改。
+2. 先用最小失败用例固定用户可观察行为或跨进程事实，再实现修复。纯类型边界可先写契约 fixture；不能用与实现同源的常量比较代替行为测试。
+3. 修改范围限于该交付包及其必需接口。发现上游 Harness 缺口时，记录准确版本、API 位置、复现用例和最小宿主改动；不能用插件侧猜测或第二套状态源绕过。
+4. 协议变化在同一提交更新 TS、Rust、有效 fixture、无效 fixture、路由、调用方和文档。新增模型可见材料时必须提供 Harness 日志重建测试。
+5. 运行本章节列出的 focused checks。命令失败时先区分产品断言、工具链、环境前置和真实外部服务；不得吞掉失败或把 SKIP 记录为 PASS。
+6. 在 `docs/evidence/` 写本任务证据，记录工作目录、HEAD、未提交状态、工具版本、命令、退出码、测试数量和证据等级。截图必须来自实际运行的软件，并附对应 SHA、场景和窗口/DPI 条件。
+7. 更新本文件和根任务书的状态。状态只能从“开发中”进入“自动检查通过待实测”或“已验收”；缺少真实模型、Windows UI 或真人证据时保留对应 NOT RUN。
+8. 提交前执行 `git diff --check` 并审阅完整差异。推送后比较本地 HEAD 与远端分支 SHA；交接写明下一交付包和仍未满足的前置条件。
+
+每次结束向用户或下一位 Codex 输出：完成的行为、修改文件、接口变化、实际命令和退出码、自动/Windows/真实模型/人工证据等级、未验证项、证据路径、提交 SHA 和下一任务。不得只写“测试通过”或“任务完成”。
 
 ## 4. R01：回答投影与请求状态
 
@@ -351,17 +384,18 @@ pnpm test:lens:e2e
 
 ## 12. 命令可用性与检查策略
 
-以下分类以 `1827bff` 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins-dev-t05`；不要误在 Harness monorepo 中运行插件脚本。
+以下分类以已推送执行基线 `c2e685e` 和当前 package scripts 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins-dev-t05`；不要误在 Harness monorepo 中运行插件脚本。
 
 | 类别 | 命令 | 注意事项 |
 |---|---|---|
-| 已有快速检查 | typecheck、test:session、test:session:replay、test:session:transport、test:protocol、test:bridge | 现有通过不代表新增行为已覆盖 |
-| 已有构建/UI | build、verify:bundle、test:native-ui、`pnpm --dir native build` | UI 测试只覆盖 WebView 组件 |
+| 已有快速检查 | typecheck、test:session、test:session:replay、test:session:transport、test:protocol、test:bridge | R03 完成后重新记录受影响命令；旧通过结果不继承 |
+| 已有构建/UI | build、verify:bundle、test:native-ui、test:lens:session、`pnpm --dir native build` | `test:lens:session` 是 WebView/投影自动测试，不是实际 Tauri 窗口证据 |
 | 已有 Rust | test:rust、`cargo check --manifest-path native/src-tauri/Cargo.toml` | 首次需先生成 native/dist |
 | 已有聚合 | check:task5 | R07 更新其覆盖并记录是否包含新增测试；真实模型不应混进默认无密钥聚合 |
 | 已有占位 | test:session:e2e | 当前无条件 exit 2；R07 改造 |
-| 现有但须核查实际范围 | test:bridge:integration、test:lens:e2e | 不能凭名字当作实机验收 |
-| 拟新增 | test:lens:session、test:session:tools、test:session:interaction、test:session:history、test:context-expansion、test:ui:a11y、test:ui:visual | 实现测试和 script 后才能执行并声称通过 |
+| 已有 Windows 管道集成 | test:bridge:integration | R02 已验证实际 Node/Rust Named Pipe；提交/回执或 Rust bridge 变化后必须重跑 |
+| 已有占位 | test:lens:e2e | 当前无条件退出 2；R07/R08 将其改为真实原生窗口运行器 |
+| 拟新增 | test:session:tools、test:session:interaction、test:session:history、test:context-expansion、test:ui:a11y、test:ui:visual、test:perf、test:human-factors:fixtures、report:human-factors、test:installer、check:release | 实现测试和 script 后才能执行并声称通过 |
 
 对新增能力分别证明成功和失败路径。测试 fixture 使用真实宿主数据结构，涉及 durable event 时覆盖实际投影/存储路径，避免只比较手写常量与同一常量。Windows 管道、真实 Provider 和人工可访问性各自保留专门证据。
 
@@ -369,7 +403,17 @@ pnpm test:lens:e2e
 
 在线 ChatGPT + GitHub 负责需求澄清、协议/文档审查、PR 审阅、测试矩阵和证据核查；它不能根据代码阅读宣称本地 Windows UIA、Named Pipe 或真实模型测试通过。Codex 本地负责实现、构建、原生和宿主集成、实机故障复现及证据采集。
 
-可并行的是职责不同且接口已经冻结的工作：R01 的纯 UI 投影与 R02 的传输测试、R04 的同版本工具 API 核查与 R07 的运行器框架、R05 的交互设计与 R06 的历史入口核查。R03 请求关联和 R04 材料绑定必须共享同一协议决定；不得在不同分支各自创造身份字段。
+可并行的是职责不同且接口已经冻结的工作。当前建议按下表分配在线审查和本地实现；一名开发者同时占用多个工作区时仍需按依赖顺序合入。
+
+| 工作线 | 可立即进行 | 必须等待 | 文件所有权与交付 |
+|---|---|---|---|
+| 本地 Codex：会话主线 | 完成 R03；随后依次完成 R04、R05 | R04 写入材料前等待 R03 身份协议提交；R05 运行工具审批前等待 R04 | `src/session/`、`src/bridge/`、共享协议、工具与交互测试；交付可运行提交和本机证据 |
+| 本地 Codex：UI/历史线 | 基于已提交事件 fixture 设计 R06 页面和 R05/R07 状态占位 | 合入真实提交、审批和历史行为前等待对应协议 | `native/src/`；不得与会话主线同时改同一协议或 App 接线文件 |
+| 本地 Codex：运行器线 | 核查 dsh profile、隔离目录、前置检测和清理设计 | 真实断言等待 R04～R06；真实模型执行等待凭据 | `scripts/test-session-e2e.mjs`、固定网页 fixture、证据模板；不得用模拟路径宣告 L 级通过 |
+| 在线 ChatGPT + GitHub | 审查已推送 SHA 的协议、测试矩阵、HCI 状态和 PR 差异；准备 R05/R08 评审清单 | 无法执行本机 Windows、Tauri、真实模型或凭据测试 | 输出带 base/head SHA 的审查报告，不直接声称本地命令通过 |
+| 实机/人工验收 | 准备非敏感 fixture、DPI/多屏/Narrator 场景和截图命名规则 | 等待对应候选 SHA 可运行 | 只记录实际软件行为；截图、日志和报告都绑定候选 SHA |
+
+R03 请求关联和 R04 材料绑定必须共享同一协议决定；R04 工具身份和 R05 审批身份也必须在合入前联合审查。不得在不同分支各自创造身份字段。
 
 每个实现分支独立 worktree，不共用 DSH_HOME、管道名或测试端口。交接必须包含 base SHA、目标 SHA、修改文件、协议变更、实际执行命令、输出证据和未验证项。合入后的集成负责人验证组合结果；不把两个分支各自的 PASS 当作组合 PASS。本文描述并行组织方式，不要求后续 Codex 自动创建任务或派生代理。
 
@@ -397,7 +441,7 @@ pnpm test:lens:e2e
 ```text
 继续 Harness-plugins 与 DeepSeek Harness 的完整交互开发。先读取根目录 harness-plugins task.md、docs/harness-integration-development-plan.md、当前 AGENTS.md（如有）、package.json 和当前 git 状态，以最新代码为起点，不重置到旧基线。
 
-以 R01～R08 为执行清单。T05-A～C 目前只有部分实现；修复状态投影、订阅漏事件、请求关联和并发幂等后，再完成工具、审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；仍须验证实际发布包与 profile，不能混用另一源码版本 API。
+以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅已通过自动检查和 Windows Named Pipe 验证；R03 正在开发，必须完成 focused checks、证据、提交和远端 SHA 核对后再进入 R04。随后完成工具、审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；仍须验证实际发布包与 profile，不能混用另一源码版本 API。
 
 每项按本文目标、边界、步骤、测试和完成标准交付，优先复用宿主能力。Native 不调用模型，材料和工具结果通过 Harness 日志可重建；网页正文不能修改权限。明确 session 级取消影响，禁止猜测 request/turn 归属或自动重发未知提交。协议变更同步 TS/Rust 与共享 fixture。
 
