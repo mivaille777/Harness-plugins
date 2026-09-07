@@ -39,19 +39,29 @@ export class RequestTurnTracker {
       case 'user/message': {
         if (event.data.source.kind === 'selection-companion' && this.openTurn !== undefined) {
           this.requests.set(this.openTurn, event.data.source.requestId)
+          return {
+            cursor: event.seq,
+            requestId: event.data.source.requestId,
+            kind: 'status',
+            data: { status: 'queued', turn: this.openTurn },
+          }
         }
         return { cursor: event.seq, kind: 'status', data: { type: event.type } }
       }
       case 'assistant/chunk':
-        return this.withTurn(event.seq, event.data.turn, 'assistant-delta', event.data.chunk)
+        return this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-delta', event.data.chunk)
       case 'assistant/message':
-        return this.withTurn(event.seq, event.data.turn, 'assistant-complete', event.data.message)
+        return this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-complete', event.data.message)
       case 'tool/call':
-        return this.withTurn(event.seq, event.data.turn, 'tool-call', event.data)
+        return this.withStep(event.seq, event.data.turn, event.data.step, 'tool-call', event.data)
       case 'tool/result':
-        return this.withTurn(event.seq, event.data.turn, 'tool-result', event.data)
+        return this.withStep(event.seq, event.data.turn, event.data.step, 'tool-result', event.data)
       case 'turn/end': {
-        const result = this.withTurn(event.seq, event.data.turn, 'status', { status: 'idle', reason: event.data.reason })
+        const result = this.withTurn(event.seq, event.data.turn, 'status', {
+          status: 'turn-end',
+          turn: event.data.turn,
+          reason: event.data.reason,
+        })
         this.requests.delete(event.data.turn)
         if (this.openTurn === event.data.turn) this.openTurn = undefined
         return result
@@ -69,6 +79,16 @@ export class RequestTurnTracker {
   ): SessionAgentEvent {
     const requestId = this.requests.get(turn)
     return { cursor, ...(requestId === undefined ? {} : { requestId }), kind, data }
+  }
+
+  private withStep(
+    cursor: number,
+    turn: number,
+    step: number,
+    kind: AgentEventKind,
+    value: unknown,
+  ): SessionAgentEvent {
+    return this.withTurn(cursor, turn, kind, { turn, step, value })
   }
 }
 

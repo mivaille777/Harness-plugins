@@ -27,12 +27,12 @@ The native client opens one dedicated named-pipe connection for each subscribed 
 Its request/reply connection is never read by an event task, so a reply cannot race an `agent.event` frame.
 The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event.
 Replacing a session subscription aborts the earlier reader, and bridge disconnect aborts every active reader.
-The Lens subscribes after each accepted request and renders text only from an event carrying both its active session id and request id. It offers a session-only stop action and preserves its fixed selection and draft while a response arrives. It does not project tool approvals yet.
-Completing the user flow still requires reconnect cursor persistence, approval presentation, and an interactive Windows test.
+The Lens registers its Tauri event listener before subscribing after an accepted request. It renders text only from an event carrying both its active session id and request id, keeps turn and step identity, excludes reasoning and tool-argument deltas, and calibrates each step from its complete assistant message. Only the correlated `turn/end` event determines request completion or cancellation. It offers a session-only stop action and preserves its fixed selection and draft while a response arrives. It does not project tool approvals yet.
+Completing the user flow still requires reconnect cursor persistence, durable deduplication and unknown-submission recovery, approval presentation, and an interactive Windows test.
 
 The published `@deepseek-ai/dsh-tools@0.1.1-rc.2` package exists and the installed Agent API provides creation/resume `setup` for scoped composition. The plugin has not integrated that package or provided `selection_current` and `selection_read_context`; see [session-tools.md](session-tools.md).
 
-The current implementation is not fully verified: replay can miss events between storage reads and listener registration, one turn's request association can be overwritten, and Lens completion/cancellation handling needs correction. [The integration development plan](harness-integration-development-plan.md) defines the remaining fixes, tests, and acceptance criteria; the paragraphs above describe the implemented paths rather than guarantees for those uncovered cases.
+The current implementation is not fully verified: replay can miss events between storage reads and listener registration, one turn's request association can be overwritten, and request identities are not durably deduplicated across restarts. [The integration development plan](harness-integration-development-plan.md) defines the remaining fixes, tests, and acceptance criteria; the paragraphs above describe the implemented paths rather than guarantees for those uncovered cases.
 
 Run the available checks from the repository root:
 
@@ -40,6 +40,7 @@ Run the available checks from the repository root:
 pnpm test:session
 pnpm test:session:replay
 pnpm test:session:transport
+pnpm test:lens:session
 pnpm test:protocol
 pnpm --dir native test
 pnpm --dir native build

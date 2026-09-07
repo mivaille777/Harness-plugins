@@ -2,7 +2,11 @@
 
 The Lens reads `selection.current` through the native bridge and fixes the returned snapshot in its local view. Selecting new browser text does not replace that displayed material until the user chooses **Use latest selection**. The preview names its source and revision so a user can tell which material a session request will use.
 
-Explain, Translate, and Ask send an explicit, fixed-material prompt to one Harness session. The Lens creates the session on its first action and reuses it for later prompts. Selected webpage text is labelled as untrusted reference data. The Lens does not create another LLM client or conversation store. It currently reports the queued request but does not render a response stream; [session integration](session-integration.md) records the remaining transport work.
+Explain, Translate, and Ask send an explicit, fixed-material prompt to one Harness session. The Lens creates the session on its first action and reuses its returned id for later prompts. Selected webpage text is labelled as untrusted reference data. The Lens does not create another LLM client or conversation store.
+
+The Lens projects only events carrying its active session and request ids. It displays `text-delta` content, excludes reasoning and tool-argument streams, and uses a complete assistant message to restore or calibrate one turn/step without duplicating streamed text. A complete assistant message ends a step rather than the request; the correlated `turn/end` reason determines completed, cancelled, limited, interrupted, blocked, or failed state. A session connection error remains visible even when the transport cannot provide a request id.
+
+The request states are idle, submitting, queued, streaming, cancelling, completed, cancelled, error, connection-lost, and submission-unknown. Subscription starts only after the Tauri event listener is ready. A listener that resolves after the view closes is immediately released. Cursor persistence, subscription generations, submission recovery, and durable request deduplication remain R02 and R03 work in the [integration development plan](harness-integration-development-plan.md).
 
 Enter submits a non-empty question, Shift+Enter inserts a line break, and Enter during an IME composition does nothing. Esc and the close button hide the Lens; they do not pause capture or cancel a future session request. Pause capture stays a separate footer action.
 
@@ -10,6 +14,7 @@ The current provider gives an enclosing accessibility-element rectangle, not an 
 
 ~~~powershell
 pnpm test:lens
+pnpm test:lens:session
 pnpm --dir native build
 ~~~
 

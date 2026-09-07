@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { AgentEventKind } from '../../../src/bridge/protocol.js'
 import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
 
 export interface BridgeStatus {
@@ -42,7 +43,7 @@ export interface SessionAgentEvent {
   readonly sessionId: string
   readonly requestId?: string
   readonly event?: {
-    readonly kind: string
+    readonly kind: AgentEventKind
     readonly data: {
       readonly cursor: number
       readonly value: unknown

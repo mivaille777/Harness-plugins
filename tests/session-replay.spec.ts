@@ -24,15 +24,30 @@ describe('selection companion session replay fixture', () => {
     )
 
     tracker.project(event(1, 'turn/start', { turn: 4 }))
-    tracker.project(event(2, 'user/message', {
+    expect(tracker.project(event(2, 'user/message', {
       id: 'message-4', role: 'user', content: [], source: { kind: 'selection-companion', requestId: 'request-4' },
-    }))
-    expect(tracker.project(event(3, 'assistant/chunk', { turn: 4, step: 1, chunk: { type: 'text', text: 'first' } })))
-      .toMatchObject({ requestId: 'request-4', kind: 'assistant-delta' })
+    }))).toEqual({
+      cursor: 2,
+      requestId: 'request-4',
+      kind: 'status',
+      data: { status: 'queued', turn: 4 },
+    })
+    expect(tracker.project(event(3, 'assistant/chunk', { turn: 4, step: 1, chunk: { type: 'text-delta', index: 0, text: 'first' } })))
+      .toEqual({
+        cursor: 3,
+        requestId: 'request-4',
+        kind: 'assistant-delta',
+        data: { turn: 4, step: 1, value: { type: 'text-delta', index: 0, text: 'first' } },
+      })
     expect(tracker.project(event(4, 'turn/end', { turn: 4, reason: { kind: 'completed' } })))
-      .toMatchObject({ requestId: 'request-4', kind: 'status' })
+      .toEqual({
+        cursor: 4,
+        requestId: 'request-4',
+        kind: 'status',
+        data: { status: 'turn-end', turn: 4, reason: { kind: 'completed' } },
+      })
 
-    expect(tracker.project(event(5, 'assistant/chunk', { turn: 4, step: 1, chunk: { type: 'text', text: 'late' } })))
+    expect(tracker.project(event(5, 'assistant/chunk', { turn: 4, step: 1, chunk: { type: 'text-delta', index: 0, text: 'late' } })))
       .not.toHaveProperty('requestId')
 
     tracker.project(event(6, 'turn/start', { turn: 5 }))
@@ -40,6 +55,11 @@ describe('selection companion session replay fixture', () => {
       id: 'message-5', role: 'user', content: [], source: { kind: 'selection-companion', requestId: 'request-5' },
     }))
     expect(tracker.project(event(8, 'assistant/message', { turn: 5, step: 1, message: { id: 'answer-5' } })))
-      .toMatchObject({ requestId: 'request-5', kind: 'assistant-complete' })
+      .toEqual({
+        cursor: 8,
+        requestId: 'request-5',
+        kind: 'assistant-complete',
+        data: { turn: 5, step: 1, value: { id: 'answer-5' } },
+      })
   })
 })
