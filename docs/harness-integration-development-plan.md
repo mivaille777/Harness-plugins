@@ -1,6 +1,6 @@
 # DeepSeek Harness 完整交互开发计划
 
-编写日期：2026-09-07。原始核查基线为 Harness-plugins 的 `feat/t05-session-integration` 提交 `1827bff`；当前已推送执行基线为 `c2e685e`。R03 在工作区中开发，只有完成本节规定的检查并形成证据提交后才能更新执行基线。本文是后续开发要求，不代表未列出证据的功能或实机测试已经通过。
+编写日期：2026-09-07。原始核查基线为 Harness-plugins 的 `feat/t05-session-integration` 提交 `1827bff`；当前执行基线为 R03 提交 `00ccb6a`。本文是后续开发要求，不代表未列出证据的功能或实机测试已经通过。
 
 本文是根目录 [harness-plugins task.md](../harness-plugins%20task.md) 中 T05 的详细执行补充，并衔接 T06～T11。有关 T05-A～C 的完成状态、T05-D 的阻塞判断以及后续执行顺序，以本次核查后的本文为准；原任务的隐私、架构及产品目标继续适用。
 
@@ -25,13 +25,13 @@
 |---|---|---|
 | 会话与 IPC | 已有创建、提交、订阅、取消、连续事件回放和 Native 订阅代次 | 不从头重写；继续补齐请求身份、审批、历史和真实闭环 |
 | T05-A | R02 已通过自动检查和实际 Windows Named Pipe 测试 | 保留真实管道证据；后续协议变化必须重跑受影响的契约与管道测试 |
-| T05-B/C | R01 已完成回答投影自动检查；R03 正在实现请求身份、去重、未知提交恢复和取消竞态 | R03 未形成验证提交前仍是“开发中” |
+| T05-B/C | R01 已完成回答投影自动检查；R03 已完成请求身份、去重、未知提交恢复和取消竞态自动检查及 Windows 管道验证 | 可进入 R04；真实模型与可见窗口仍由 R07 验收 |
 | 工具包 | `npm.cmd view @deepseek-ai/dsh-tools@0.1.1-rc.2 version` 返回 `0.1.1-rc.2` | 本地未安装不等于宿主不存在该能力 |
 | Agent 组合 | 已安装 Agent 类型提供 `create/resume` 的 `setup(agentCtx)`，文档明确包含 scoped tools | 先验证同版本工具包与 profile 组合，再判断是否需要宿主修改 |
 | 工具源码 | 本地 Harness `packages/core/tools/src/index.ts` 有作用域 `register` 及 disposer | 本地源码版本为另一版本，不能直接假定与 rc.2 完全兼容 |
 | 回放测试 | R01/R02 已覆盖回答投影、连续订阅、cursor 和双 session 的无密钥场景 | 尚不是实际持久化、进程重启和真实模型请求的完整回放 |
 | 传输测试 | R02 已用真实 Node 服务与 Rust 客户端在 Windows Named Pipe 连续传递 100 个事件并并发执行请求 | R03 或后续修改提交/回执协议时必须重跑该测试 |
-| Native UI 测试 | R01 已覆盖回答正文、结束原因、连接错误和 listener 生命周期；R03 正在补重复提交、未知提交恢复和取消竞态 | 尚未覆盖真实 Tauri 窗口、审批、历史选择及完整视觉状态 |
+| Native UI 测试 | R01/R03 已覆盖回答正文、结束原因、连接错误、listener 生命周期、重复提交、未知提交恢复和取消竞态 | 尚未覆盖真实 Tauri 窗口、审批、历史选择及完整视觉状态 |
 | 真实 session e2e | 脚本无条件输出未实现并退出 2 | 不是凭据检测器；必须开发实际运行器 |
 
 R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连接错误和 listener 生命周期。R02 已处理历史与实时事件连续性、确认 cursor、订阅代次、背压、异步关闭释放及 Windows 管道验证。当前最高优先级是完成 R03：一个 turn 的多请求归属、并发幂等、持久回执、未知提交安全恢复、全局唯一 ID 和完成/取消竞态仍须以最终测试与证据确认。之后才进入工具、审批、历史和真实模型闭环。
@@ -42,7 +42,7 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 |---|---|---|---|---|---|
 | R01 | P0 | T05-C | 基线 | Lens 事件投影与状态 | 自动检查通过待实测；见 `docs/evidence/r01-lens-session-projection.md` |
 | R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 自动检查与 Windows 管道通过；见 `docs/evidence/r02-continuous-session-subscriptions.md` |
-| R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 开发中；实现已起草，待 focused checks、文档、证据提交与推送 |
+| R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 自动检查与 Windows 管道通过待实测；提交 `00ccb6a`，见 `docs/evidence/r03-request-identity-and-recovery.md` |
 | R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 待开发 |
 | R05 | P0 | T05-C/D | R01～R04；可提前核查宿主 API | 审批和 ask-user 交互 | 待开发 |
 | R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 待开发 |
@@ -384,11 +384,11 @@ pnpm test:lens:e2e
 
 ## 12. 命令可用性与检查策略
 
-以下分类以已推送执行基线 `c2e685e` 和当前 package scripts 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins-dev-t05`；不要误在 Harness monorepo 中运行插件脚本。
+以下分类以执行基线 `00ccb6a` 和当前 package scripts 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins-dev-t05`；不要误在 Harness monorepo 中运行插件脚本。
 
 | 类别 | 命令 | 注意事项 |
 |---|---|---|
-| 已有快速检查 | typecheck、test:session、test:session:replay、test:session:transport、test:protocol、test:bridge | R03 完成后重新记录受影响命令；旧通过结果不继承 |
+| 已有快速检查 | typecheck、test:session、test:session:replay、test:session:transport、test:protocol、test:bridge | 修改请求或协议行为后重新记录受影响命令；旧通过结果不继承 |
 | 已有构建/UI | build、verify:bundle、test:native-ui、test:lens:session、`pnpm --dir native build` | `test:lens:session` 是 WebView/投影自动测试，不是实际 Tauri 窗口证据 |
 | 已有 Rust | test:rust、`cargo check --manifest-path native/src-tauri/Cargo.toml` | 首次需先生成 native/dist |
 | 已有聚合 | check:task5 | R07 更新其覆盖并记录是否包含新增测试；真实模型不应混进默认无密钥聚合 |
@@ -441,7 +441,7 @@ R03 请求关联和 R04 材料绑定必须共享同一协议决定；R04 工具�
 ```text
 继续 Harness-plugins 与 DeepSeek Harness 的完整交互开发。先读取根目录 harness-plugins task.md、docs/harness-integration-development-plan.md、当前 AGENTS.md（如有）、package.json 和当前 git 状态，以最新代码为起点，不重置到旧基线。
 
-以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅已通过自动检查和 Windows Named Pipe 验证；R03 正在开发，必须完成 focused checks、证据、提交和远端 SHA 核对后再进入 R04。随后完成工具、审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；仍须验证实际发布包与 profile，不能混用另一源码版本 API。
+以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅和 R03 的请求生命周期已通过自动检查与 Windows Named Pipe 验证。现在从 R04 开始，依次完成工具、审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；仍须验证实际发布包与 profile，不能混用另一源码版本 API。
 
 每项按本文目标、边界、步骤、测试和完成标准交付，优先复用宿主能力。Native 不调用模型，材料和工具结果通过 Harness 日志可重建；网页正文不能修改权限。明确 session 级取消影响，禁止猜测 request/turn 归属或自动重发未知提交。协议变更同步 TS/Rust 与共享 fixture。
 
