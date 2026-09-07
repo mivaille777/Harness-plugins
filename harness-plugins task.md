@@ -454,7 +454,7 @@ pnpm test:session:e2e
 
 #### T05 后续执行清单与核查修订
 
-**当前执行入口（2026-09-07）。** 后续 Codex 先读 [DeepSeek Harness 完整交互开发计划](docs/harness-integration-development-plan.md)。该文档记录原始核查基线 `1827bff`、当前 R03 执行基线 `00ccb6a`，并逐项规定 R01～R08 的目标、实现方法、修改范围、失败场景、测试命令、验收标准、交付包和提示词。下表保留 T05-A～E 的目标；当前状态、修复顺序及工具能力结论以详细计划为准。
+**当前执行入口（2026-09-07）。** 后续 Codex 先读 [DeepSeek Harness 完整交互开发计划](docs/harness-integration-development-plan.md)。该文档记录原始核查基线 `1827bff`、R03 实现基线 `00ccb6a`，并逐项规定剩余差距 G01～G07、R04～R08 的目标、实现方法、文件边界、失败场景、测试命令、验收标准、交付包和可直接使用的 Codex 提示词。下表保留 T05-A～E 的目标；当前状态、修复顺序及工具能力结论以详细计划为准。
 
 `98b7acf` 已完成 Harness 服务依赖声明、会话创建/恢复、`queue` 与 `steer` 提交、五分钟请求幂等、取消消息、协议层订阅，以及 Lens 的固定材料提交。它没有实现 Native 事件流读取、回答渲染、工具绑定材料、真实模型 e2e。后续必须按以下顺序完成；每项独立提交，不能把“请求已入队”写成“已得到回答”。
 
@@ -472,13 +472,12 @@ pnpm test:session:e2e
 
 | 顺序 | 交付包 | 目标 | 自动测试 | 必须补充的真实证据 |
 |---|---|---|---|---|
-| 1 | R03 请求身份与恢复 | 完成 request/message/turn 持久关联、共享 Promise 去重、UUID、状态未知安全重试和取消竞态 | session、replay、lens:session、contract；bridge/Rust 协议变化时重跑 Windows 管道 | 重复点击不重复执行；提交断线可用同一 request id 恢复；完成后迟到 token 不回退状态 |
-| 2 | R04 会话绑定工具 | scoped 注册 `selection_current`、`selection_read_context`，只读取当前执行请求的持久材料 | 新增 session:tools，加 replay、typecheck、build、verify:bundle | 真实 profile 工具可见；跨 session/新选区不污染；日志能重建工具输入和结果 |
-| 3 | R05 审批与 ask-user | 投影宿主待办并安全答复，不建立第二套审批状态 | 新增 session:interaction，加 tools、lens:session、protocol | 未批准前工具不执行；允许、拒绝、过期、另一客户端已处理均与宿主一致 |
-| 4 | R06 会话与历史 | 新建、选择、切换、重启恢复并打开同一完整 Harness 会话 | 新增 session:history，加 replay、lens:session | Lens 与 Harness 历史一致；重启不静默创建替代会话；草稿和材料不串换 |
-| 5 | R07 真实闭环 | 把 session:e2e 占位脚本改为真实、可失败、可清理的运行器 | 运行器测试、session:e2e、check:task5 | 浏览器选区→回答→追问→工具/审批→完整历史→重启回放；日志、截图和候选 SHA 对齐 |
-| 6 | T06/T07 | 上下文范围、来源、安全渲染、中文、可访问性和高级视觉 | context-expansion、ui:a11y、ui:visual、Lens e2e | Narrator、125%/200% DPI、多屏、窄窗、长回答及完整状态截图 |
-| 7 | T09/T10/T11 | 性能与人因、安装升级卸载、发布候选证据 | perf、human-factors、installer、check:release | 真人任务数据、干净 Windows 安装 smoke、同一候选 SHA 的兼容矩阵与证据索引 |
+| 1 | R04 会话绑定工具 | scoped 注册 `selection_current`、`selection_read_context`，只读取当前执行请求的持久材料 | 新增 session:tools，加 replay、typecheck、build、verify:bundle | 真实 profile 工具可见；跨 session/新选区不污染；日志能重建工具输入和结果 |
+| 2 | R05 审批与 ask-user | 投影宿主待办并安全答复，不建立第二套审批状态 | 新增 session:interaction，加 tools、lens:session、protocol | 未批准前工具不执行；允许、拒绝、过期、另一客户端已处理均与宿主一致 |
+| 3 | R06 会话与历史 | 新建、选择、切换、重启恢复并打开同一完整 Harness 会话 | 新增 session:history，加 replay、lens:session | Lens 与 Harness 历史一致；重启不静默创建替代会话；草稿和材料不串换 |
+| 4 | R07 真实闭环 | 把 session:e2e 占位脚本改为真实、可失败、可清理的运行器 | 运行器测试、session:e2e、check:task5 | 浏览器选区→回答→追问→工具/审批→完整历史→重启回放；日志、截图和候选 SHA 对齐 |
+| 5 | R08.1/R08.2 | 上下文范围、来源、安全渲染、中文、可访问性和高级视觉 | context-expansion、ui:a11y、ui:visual、Lens e2e | Narrator、125%/200% DPI、多屏、窄窗、长回答及完整状态截图 |
+| 6 | R08.3/R08.4/R08.5 | 性能与人因、安装升级卸载、发布候选证据 | perf、human-factors、installer、check:release | 真人任务数据、干净 Windows 安装 smoke、同一候选 SHA 的兼容矩阵与证据索引 |
 
 T08 的 Word、PDF 和其他应用 Provider 是可选交付包。未取得用户指定的目标应用和实际测试环境时保持“待开始”，不阻塞浏览器闭环，也不进入已支持列表。
 
@@ -487,7 +486,7 @@ T08 的 Word、PDF 和其他应用 Provider 是可选交付包。未取得用户
 **下一位 Codex 提示词。**
 
 ```text
-从 feat/t05-session-integration 的当前 HEAD 继续，不重置到旧基线。先读 docs/harness-integration-development-plan.md，依次执行 R01～R08；其中每项均有独立的实现边界、测试与 Codex 提示词。
+从 feat/t05-session-integration 的当前 HEAD 继续，不重置到旧基线。先读 docs/harness-integration-development-plan.md；R01～R03 已完成规定的自动验证，从 R04 开始依次执行 R04～R08。每项均有独立的目标、实现边界、测试、证据门槛与 Codex 提示词。
 R01～R03 已形成投影、订阅和请求生命周期基础。现在从 R04 验证同版本工具包并完成会话绑定材料与 scoped 工具，随后按 R05、R06 完成审批和历史恢复。工具包本地未安装不能作为宿主无能力的依据。只有具体同版本 API 缺口和失败用例才能支持独立宿主修改。
 按 R07 将 test:session:e2e 改为实际运行器，缺少凭据仍可开发框架和负例；真实调用缺前置时明确未验证。更新实际命令、退出码和证据，模拟、TCP、Named Pipe、真实模型及人工验收分别报告。
 ```
