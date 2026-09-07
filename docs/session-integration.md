@@ -30,6 +30,8 @@ Replacing a session subscription aborts the earlier reader, and bridge disconnec
 The Lens subscribes after each accepted request and renders text only from an event carrying both its active session id and request id. It offers a session-only stop action and preserves its fixed selection and draft while a response arrives. It does not project tool approvals yet.
 Completing the user flow still requires reconnect cursor persistence, approval presentation, and an interactive Windows test.
 
+`dsh` `0.1.1-rc.2` does not expose an Agent-scoped tool registration capability in the installed runtime. The companion therefore does not claim to provide `selection_current` or `selection_read_context`; the required host API and safety constraints are documented in [session-tools.md](session-tools.md).
+
 Run the available checks from the repository root:
 
 ```powershell

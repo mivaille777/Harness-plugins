@@ -464,6 +464,8 @@ pnpm test:session:e2e
 | T05-D | 向 Agent 提供会话绑定的选区工具，并保证模型的工具读取不会拿到其他会话的新选区。 | 在 Agent 创建/恢复时将不可变 snapshot 绑定到该 Agent scope；注册审阅后的 `selection_current`/`selection_read_context` 工具。工具只读取该 session 的持久材料；范围扩展留给 T06。使用 Harness 审批与工具结果日志。 | 新增 `pnpm test:session:tools`：跨 session 隔离、快照清除后重放、工具审批、恶意网页文本。 | 真实 profile 中核对工具调用、审批 UI 与 session log 可重建输入。 |
 | T05-E | 取得可审查的真实闭环证据。 | 使用隔离 `DSH_HOME`、已安装的打包 bundle、非敏感固定网页 fixture 和显式配置的模型凭据；不改动用户日常 profile。保存命令、版本、SHA、日志与截图路径，密钥不入库。 | `pnpm test:session:e2e` 仅在 `DEEPSEEK_API_KEY` 和 Windows 环境齐全时执行；前置缺失时必须以明确 skip/exit 2 报告。 | 浏览器选区 → Lens 解释 → 回答 → 追问 → 完整 Harness 会话历史 → 重启后回放；每项记录 PASS/FAIL。 |
 
+**2026-09-07 进度。** T05-A、T05-B、T05-C 已实现并推送至 `feat/t05-session-integration`（`7c37e47`、`e7b933e`、`85784c3`）。T05-D 经已安装的 `dsh` `0.1.1-rc.2` 公开导出核对后阻塞：缺少 Agent 作用域工具注册、宿主审批和持久结果写入 API。详细的最小宿主依赖与禁止替代方案见 `docs/session-tools.md`。T05-E 仍需隔离 profile、Windows 原生链路和显式模型凭据；没有这些证据时，T05 状态保持“开发中”。
+
 **T05 完成门槛。** 只有 T05-A 至 T05-E 都有对应证据，且 `pnpm check:task5`、`pnpm test:session`、`pnpm test:session:replay`、新增会话传输/工具/Lens 测试通过，才可把 T05 状态改为“自动检查通过待实测”或“已验收”。没有真实模型与 Windows 证据时，状态保持“开发中”。
 
 **下一位 Codex 提示词。**
