@@ -16,6 +16,10 @@ path = "src/lib.rs"
 name = "dsh-selection-companion-host"
 path = "src/bin/native_host.rs"
 
+[[bin]]
+name = "dsh-selection-companion-bridge-probe"
+path = "src/bin/bridge_probe.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

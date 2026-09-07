@@ -21,6 +21,7 @@ export const DEFAULT_SUBMISSION_RETENTION_MS = 5 * 60_000
 
 export interface SessionAgentEvent {
   readonly cursor: number
+  readonly persistent: boolean
   readonly requestId?: string
   readonly kind: AgentEventKind
   readonly data: unknown
@@ -35,18 +36,19 @@ export class RequestTurnTracker {
     switch (event.type) {
       case 'turn/start':
         this.openTurn = event.data.turn
-        return { cursor: event.seq, kind: 'status', data: { status: 'running', turn: event.data.turn } }
+        return { cursor: event.seq, persistent: true, kind: 'status', data: { status: 'running', turn: event.data.turn } }
       case 'user/message': {
         if (event.data.source.kind === 'selection-companion' && this.openTurn !== undefined) {
           this.requests.set(this.openTurn, event.data.source.requestId)
           return {
             cursor: event.seq,
+            persistent: true,
             requestId: event.data.source.requestId,
             kind: 'status',
             data: { status: 'queued', turn: this.openTurn },
           }
         }
-        return { cursor: event.seq, kind: 'status', data: { type: event.type } }
+        return { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type } }
       }
       case 'assistant/chunk':
         return this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-delta', event.data.chunk)
@@ -67,7 +69,7 @@ export class RequestTurnTracker {
         return result
       }
       default:
-        return { cursor: event.seq, kind: 'status', data: { type: event.type, data: event.data } }
+        return { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type, data: event.data } }
     }
   }
 
@@ -78,7 +80,7 @@ export class RequestTurnTracker {
     data: unknown,
   ): SessionAgentEvent {
     const requestId = this.requests.get(turn)
-    return { cursor, ...(requestId === undefined ? {} : { requestId }), kind, data }
+    return { cursor, persistent: true, ...(requestId === undefined ? {} : { requestId }), kind, data }
   }
 
   private withStep(
@@ -195,18 +197,75 @@ export class SelectionCompanionSessionService extends Service {
   ): Promise<SessionSubscription> {
     const id = SessionId(sessionId)
     const tracker = new RequestTurnTracker()
-    const snapshot = await this.ctx.sessionQuery.readSession(id)
-    for (const event of snapshot.events) {
-      const projected = tracker.project(event)
-      if (cursor === undefined || event.seq > cursor) listener(projected)
+    const bufferedEvents: SessionEvent[] = []
+    const bufferedStatuses: unknown[] = []
+    let ready = false
+    let disposed = false
+    let lastProjectedSeq: number | undefined
+    let lastDeliveredSeq = cursor
+
+    const dispose = (): void => {
+      if (disposed) return
+      disposed = true
+      stopSessionEvents()
+      stopStatusEvents()
     }
+    const deliverStatus = (status: unknown): void => {
+      if (disposed) return
+      listener({ cursor: lastProjectedSeq ?? 0, persistent: false, kind: 'status', data: { status } })
+    }
+    const projectDurable = (event: SessionEvent): void => {
+      if (disposed || (lastProjectedSeq !== undefined && event.seq <= lastProjectedSeq)) return
+      if (lastProjectedSeq !== undefined && event.seq !== lastProjectedSeq + 1) {
+        listener({
+          cursor: lastProjectedSeq,
+          persistent: false,
+          kind: 'error',
+          data: { code: 'SESSION_SEQUENCE_GAP', expected: lastProjectedSeq + 1, actual: event.seq },
+        })
+        dispose()
+        return
+      }
+      const projected = tracker.project(event)
+      lastProjectedSeq = event.seq
+      if (lastDeliveredSeq === undefined || event.seq > lastDeliveredSeq) {
+        listener(projected)
+        lastDeliveredSeq = event.seq
+      }
+    }
+
     const stopSessionEvents = this.ctx.on('session/event', (session, event) => {
-      if (session.id === id) listener(tracker.project(event))
+      if (session.id !== id || disposed) return
+      if (ready) projectDurable(event)
+      else bufferedEvents.push(event)
     })
     const stopStatusEvents = this.ctx.on('agent/status', ({ agent, status }) => {
-      if (agent.id === id) listener({ cursor: agent.session.events.at(-1)?.seq ?? 0, kind: 'status', data: { status } })
+      if (agent.id !== id || disposed) return
+      if (ready) deliverStatus(status)
+      else bufferedStatuses.push(status)
     })
-    return { dispose: () => { stopSessionEvents(); stopStatusEvents() } }
+
+    try {
+      const snapshot = await this.ctx.sessionQuery.readSession(id)
+      const events = new Map<number, SessionEvent>()
+      for (const event of snapshot.events) events.set(event.seq, event)
+      for (const event of bufferedEvents) events.set(event.seq, event)
+      const ordered = [...events.values()].sort((left, right) => left.seq - right.seq)
+      const highWater = ordered.at(-1)?.seq
+      if (cursor !== undefined && (highWater === undefined ? cursor !== 0 : cursor > highWater)) {
+        throw new RangeError(`session cursor ${cursor} is ahead of durable high-water ${highWater ?? 0}`)
+      }
+      if (cursor !== undefined && ordered.length > 0 && ordered[0]!.seq > cursor + 1) {
+        throw new RangeError(`session history starts at ${ordered[0]!.seq}, after requested cursor ${cursor}`)
+      }
+      for (const event of ordered) projectDurable(event)
+      ready = true
+      for (const status of bufferedStatuses) deliverStatus(status)
+      return { dispose }
+    } catch (error) {
+      dispose()
+      throw error
+    }
   }
 
   private async resolveAgent(sessionId: string): Promise<Agent> {

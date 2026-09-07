@@ -103,10 +103,15 @@ export interface PromptTextPart {
 
 export interface AgentEventPayload {
   readonly sessionId: string
+  readonly subscriptionId: string
   readonly requestId?: string
   readonly event: {
     readonly kind: AgentEventKind
-    readonly data: unknown
+    readonly data: {
+      readonly cursor: number
+      readonly persistent: boolean
+      readonly value: unknown
+    }
   }
 }
 
@@ -138,7 +143,7 @@ export type IpcMessage =
     }>
   | IpcEnvelope<'session.submitted', { readonly accepted: boolean; readonly requestId: string }>
   | IpcEnvelope<'session.subscribe', { readonly sessionId: string; readonly cursor?: number }>
-  | IpcEnvelope<'session.subscribed', { readonly sessionId: string; readonly cursor?: number }>
+  | IpcEnvelope<'session.subscribed', { readonly sessionId: string; readonly subscriptionId: string; readonly cursor?: number }>
   | IpcEnvelope<'session.cancel', { readonly sessionId: string }>
   | IpcEnvelope<'session.cancelled', { readonly sessionId: string; readonly cancelled: boolean }>
   | IpcEnvelope<'agent.event', AgentEventPayload>
@@ -376,8 +381,9 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
     case 'session.submitted':
       return z.object({ accepted: z.boolean(), requestId: nonEmptyString }).strict().parse(payload)
     case 'session.subscribe':
-    case 'session.subscribed':
       return z.object({ sessionId: nonEmptyString, cursor: nonNegativeSafeInteger.optional() }).strict().parse(payload)
+    case 'session.subscribed':
+      return z.object({ sessionId: nonEmptyString, subscriptionId: nonEmptyString, cursor: nonNegativeSafeInteger.optional() }).strict().parse(payload)
     case 'session.cancel':
       return z.object({ sessionId: nonEmptyString }).strict().parse(payload)
     case 'session.cancelled':
@@ -385,8 +391,16 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
     case 'agent.event':
       return z.object({
         sessionId: nonEmptyString,
+        subscriptionId: nonEmptyString,
         requestId: nonEmptyString.optional(),
-        event: z.object({ kind: agentEventKindSchema, data: z.unknown() }).strict(),
+        event: z.object({
+          kind: agentEventKindSchema,
+          data: z.object({
+            cursor: nonNegativeSafeInteger,
+            persistent: z.boolean(),
+            value: z.unknown(),
+          }).strict(),
+        }).strict(),
       }).strict().parse(payload)
     case 'error.response':
       return z.object({

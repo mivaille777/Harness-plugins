@@ -318,6 +318,8 @@ pub struct SessionSubmittedPayload {
 pub struct SessionSubscriptionPayload {
     pub session_id: String,
     #[serde(default)]
+    pub subscription_id: Option<String>,
+    #[serde(default)]
     pub cursor: Option<u64>,
 }
 
@@ -351,6 +353,7 @@ pub enum PromptContentPart {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentEventPayload {
     pub session_id: String,
+    pub subscription_id: String,
     #[serde(default)]
     pub request_id: Option<String>,
     pub event: AgentEvent,
@@ -360,7 +363,15 @@ pub struct AgentEventPayload {
 #[serde(deny_unknown_fields)]
 pub struct AgentEvent {
     pub kind: AgentEventKind,
-    pub data: Value,
+    pub data: AgentEventData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentEventData {
+    pub cursor: u64,
+    pub persistent: bool,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -554,9 +565,20 @@ impl IpcMessage {
                 let payload: SessionSubmittedPayload = typed_payload(&self.payload)?;
                 require_text(&payload.request_id, "requestId")?;
             }
-            "session.subscribe" | "session.subscribed" => {
+            "session.subscribe" => {
                 let payload: SessionSubscriptionPayload = typed_payload(&self.payload)?;
                 require_text(&payload.session_id, "sessionId")?;
+                if let Some(cursor) = payload.cursor {
+                    require_safe_integer(cursor, "cursor")?;
+                }
+            }
+            "session.subscribed" => {
+                let payload: SessionSubscriptionPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
+                require_text(
+                    payload.subscription_id.as_deref().unwrap_or_default(),
+                    "subscriptionId",
+                )?;
                 if let Some(cursor) = payload.cursor {
                     require_safe_integer(cursor, "cursor")?;
                 }
@@ -572,9 +594,11 @@ impl IpcMessage {
             "agent.event" => {
                 let payload: AgentEventPayload = typed_payload(&self.payload)?;
                 require_text(&payload.session_id, "sessionId")?;
+                require_text(&payload.subscription_id, "subscriptionId")?;
                 if let Some(request_id) = &payload.request_id {
                     require_text(request_id, "requestId")?;
                 }
+                require_safe_integer(payload.event.data.cursor, "event.data.cursor")?;
             }
             "error.response" => {
                 let payload: ErrorResponsePayload = typed_payload(&self.payload)?;

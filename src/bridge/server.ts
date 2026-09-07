@@ -13,12 +13,14 @@ import { SelectionCompanionSessionService } from '../session/service.js'
 export const DEFAULT_SELECTION_COMPANION_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v1`
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BRIDGE_CLIENTS = 4
+export const DEFAULT_MAX_PENDING_WRITE_BYTES = 4 * 1024 * 1024
 
 export interface SelectionCompanionBridgeOptions {
   readonly endpoint?: string
   readonly enabled?: boolean
   readonly idleTimeoutMs?: number
   readonly maxClients?: number
+  readonly maxPendingWriteBytes?: number
 }
 
 export interface SelectionCompanionBridgeStatus {
@@ -45,6 +47,7 @@ export class SelectionCompanionBridgeService extends Service {
   private readonly enabledValue: boolean
   private readonly idleTimeoutMs: number
   private readonly maxClients: number
+  private readonly maxPendingWriteBytes: number
   private readonly clients = new Set<Socket>()
   private readonly router: BridgeMessageRouter
   private server: Server | undefined
@@ -59,11 +62,15 @@ export class SelectionCompanionBridgeService extends Service {
       ?? process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE !== '1'
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_BRIDGE_IDLE_TIMEOUT_MS
     this.maxClients = options.maxClients ?? DEFAULT_MAX_BRIDGE_CLIENTS
+    this.maxPendingWriteBytes = options.maxPendingWriteBytes ?? DEFAULT_MAX_PENDING_WRITE_BYTES
     if (!Number.isSafeInteger(this.idleTimeoutMs) || this.idleTimeoutMs <= 0) {
       throw new RangeError('idleTimeoutMs must be a positive safe integer')
     }
     if (!Number.isSafeInteger(this.maxClients) || this.maxClients <= 0) {
       throw new RangeError('maxClients must be a positive safe integer')
+    }
+    if (!Number.isSafeInteger(this.maxPendingWriteBytes) || this.maxPendingWriteBytes <= 0) {
+      throw new RangeError('maxPendingWriteBytes must be a positive safe integer')
     }
     this.router = new BridgeMessageRouter(ctx.selectionContext, ctx.selectionCompanionSessions)
   }
@@ -128,13 +135,26 @@ export class SelectionCompanionBridgeService extends Service {
     socket.setTimeout(this.idleTimeoutMs)
 
     let writes = Promise.resolve()
+    let pendingWriteBytes = 0
+    let closed = false
     const write = (message: IpcMessage): void => {
+      if (closed || socket.destroyed) return
+      const frame = encodeIpcFrame(message)
+      pendingWriteBytes += frame.byteLength
+      if (pendingWriteBytes > this.maxPendingWriteBytes) {
+        socket.destroy(new Error(`selection companion bridge pending writes exceeded ${this.maxPendingWriteBytes} bytes`))
+        return
+      }
       writes = writes.then(() => new Promise<void>((resolve, reject) => {
-        socket.write(encodeIpcFrame(message), error => {
+        if (closed || socket.destroyed) {
+          resolve()
+          return
+        }
+        socket.write(frame, error => {
           if (error == null) resolve()
           else reject(error)
         })
-      }))
+      })).finally(() => { pendingWriteBytes -= frame.byteLength })
       writes.catch(error => { socket.destroy(error) })
     }
 
@@ -148,7 +168,14 @@ export class SelectionCompanionBridgeService extends Service {
           void this.router.handle(message, event => {
             if (responseWritten) write(event)
             else queuedEvents.push(event)
-          }, subscription => subscriptions.push(subscription)).then(response => {
+          }, subscription => {
+            if (closed) subscription.dispose()
+            else {
+              subscriptions.push(subscription)
+              socket.setTimeout(0)
+            }
+          }).then(response => {
+            if (closed) return
             write(response)
             responseWritten = true
             for (const event of queuedEvents) write(event)
@@ -173,6 +200,7 @@ export class SelectionCompanionBridgeService extends Service {
     })
 
     socket.once('close', () => {
+      closed = true
       decoder.reset()
       for (const subscription of subscriptions) subscription.dispose()
       this.clients.delete(socket)

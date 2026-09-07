@@ -5,7 +5,7 @@ use std::env;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::State;
 #[cfg(windows)]
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
@@ -49,7 +49,15 @@ struct BridgeInner {
     #[cfg(windows)]
     client: Option<tokio::net::windows::named_pipe::NamedPipeClient>,
     #[cfg(windows)]
-    subscriptions: HashMap<String, tokio::task::JoinHandle<()>>,
+    subscriptions: HashMap<String, SubscriptionTask>,
+    #[cfg(windows)]
+    subscription_epoch: u64,
+}
+
+#[cfg(windows)]
+struct SubscriptionTask {
+    id: String,
+    handle: tokio::task::JoinHandle<()>,
 }
 
 impl BridgeRuntime {
@@ -79,6 +87,8 @@ impl BridgeRuntime {
                 client: None,
                 #[cfg(windows)]
                 subscriptions: HashMap::new(),
+                #[cfg(windows)]
+                subscription_epoch: 0,
             }),
         })
     }
@@ -195,6 +205,7 @@ impl BridgeRuntime {
         &self,
         app: AppHandle,
         session_id: String,
+        subscription_id: String,
         cursor: Option<u64>,
     ) -> Result<(), String> {
         use tokio::io::AsyncWriteExt;
@@ -204,6 +215,10 @@ impl BridgeRuntime {
         if session_id.trim().is_empty() {
             return Err("session id must not be empty".to_owned());
         }
+        if subscription_id.trim().is_empty() {
+            return Err("subscription id must not be empty".to_owned());
+        }
+        let epoch = self.inner.lock().await.subscription_epoch;
 
         let mut last_error = None;
         let mut client = None;
@@ -237,7 +252,7 @@ impl BridgeRuntime {
         ensure_response_id(&response, &hello_id)?;
         ensure_hello_response(response)?;
 
-        let subscribe_id = request_id("session-subscribe");
+        let subscribe_id = subscription_id.clone();
         let payload = match cursor {
             Some(cursor) => serde_json::json!({ "sessionId": session_id, "cursor": cursor }),
             None => serde_json::json!({ "sessionId": session_id }),
@@ -278,9 +293,22 @@ impl BridgeRuntime {
                 subscribed.type_name
             ));
         }
+        let acknowledged_id = subscribed
+            .payload
+            .get("subscriptionId")
+            .and_then(serde_json::Value::as_str);
+        if acknowledged_id != Some(subscription_id.as_str()) {
+            return Err("session.subscribed response has a different subscriptionId".to_owned());
+        }
 
         let expected_session_id = session_id.clone();
+        let expected_subscription_id = subscription_id.clone();
+        let cleanup_app = app.clone();
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(async move {
+            if start_rx.await.is_err() {
+                return;
+            }
             loop {
                 match read_message_unbounded(&mut client).await {
                     Ok(message) if message.type_name == "agent.event" => {
@@ -294,6 +322,7 @@ impl BridgeRuntime {
                                 "session-agent-event",
                                 serde_json::json!({
                                     "sessionId": expected_session_id,
+                                    "subscriptionId": expected_subscription_id,
                                     "error": "received event for a different session",
                                 }),
                             );
@@ -306,6 +335,7 @@ impl BridgeRuntime {
                             "session-agent-event",
                             serde_json::json!({
                                 "sessionId": expected_session_id,
+                                "subscriptionId": expected_subscription_id,
                                 "error": format!("unexpected subscription frame: {}", message.type_name),
                             }),
                         );
@@ -314,19 +344,52 @@ impl BridgeRuntime {
                     Err(error) => {
                         let _ = app.emit(
                             "session-agent-event",
-                            serde_json::json!({ "sessionId": expected_session_id, "error": error }),
+                            serde_json::json!({
+                                "sessionId": expected_session_id,
+                                "subscriptionId": expected_subscription_id,
+                                "error": error,
+                            }),
                         );
                         break;
                     }
                 }
             }
+            let runtime = cleanup_app.state::<BridgeRuntime>();
+            runtime
+                .remove_subscription(&expected_session_id, &expected_subscription_id)
+                .await;
         });
 
         let mut inner = self.inner.lock().await;
-        if let Some(previous) = inner.subscriptions.insert(session_id, task) {
-            previous.abort();
+        if inner.subscription_epoch != epoch {
+            task.abort();
+            return Err(
+                "bridge disconnected while the session subscription was opening".to_owned(),
+            );
         }
+        if let Some(previous) = inner.subscriptions.insert(
+            session_id,
+            SubscriptionTask {
+                id: subscription_id,
+                handle: task,
+            },
+        ) {
+            previous.handle.abort();
+        }
+        let _ = start_tx.send(());
         Ok(())
+    }
+
+    #[cfg(windows)]
+    async fn remove_subscription(&self, session_id: &str, subscription_id: &str) {
+        let mut inner = self.inner.lock().await;
+        let matches = inner
+            .subscriptions
+            .get(session_id)
+            .is_some_and(|subscription| subscription.id == subscription_id);
+        if matches {
+            inner.subscriptions.remove(session_id);
+        }
     }
 
     #[cfg(not(windows))]
@@ -627,8 +690,9 @@ impl BridgeRuntime {
         #[cfg(windows)]
         {
             inner.client = None;
+            inner.subscription_epoch = inner.subscription_epoch.wrapping_add(1);
             for (_, subscription) in inner.subscriptions.drain() {
-                subscription.abort();
+                subscription.handle.abort();
             }
         }
     }
@@ -679,9 +743,12 @@ pub async fn bridge_subscribe_session(
     state: State<'_, BridgeRuntime>,
     app: AppHandle,
     session_id: String,
+    subscription_id: String,
     cursor: Option<u64>,
 ) -> Result<(), String> {
-    state.subscribe_session(app, session_id, cursor).await
+    state
+        .subscribe_session(app, session_id, subscription_id, cursor)
+        .await
 }
 
 #[tauri::command]

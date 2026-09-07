@@ -28,6 +28,7 @@ describe('selection companion session replay fixture', () => {
       id: 'message-4', role: 'user', content: [], source: { kind: 'selection-companion', requestId: 'request-4' },
     }))).toEqual({
       cursor: 2,
+      persistent: true,
       requestId: 'request-4',
       kind: 'status',
       data: { status: 'queued', turn: 4 },
@@ -35,6 +36,7 @@ describe('selection companion session replay fixture', () => {
     expect(tracker.project(event(3, 'assistant/chunk', { turn: 4, step: 1, chunk: { type: 'text-delta', index: 0, text: 'first' } })))
       .toEqual({
         cursor: 3,
+        persistent: true,
         requestId: 'request-4',
         kind: 'assistant-delta',
         data: { turn: 4, step: 1, value: { type: 'text-delta', index: 0, text: 'first' } },
@@ -42,6 +44,7 @@ describe('selection companion session replay fixture', () => {
     expect(tracker.project(event(4, 'turn/end', { turn: 4, reason: { kind: 'completed' } })))
       .toEqual({
         cursor: 4,
+        persistent: true,
         requestId: 'request-4',
         kind: 'status',
         data: { status: 'turn-end', turn: 4, reason: { kind: 'completed' } },
@@ -57,6 +60,7 @@ describe('selection companion session replay fixture', () => {
     expect(tracker.project(event(8, 'assistant/message', { turn: 5, step: 1, message: { id: 'answer-5' } })))
       .toEqual({
         cursor: 8,
+        persistent: true,
         requestId: 'request-5',
         kind: 'assistant-complete',
         data: { turn: 5, step: 1, value: { id: 'answer-5' } },

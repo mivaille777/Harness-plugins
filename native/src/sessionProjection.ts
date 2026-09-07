@@ -15,6 +15,7 @@ export type RequestPhase =
 export interface ActiveRequest {
   readonly sessionId: string
   readonly requestId: string
+  readonly subscriptionId: string
 }
 
 export interface RequestProjection {
@@ -101,13 +102,16 @@ export function projectSessionEvent(
   incoming: SessionAgentEvent,
 ): RequestProjection {
   if (incoming.sessionId !== active.sessionId) return state
+  if (incoming.subscriptionId !== active.subscriptionId) return state
   if (incoming.error !== undefined) {
     return { ...state, phase: 'connection-lost', error: incoming.error }
   }
   if (incoming.requestId !== active.requestId || incoming.event === undefined) return state
-  if (state.lastCursor !== null && incoming.event.data.cursor <= state.lastCursor) return state
+  if (incoming.event.data.persistent && state.lastCursor !== null && incoming.event.data.cursor <= state.lastCursor) return state
 
-  const next = { ...state, lastCursor: incoming.event.data.cursor }
+  const next = incoming.event.data.persistent
+    ? { ...state, lastCursor: incoming.event.data.cursor }
+    : state
   switch (incoming.event.kind) {
     case 'assistant-delta': {
       const step = stepValue(incoming.event.data.value)

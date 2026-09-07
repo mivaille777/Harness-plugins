@@ -4,11 +4,22 @@
   "type": "agent.event",
   "payload": {
     "sessionId": "session-demo",
+    "subscriptionId": "subscription-demo",
     "requestId": "selreq-demo",
     "event": {
       "kind": "assistant-delta",
       "data": {
-        "text": "The passage argues that..."
+        "cursor": 4,
+        "persistent": true,
+        "value": {
+          "turn": 1,
+          "step": 1,
+          "value": {
+            "type": "text-delta",
+            "index": 0,
+            "text": "The passage argues that..."
+          }
+        }
       }
     }
   }

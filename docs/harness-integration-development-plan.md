@@ -40,7 +40,7 @@
 | 编号 | 优先级 | 对应原任务 | 依赖 | 主要修改范围 | 当前状态 |
 |---|---|---|---|---|---|
 | R01 | P0 | T05-C | 基线 | Lens 事件投影与状态 | 自动检查通过待实测；见 `docs/evidence/r01-lens-session-projection.md` |
-| R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 待开发 |
+| R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 自动检查与 Windows 管道通过；见 `docs/evidence/r02-continuous-session-subscriptions.md` |
 | R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 待开发 |
 | R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 待开发 |
 | R05 | P0 | T05-C/D | R01～R04；可提前核查宿主 API | 审批和 ask-user 交互 | 待开发 |

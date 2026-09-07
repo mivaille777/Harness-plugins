@@ -41,11 +41,13 @@ export interface SessionSubmission {
 /** A durable Harness event delivered over the dedicated session pipe. */
 export interface SessionAgentEvent {
   readonly sessionId: string
+  readonly subscriptionId: string
   readonly requestId?: string
   readonly event?: {
     readonly kind: AgentEventKind
     readonly data: {
       readonly cursor: number
+      readonly persistent: boolean
       readonly value: unknown
     }
   }
@@ -89,8 +91,8 @@ export function submitSessionPrompt(sessionId: string | null, content: string): 
 }
 
 /** Opens a pipe owned solely by the event stream for one Harness session. */
-export function subscribeSession(sessionId: string, cursor?: number): Promise<void> {
-  return invoke<void>('bridge_subscribe_session', { sessionId, cursor })
+export function subscribeSession(sessionId: string, subscriptionId: string, cursor?: number): Promise<void> {
+  return invoke<void>('bridge_subscribe_session', { sessionId, subscriptionId, cursor })
 }
 
 /** Requests the Harness cancellation operation for the selected session only. */

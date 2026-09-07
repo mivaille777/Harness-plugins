@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionAgentEvent } from './api/bridge'
 import { initialRequestProjection, projectSessionEvent, type RequestProjection } from './sessionProjection'
 
-const active = { sessionId: 'session-1', requestId: 'request-1' }
+const active = { sessionId: 'session-1', requestId: 'request-1', subscriptionId: 'subscription-1' }
 
 function event(
   cursor: number,
@@ -12,8 +12,9 @@ function event(
 ): SessionAgentEvent {
   return {
     sessionId: 'session-1',
+    subscriptionId: 'subscription-1',
     requestId: 'request-1',
-    event: { kind, data: { cursor, value } },
+    event: { kind, data: { cursor, persistent: true, value } },
     ...overrides,
   }
 }
@@ -95,6 +96,7 @@ describe('projectSessionEvent', () => {
       event(5, 'assistant-delta', { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'duplicate' } }),
       event(6, 'assistant-delta', { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'wrong request' } }, { requestId: 'request-2' }),
       event(7, 'assistant-delta', { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'wrong session' } }, { sessionId: 'session-2' }),
+      event(8, 'assistant-delta', { turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'old subscription' } }, { subscriptionId: 'subscription-0' }),
     ])
     expect(state.answer).toBe('A')
     expect(state.lastCursor).toBe(5)
@@ -103,8 +105,19 @@ describe('projectSessionEvent', () => {
   it('surfaces a session connection failure without a request id', () => {
     const state = projectSessionEvent(initialRequestProjection, active, {
       sessionId: 'session-1',
+      subscriptionId: 'subscription-1',
       error: 'named pipe closed',
     })
     expect(state).toMatchObject({ phase: 'connection-lost', error: 'named pipe closed' })
+  })
+
+  it('does not advance the durable cursor for transient status', () => {
+    const durable = reduce([event(4, 'assistant-delta', {
+      turn: 1, step: 1, value: { type: 'text-delta', index: 0, text: 'A' },
+    })])
+    const transient = projectSessionEvent(durable, active, event(99, 'status', { status: 'running' }, {
+      event: { kind: 'status', data: { cursor: 99, persistent: false, value: { status: 'running' } } },
+    }))
+    expect(transient.lastCursor).toBe(4)
   })
 })

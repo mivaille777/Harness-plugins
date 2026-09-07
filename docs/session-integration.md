@@ -19,20 +19,19 @@ Each submitted message uses the merge-extensible durable source `{ kind: 'select
 The subscription projects a request id only after the persisted `turn/start` and that exact source message establish a turn association.
 It applies that association to chunks, assistant messages, tool events, and `turn/end`, then discards it.
 An event outside that durable association has no request id, so a Lens must ignore it for a selected request instead of assigning it to the most recent submission.
-On reconnect the service reads the whole log to rebuild those associations before replaying only events after the acknowledged cursor.
+On reconnect the service first registers and buffers live session events, reads the durable log to rebuild associations, then merges the snapshot and buffer by sequence before replaying events after the acknowledged cursor. It removes duplicates and reports a sequence gap rather than silently skipping output. Transient agent status does not advance the durable cursor.
 
 The bridge also implements session list, create, submit, subscribe, and cancel messages.
 Subscriptions project durable session events and status events with a session id and cursor.
 The native client opens one dedicated named-pipe connection for each subscribed session.
 Its request/reply connection is never read by an event task, so a reply cannot race an `agent.event` frame.
-The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event.
-Replacing a session subscription aborts the earlier reader, and bridge disconnect aborts every active reader.
+The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event. Each subscription has a caller-generated id carried across JS, Rust, and Node. Replacing a session subscription aborts the earlier reader, stale generations are ignored by the Lens, completed readers remove their handles, and bridge disconnect increments a lifecycle epoch before aborting every active reader.
 The Lens registers its Tauri event listener before subscribing after an accepted request. It renders text only from an event carrying both its active session id and request id, keeps turn and step identity, excludes reasoning and tool-argument deltas, and calibrates each step from its complete assistant message. Only the correlated `turn/end` event determines request completion or cancellation. It offers a session-only stop action and preserves its fixed selection and draft while a response arrives. It does not project tool approvals yet.
 Completing the user flow still requires reconnect cursor persistence, durable deduplication and unknown-submission recovery, approval presentation, and an interactive Windows test.
 
 The published `@deepseek-ai/dsh-tools@0.1.1-rc.2` package exists and the installed Agent API provides creation/resume `setup` for scoped composition. The plugin has not integrated that package or provided `selection_current` and `selection_read_context`; see [session-tools.md](session-tools.md).
 
-The current implementation is not fully verified: replay can miss events between storage reads and listener registration, one turn's request association can be overwritten, and request identities are not durably deduplicated across restarts. [The integration development plan](harness-integration-development-plan.md) defines the remaining fixes, tests, and acceptance criteria; the paragraphs above describe the implemented paths rather than guarantees for those uncovered cases.
+The current implementation is not fully verified: one turn's request association can be overwritten, request identities are not durably deduplicated across restarts, and a submission whose response is lost has no query path. [The integration development plan](harness-integration-development-plan.md) defines the remaining fixes, tests, and acceptance criteria; the paragraphs above describe the implemented paths rather than guarantees for those uncovered cases.
 
 Run the available checks from the repository root:
 

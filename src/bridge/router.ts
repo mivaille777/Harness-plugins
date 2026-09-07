@@ -143,7 +143,11 @@ export class BridgeMessageRouter {
           protocol: IPC_PROTOCOL_VERSION,
           id: message.id,
           type: 'session.subscribed',
-          payload: { sessionId: message.payload.sessionId, ...(message.payload.cursor === undefined ? {} : { cursor: message.payload.cursor }) },
+          payload: {
+            sessionId: message.payload.sessionId,
+            subscriptionId: message.id,
+            ...(message.payload.cursor === undefined ? {} : { cursor: message.payload.cursor }),
+          },
         }
       }
       case 'session.cancel': {
@@ -166,8 +170,9 @@ export class BridgeMessageRouter {
       type: 'agent.event',
       payload: {
         sessionId,
+        subscriptionId: id,
         ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
-        event: { kind: event.kind, data: { cursor: event.cursor, value: event.data } },
+        event: { kind: event.kind, data: { cursor: event.cursor, persistent: event.persistent, value: event.data } },
       },
     }
   }

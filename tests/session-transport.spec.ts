@@ -33,7 +33,7 @@ function createSessions(): TestSessions {
     cancel() { return true },
     async subscribe(_sessionId, cursor, listener) {
       listeners.add(listener)
-      if (cursor !== undefined) listener({ cursor: cursor + 1, kind: 'status', data: { replay: true } })
+      if (cursor !== undefined) listener({ cursor: cursor + 1, persistent: true, kind: 'status', data: { replay: true } })
       return {
         dispose: () => {
           disposed.value += 1
@@ -97,11 +97,18 @@ interface TransportFixture {
   readonly sessions: TestSessions
 }
 
-async function createFixture(idleTimeoutMs = 1_000): Promise<TransportFixture> {
+async function createFixture(
+  idleTimeoutMs = 1_000,
+  sessions = createSessions(),
+  maxPendingWriteBytes?: number,
+): Promise<TransportFixture> {
   const context = new Context()
   new SelectionContextService(context)
-  const sessions = createSessions()
-  const bridge = new SelectionCompanionBridgeService(context, { endpoint: 'test-session-transport', idleTimeoutMs })
+  const bridge = new SelectionCompanionBridgeService(context, {
+    endpoint: 'test-session-transport',
+    idleTimeoutMs,
+    ...(maxPendingWriteBytes === undefined ? {} : { maxPendingWriteBytes }),
+  })
   ;(bridge as unknown as { router: BridgeMessageRouter }).router = new BridgeMessageRouter(
     context.selectionContext,
     sessions,
@@ -142,8 +149,16 @@ describe('session subscription transport', () => {
     socket.write(frame.subarray(3))
 
     const [subscribed, replay] = await received
-    expect(subscribed).toMatchObject({ id: 'subscribe-1', type: 'session.subscribed' })
-    expect(replay).toMatchObject({ id: 'subscribe-1', type: 'agent.event', payload: { sessionId: 'session-transport' } })
+    expect(subscribed).toMatchObject({
+      id: 'subscribe-1',
+      type: 'session.subscribed',
+      payload: { subscriptionId: 'subscribe-1' },
+    })
+    expect(replay).toMatchObject({
+      id: 'subscribe-1',
+      type: 'agent.event',
+      payload: { sessionId: 'session-transport', subscriptionId: 'subscribe-1' },
+    })
     socket.destroy()
   })
 
@@ -180,5 +195,67 @@ describe('session subscription transport', () => {
     const idle = await openClient(fixture.port)
     const closed = new Promise<void>(resolve => idle.once('close', () => resolve()))
     await expect(closed).resolves.toBeUndefined()
+  })
+
+  it('disposes a subscription that resolves after its socket closes', async () => {
+    const sessions = createSessions()
+    let markStarted: (() => void) | undefined
+    let finishSubscribe: (() => void) | undefined
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    sessions.subscribe = async (_sessionId, _cursor, listener) => {
+      sessions.listeners.add(listener)
+      markStarted?.()
+      await new Promise<void>(resolve => { finishSubscribe = resolve })
+      return {
+        dispose: () => {
+          sessions.disposed.value += 1
+          sessions.listeners.delete(listener)
+        },
+      }
+    }
+    const fixture = await createFixture(1_000, sessions)
+    fixtures.push(fixture)
+    const socket = await openClient(fixture.port)
+    socket.write(encodeIpcFrame(subscribeMessage('subscribe-late')))
+    await started
+    socket.destroy()
+    finishSubscribe?.()
+    await vi.waitFor(() => expect(sessions.disposed.value).toBe(1))
+    expect(sessions.listeners.size).toBe(0)
+  })
+
+  it('keeps an acknowledged subscription open beyond the request idle timeout', async () => {
+    const fixture = await createFixture(20)
+    fixtures.push(fixture)
+    const socket = await openClient(fixture.port)
+    const subscribed = readMessages(socket, 1)
+    socket.write(encodeIpcFrame(subscribeMessage('subscribe-long-wait')))
+    await subscribed
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(socket.destroyed).toBe(false)
+
+    const received = readMessages(socket, 1)
+    for (const listener of fixture.sessions.listeners) {
+      listener({ cursor: 1, persistent: true, kind: 'status', data: { status: 'running' } })
+    }
+    await expect(received).resolves.toMatchObject([{
+      type: 'agent.event', payload: { subscriptionId: 'subscribe-long-wait' },
+    }])
+    socket.destroy()
+  })
+
+  it('closes a subscription whose pending write budget is exceeded', async () => {
+    const fixture = await createFixture(1_000, createSessions(), 256)
+    fixtures.push(fixture)
+    const socket = await openClient(fixture.port)
+    const subscribed = readMessages(socket, 1)
+    socket.write(encodeIpcFrame(subscribeMessage('subscribe-backpressure')))
+    await subscribed
+    const closed = new Promise<void>(resolve => socket.once('close', () => resolve()))
+    for (const listener of fixture.sessions.listeners) {
+      listener({ cursor: 1, persistent: true, kind: 'status', data: { detail: 'x'.repeat(512) } })
+    }
+    await closed
+    await vi.waitFor(() => expect(fixture.sessions.disposed.value).toBe(1))
   })
 })
