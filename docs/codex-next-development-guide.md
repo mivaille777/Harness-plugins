@@ -2,7 +2,7 @@
 
 本指南把 [完整交互开发计划](harness-integration-development-plan.md) 和根目录的 [Harness-plugins 任务手册](../harness-plugins%20task.md) 转换为后续 Codex 可以直接执行和审查的工作包。它面向当前 `feat/t05-session-integration` 工作线，覆盖 R04 到可与 DeepSeek Harness 完整交互的 R08。执行者必须以当前工作树、已安装依赖和实际 Harness 版本为准；本文不把计划中的接口或测试结果当作已经实现的事实。
 
-审阅基线：2026-09-08，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器提交为 `3168b23`，环境变量测试稳定性修复为 `eac4d23`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
+审阅基线：2026-09-08，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器远端提交为 `9522081`，环境变量测试稳定性修复远端提交为 `716c07c`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
 
 ## 目录
 

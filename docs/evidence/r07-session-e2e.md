@@ -4,7 +4,7 @@ Date: 2026-09-08
 
 Repository and branch: `mivaille777/Harness-plugins`, `feat/t05-session-integration`
 
-Candidate code SHA tested: `eac4d23` (the runner implementation is in `3168b23`; `eac4d23` additionally serializes Rust bridge environment-variable tests). The evidence document and screenshots are committed afterward; rerun the commands below when selecting a later release candidate.
+Candidate code SHA tested: `716c07c` (the runner implementation is in `9522081`; `716c07c` additionally serializes Rust bridge environment-variable tests). The evidence document and screenshots are committed afterward; rerun the commands below when selecting a later release candidate.
 
 Environment: Windows (`win32`), Node `v24.11.1`, pnpm `11.7.0`, Rust `1.97.1`, installed `dsh` `0.1.1-rc.2`. The process did not contain `DEEPSEEK_API_KEY`, so real-model execution was not authorized or available. The local L1 provider was a loopback deterministic SSE endpoint and used an isolated `DSH_HOME`.
 
