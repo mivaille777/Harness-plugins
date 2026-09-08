@@ -2,6 +2,8 @@
 
 The companion declares `@deepseek-ai/dsh-tools@0.1.1-rc.2` as a peer and uses the matching runtime's Agent `setup(agentCtx)` hook on both create and resume. The setup function registers the two tools through the Agent-scoped `ToolRuntime`; it does not create a process-global selection registry.
 
+The durable-binding rule is recorded in [the selection-material decision](decisions/2026-09-08-session-bound-selection-material.md).
+
 ## Fixed request material
 
 Every Protocol V3 `session.submit` carries a validated `material` object, and the Harness service saves that object in the durable `selection-companion` source of the ordinary user message. The object contains the snapshot identity and revision, capture time, selected text, source, optional document identity, and literal `authorizedScope`, `actualScope`, and `completeness` values of `selection`, `selection`, and `complete`.
@@ -24,7 +26,7 @@ This lookup deliberately does not read `ctx.selectionContext`, Native IPC, a las
 
 ## Acceptance status and verification
 
-R04 source integration is present, but R04 is not accepted by this document. A supported `dsh` profile/model invocation, host-policy behavior, durable tool-result observation, and visible native interaction have not been recorded here. Do not treat a unit or WebView result as evidence of those real paths.
+R04 automated behavior, cross-language checks, and the Windows Node/Rust named-pipe integration test passed for commit `5ec3a8a`; see [R04 evidence](evidence/r04-session-bound-selection-tools.md). A supported `dsh` profile/model invocation, host-policy behavior, durable tool-result observation, visible native interaction, and screenshot have not been recorded. Do not treat unit, fixture, or WebView results as evidence of those real paths.
 
 Run the focused checks from the plugin repository root after changing this surface:
 

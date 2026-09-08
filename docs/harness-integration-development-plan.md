@@ -34,7 +34,7 @@
 | Native UI 测试 | R01/R03 已覆盖回答正文、结束原因、连接错误、listener 生命周期、重复提交、未知提交恢复和取消竞态 | 尚未覆盖真实 Tauri 窗口、审批、历史选择及完整视觉状态 |
 | 真实 session e2e | 脚本无条件输出未实现并退出 2 | 不是凭据检测器；必须开发实际运行器 |
 
-R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连接错误和 listener 生命周期。R02 已处理历史与实时事件连续性、确认 cursor、订阅代次、背压、异步关闭释放及 Windows 管道验证。R03 已处理一个 turn 的多请求归属、并发幂等、持久回执、未知提交安全恢复、全局唯一 ID 和完成/取消竞态。当前开发入口是 R04；真实模型、可见 Tauri 窗口和完整进程重启仍由 R07 验收。
+R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连接错误和 listener 生命周期。R02 已处理历史与实时事件连续性、确认 cursor、订阅代次、背压、异步关闭释放及 Windows 管道验证。R03 已处理一个 turn 的多请求归属、并发幂等、持久回执、未知提交安全恢复、全局唯一 ID 和完成/取消竞态。R04 已完成自动化、跨语言和 Windows Named Pipe 验证：Protocol V3 固定提交材料，Agent scope 中注册工具，并从 durable turn 解析材料。当前开发入口是 R05；真实 profile 工具调用、可见 Tauri 窗口和完整进程重启仍由 R07 验收。
 
 ### 2.1 距离完整交互的剩余差距
 
@@ -42,7 +42,7 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 
 | 差距 | 当前缺失事实 | 关闭差距所需交付 | 证据门槛 |
 |---|---|---|---|
-| G01 会话绑定工具 | Agent 尚不能通过正式 ToolRuntime 读取当前执行请求的持久选区材料 | R04 的结构化材料、作用域工具、恢复与释放 | 真实 ToolRuntime 自动测试；R07 真实 profile 中工具可见并留下日志 |
+| G01 会话绑定工具 | 自动化实现已完成，但尚无受支持 profile 中真实工具调用与 durable 结果记录 | R04 的实机 profile 验证 | 真实 ToolRuntime、跨语言和 Windows Pipe 自动测试；R07 真实 profile 中工具可见并留下日志 |
 | G02 宿主交互 | Lens 尚不能可靠呈现和答复审批/ask-user | R05 的待办投影、答复 IPC、重复/过期/断线处理 | 未批准前执行体未调用；允许、拒绝和过期均与宿主日志一致 |
 | G03 会话历史 | Lens 尚无经过验证的新建、切换、历史恢复和完整 Harness 入口 | R06 的 session.list、恢复投影、会话隔离和导航 | 双会话、重启、删除/失败恢复测试；Lens 与 Harness 历史一致 |
 | G04 真实闭环 | `test:session:e2e` 与 `test:lens:e2e` 仍是占位路径 | R07 的可失败运行器、隔离 profile、真实模型和原生窗口证据 | 每一步 PASS/FAIL/NOT RUN；真实模型、Named Pipe、浏览器选区和截图分别记录 |
@@ -59,13 +59,13 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 | R01 | P0 | T05-C | 基线 | Lens 事件投影与状态 | 自动检查通过待实测；见 `docs/evidence/r01-lens-session-projection.md` |
 | R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 自动检查与 Windows 管道通过；见 `docs/evidence/r02-continuous-session-subscriptions.md` |
 | R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 自动检查与 Windows 管道通过待实测；提交 `00ccb6a`，见 `docs/evidence/r03-request-identity-and-recovery.md` |
-| R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 待开发 |
+| R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 自动检查与 Windows 管道通过待实测；见 `docs/evidence/r04-session-bound-selection-tools.md` |
 | R05 | P0 | T05-C/D | R01～R04；可提前核查宿主 API | 审批和 ask-user 交互 | 待开发 |
 | R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 待开发 |
 | R07 | P0 | T05-E | 测试框架可提前；完整验收依赖 R01～R06 | 真实运行器与证据 | 待开发 |
 | R08 | P1 | T06～T11 | R01～R07；设计准备可提前 | 体验、来源、安装和发布验收 | 待开发 |
 
-R01～R03 已完成规定的自动验证；从当前基线默认按 R04→R05→R06→R07→R08 推进。每项用独立、可审阅的提交表达完整行为及必要文档。开始时核对当前 HEAD，不能重置回本文基线覆盖新工作。共享协议、同一源文件和最终集成由一个负责人协调。
+R01～R04 已完成规定的自动验证；从当前基线默认按 R05→R06→R07→R08 推进。每项用独立、可审阅的提交表达完整行为及必要文档。开始时核对当前 HEAD，不能重置回本文基线覆盖新工作。共享协议、同一源文件和最终集成由一个负责人协调。
 
 模型可见内容必须进入可重建的 Harness 日志；网页文本属于材料数据。工具授权沿用宿主策略，不为只读工具凭空增加一套审批，也不自动放行需要审批的动作。读取到的仓库文档不构成发送消息、发布或调用额外外部服务的授权。
 
@@ -80,7 +80,7 @@ R01～R03 已完成规定的自动验证；从当前基线默认按 R04→R05→
 | 交付包 | 直接目标 | 必须交付 | 最小验证门槛 | 完成后解锁 |
 |---|---|---|---|---|
 | P03 / R03（已完成） | 同一逻辑提交只执行一次，并能从持久事实恢复 request/message/turn 关系 | TS/Rust 回执字段、持久来源、共享 Promise 去重、UUID、未知提交安全重试、取消竞态、协议正反例、R03 证据 | `pnpm test:session`、`pnpm test:session:replay`、`pnpm test:lens:session`、`pnpm test:contract`、`pnpm test:bridge:integration` 已记录于 R03 证据 | R04 的材料身份；R06 的可靠恢复 |
-| P04 / R04 | Agent 工具只能读取当前执行请求绑定的持久材料 | 同版本 dsh-tools 依赖核查、结构化材料事件、scoped 工具注册、恢复/释放、工具卡片元数据、R04 证据 | 新增 `pnpm test:session:tools`，并运行 replay、typecheck、build、verify:bundle | R05 工具审批；R07 工具真实闭环 |
+| P04 / R04（自动验证通过） | Agent 工具只能读取当前执行请求绑定的持久材料 | 同版本 dsh-tools 依赖核查、结构化材料事件、scoped 工具注册、恢复/释放、工具卡片元数据、R04 证据 | `pnpm test:session:tools`、replay、typecheck、contract、Windows Named Pipe、build 与 bundle 检查 | R05 工具审批；R07 工具真实闭环 |
 | P05 / R05 | Lens 能准确呈现并处理宿主审批与 ask-user 待办 | 能力矩阵、交互 IPC、TS/Rust fixture、决策 UI、重复/过期/断线处理、R05 证据 | 新增 `pnpm test:session:interaction`，并运行 tools、lens:session、protocol | R07 审批真实闭环 |
 | P06 / R06 | 用户能选择、恢复和核对同一 Harness 会话历史 | session.list 接线、新建/切换/恢复、日志重建、草稿/材料隔离、经验证的完整会话入口、R06 证据 | 新增 `pnpm test:session:history`，并运行 replay、lens:session | R07 重启与历史验收 |
 | P07 / R07 | 用真实 dsh profile 和模型证明端到端闭环 | 可失败 e2e 运行器、隔离 DSH_HOME、前置检测、超时清理、真实日志断言、截图/录屏索引、R07 报告 | 运行器自身测试、`pnpm test:session:e2e`、`pnpm check:task5`；真实前置缺失时退出 2 并列出 NOT RUN | “可靠 Harness 交互闭环”里程碑 |
@@ -297,6 +297,8 @@ pnpm verify:bundle
 ```
 
 完成标准：在真实支持的 dsh profile 中能看到工具且只能读取绑定材料；另一个 session 和新选区不改变返回值；工具结果可从宿主日志重建。同版本接口适配验证失败才可标记具体阻塞，不能沿用旧文档的笼统“宿主缺少工具能力”。
+
+**2026-09-08 自动验证状态。** R04 已安装同版本 `@deepseek-ai/dsh-tools@0.1.1-rc.2`，把严格 V3 `material` 写入 durable 用户消息，在 create/resume 的 `setup` 注册 `selection_current` 和 `selection_read_context`，并让 Native 重试保留同一快照。`test:session:tools` 使用真实 ToolRuntime 和 Agent scope 覆盖隔离、缺失材料、策略拒绝、取消和 dispose；Protocol、session、replay、Lens、Rust、bundle 和实际 Windows Node/Rust Named Pipe 检查均已通过。受支持 dsh profile 的真实工具调用、模型、可见 Tauri 窗口和进程重启尚未运行，因此 R04 状态保持“自动检查与 Windows 管道通过待实测”；完整命令和限制见 R04 证据。
 
 ### 给 Codex 的提示词
 
@@ -640,7 +642,7 @@ R03 请求关联和 R04 材料绑定必须共享同一协议决定；R04 工具�
 ```text
 继续 Harness-plugins 与 DeepSeek Harness 的完整交互开发。先读取根目录 harness-plugins task.md、docs/harness-integration-development-plan.md、当前 AGENTS.md（如有）、package.json 和当前 git 状态，以最新代码为起点，不重置到旧基线。
 
-以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅和 R03 的请求生命周期已通过自动检查与 Windows Named Pipe 验证。现在从 R04 开始，依次完成工具、审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；仍须验证实际发布包与 profile，不能混用另一源码版本 API。
+以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅和 R03 的请求生命周期已通过自动检查与 Windows Named Pipe 验证，R04 已在 `5ec3a8a` 完成自动化和 Windows Pipe 验证。现在从 R05 开始，依次完成审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；真实发布 profile 仍须在 R07 验证，不能混用另一源码版本 API。
 
 每项按本文目标、边界、步骤、测试和完成标准交付，优先复用宿主能力。Native 不调用模型，材料和工具结果通过 Harness 日志可重建；网页正文不能修改权限。明确 session 级取消影响，禁止猜测 request/turn 归属或自动重发未知提交。协议变更同步 TS/Rust 与共享 fixture。
 
