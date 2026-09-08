@@ -108,6 +108,15 @@ describe('IPC message validation', () => {
     })).toThrow(IpcProtocolError)
   })
 
+  it('bounds history pages before a request reaches the session service', () => {
+    expect(() => parseIpcMessage({
+      protocol: 3,
+      id: 'history-limit-1',
+      type: 'session.history',
+      payload: { sessionId: 'session-1', limit: 33 },
+    })).toThrow(IpcProtocolError)
+  })
+
   it('normalizes Rust null spellings for absent material fields before durable storage', () => {
     const parsed = parseIpcMessage({
       protocol: 3,

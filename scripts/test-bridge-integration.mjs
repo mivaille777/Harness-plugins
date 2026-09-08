@@ -26,7 +26,26 @@ const listeners = new Set()
 let disposed = 0
 let submitted = 0
 const sessions = {
-  async list() { return [] },
+  async list() {
+    return [{
+      id: 'session-integration',
+      title: 'Integration fixture',
+      status: 'idle',
+      createdAt: 1_725_753_600_000,
+      live: true,
+      persisted: true,
+    }]
+  },
+  async history(sessionId) {
+    return {
+      sessionId,
+      capturedThroughCursor: 2,
+      entries: [
+        { seq: 1, time: 1_000, role: 'user', text: 'Integration question', sourceKind: 'fixture' },
+        { seq: 2, time: 2_000, role: 'assistant', text: 'Integration answer', sourceKind: 'model' },
+      ],
+    }
+  },
   async create() { return 'session-integration' },
   async submit() {
     submitted += 1

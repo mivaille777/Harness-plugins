@@ -1,0 +1,10 @@
+{
+  "protocol": 3,
+  "id": "session-history-1",
+  "type": "session.history",
+  "payload": {
+    "sessionId": "session-demo",
+    "afterCursor": 12,
+    "limit": 32
+  }
+}

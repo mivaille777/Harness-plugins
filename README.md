@@ -88,12 +88,15 @@ bridge.ping
 selection.update
 selection.current
 session.list
+session.history
 session.create
 session.submit
 session.subscribe
 session.cancel
 agent.event
 ```
+
+`session.history` 返回有界 durable history page，并带有原始日志的 `capturedThroughCursor`。Lens 按 `nextCursor` 读取后从该高水位订阅；Native 的 list/create/history 请求复用 request/reply 管道，事件订阅使用独立管道，切换时通过 `bridge_unsubscribe_session` 精确释放旧订阅。
 
 `BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
 

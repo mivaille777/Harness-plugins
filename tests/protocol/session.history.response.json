@@ -1,0 +1,27 @@
+{
+  "protocol": 3,
+  "id": "session-history-1",
+  "type": "session.history.result",
+  "payload": {
+    "sessionId": "session-demo",
+    "nextCursor": 20,
+    "capturedThroughCursor": 42,
+    "entries": [
+      {
+        "seq": 14,
+        "time": 1725753600000,
+        "role": "user",
+        "text": "Explain the fixed passage.",
+        "sourceKind": "selection-companion",
+        "requestId": "selreq-demo"
+      },
+      {
+        "seq": 20,
+        "time": 1725753601000,
+        "role": "assistant",
+        "text": "The passage argues that...",
+        "sourceKind": "model"
+      }
+    ]
+  }
+}

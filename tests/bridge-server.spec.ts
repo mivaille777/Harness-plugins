@@ -15,8 +15,16 @@ function setup(now = 42_000) {
   const ctx = new Context()
   new SelectionContextService(ctx)
   const submit = vi.fn(async (..._args: unknown[]) => ({ requestId: 'request-test', messageId: 'message-test', delivery: 'queued' as const, duplicate: false }))
+  type HistoryFixture = {
+    readonly sessionId: string
+    readonly nextCursor?: number
+    readonly capturedThroughCursor: number
+    readonly entries: readonly { readonly seq: number; readonly time: number; readonly role: 'user' | 'assistant'; readonly text: string }[]
+  }
+  const history = vi.fn(async (sessionId: string, _afterCursor?: number, _limit?: number): Promise<HistoryFixture> => ({ sessionId, capturedThroughCursor: 0, entries: [] }))
   const sessions = {
     list: async () => [],
+    history,
     create: async () => 'session-created',
     submit,
     cancel: () => true,
@@ -26,7 +34,7 @@ function setup(now = 42_000) {
     pluginVersion: '0.1.0-test',
     now: () => now,
   })
-  return { ctx, router, submit }
+  return { ctx, router, submit, sessions }
 }
 
 function selectionUpdate() {
@@ -141,6 +149,27 @@ describe('BridgeMessageRouter', () => {
     if (response.type !== 'selection.current.result') throw new Error('unexpected response')
     expect(response.payload.snapshot?.id).toBe('selection-1')
     expect(Object.isFrozen(response.payload.snapshot)).toBe(true)
+  })
+
+  it('routes a bounded durable history page and keeps its raw cursor fields', async () => {
+    const { router, sessions } = setup()
+    sessions.history.mockImplementation(async (sessionId: string, _afterCursor?: number, _limit?: number) => ({
+      sessionId,
+      nextCursor: 12,
+      capturedThroughCursor: 42,
+      entries: [{ seq: 12, time: 10, role: 'user' as const, text: 'A durable question' }],
+    }))
+    const response = await router.handle(parseIpcMessage({
+      protocol: 3,
+      id: 'history-1',
+      type: 'session.history',
+      payload: { sessionId: 'session-history', afterCursor: 4, limit: 8 },
+    }))
+    expect(sessions.history).toHaveBeenCalledWith('session-history', 4, 8)
+    expect(response).toMatchObject({
+      type: 'session.history.result',
+      payload: { sessionId: 'session-history', nextCursor: 12, capturedThroughCursor: 42 },
+    })
   })
 
   it('returns the durable message receipt for a submitted request', async () => {

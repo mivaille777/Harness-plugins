@@ -1,0 +1,10 @@
+{
+  "protocol": 3,
+  "id": "session-history-invalid-1",
+  "type": "session.history.result",
+  "payload": {
+    "sessionId": "session-demo",
+    "capturedThroughCursor": -1,
+    "entries": []
+  }
+}

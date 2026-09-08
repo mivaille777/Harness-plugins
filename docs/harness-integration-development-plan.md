@@ -61,7 +61,7 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 | R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 自动检查与 Windows 管道通过待实测；提交 `00ccb6a`，见 `docs/evidence/r03-request-identity-and-recovery.md` |
 | R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 自动检查与 Windows 管道通过待实测；见 `docs/evidence/r04-session-bound-selection-tools.md` |
 | R05 | P0 | T05-C/D | R01～R04；H05 发布 API 是插件实现前置 | 审批和 ask-user 交互 | 宿主前置任务 H05 已识别；见 `docs/host-tasks/r05-durable-session-interactions.md` |
-| R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | API 核查完成，可独立开发；见 `docs/evidence/r06-session-history-api-audit.md` |
+| R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 自动实现与聚焦验证完成；见 `docs/evidence/r06-session-history-implementation.md` |
 | R07 | P0 | T05-E | 测试框架可提前；完整验收依赖 R01～R06 | 真实运行器与证据 | 待开发 |
 | R08 | P1 | T06～T11 | R01～R07；设计准备可提前 | 体验、来源、安装和发布验收 | 待开发 |
 
@@ -378,7 +378,7 @@ pnpm test:protocol
 
 1. 接通已有 session.list，显示标题/时间/状态，并为尚不可获得的字段定义真实降级；提供新建和切换操作。
 2. 核对宿主实际支持的完整会话 URL/导航接口，在测试中验证打开目标身份；不得凭猜测构造路径，也不得在 URL 中拼接选区正文或凭据。
-3. 重载时恢复会话身份并从日志构建投影；只保存 cursor 不保存投影时不能跳过重建所需历史，需定义完整快照与 cursor 的一致性策略。
+3. 重载时恢复会话身份并从日志构建投影；历史通过有界页面读取，每页返回原始日志高水位，Native 从该高水位续订。只保存 cursor 不保存投影时不能跳过重建所需历史，需保持历史与 cursor 的一致性。
 4. 草稿和固定材料按 session/request 归属；切换会话中止或忽略旧订阅，但不默认取消宿主任务。
 5. 处理会话删除、无法恢复、当前模型不可用、profile 变化、旧日志版本和重启后待审批；显示明确下一步。
 
@@ -386,7 +386,7 @@ pnpm test:protocol
 
 ### 测试与验收
 
-新增 `pnpm test:session:history`：两会话来回切换、草稿隔离、重载恢复、删除会话、错误恢复、历史全文一致性、游标与重建一致性、完整会话入口和跨会话事件隔离。
+`pnpm test:session:history` 覆盖历史投影、分页读取、冷 session 不 resume、列表状态、无效游标和订阅恢复；Native 的 `pnpm test:lens:session` 覆盖历史合并、命令转发、选择切换、旧代事件隔离和失败状态。双 session 删除、完整 Harness 导航、真实重载和待审批恢复仍归 R07/H05 的实机验收。
 
 | 增量 | 目的与实现 | 该增量的验证 |
 |---|---|---|
@@ -400,9 +400,11 @@ pnpm test:protocol
 pnpm test:session:history
 pnpm test:session:replay
 pnpm test:lens:session
+pnpm test:contract
+pnpm test:bridge:integration
 ```
 
-完成标准：重载后仍看到原会话的正确材料与回答；完整 Harness 历史与 Lens 一致；恢复失败不会静默新建另一个会话替代。
+这些命令证明插件内的历史投影、分页协议、Native 命令和 Windows 管道行为。产品级完成标准仍要求真实 profile 重载后看到原会话的正确材料与回答，并在完整 Harness 历史中核对一致；恢复失败不会静默新建另一个会话替代。
 
 ### 给 Codex 的提示词
 

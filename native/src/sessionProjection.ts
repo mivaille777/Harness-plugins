@@ -1,4 +1,4 @@
-import type { SessionAgentEvent } from './api/bridge'
+import type { SessionAgentEvent, SessionHistoryEntry } from './api/bridge'
 
 export type RequestPhase =
   | 'idle'
@@ -36,6 +36,17 @@ export const initialRequestProjection: RequestProjection = {
   lastCursor: null,
   steps: {},
   stepOrder: [],
+}
+
+/** Merge durable history pages and live entries by their immutable event sequence. */
+export function mergeSessionHistory(
+  current: readonly SessionHistoryEntry[],
+  incoming: readonly SessionHistoryEntry[],
+): readonly SessionHistoryEntry[] {
+  const bySequence = new Map<number, SessionHistoryEntry>()
+  for (const entry of current) bySequence.set(entry.seq, entry)
+  for (const entry of incoming) bySequence.set(entry.seq, entry)
+  return [...bySequence.values()].sort((left, right) => left.seq - right.seq)
 }
 
 interface StepValue {

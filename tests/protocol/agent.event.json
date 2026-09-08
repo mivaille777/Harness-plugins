@@ -7,6 +7,13 @@
     "subscriptionId": "subscription-demo",
     "requestId": "selreq-demo",
     "requestIds": ["selreq-demo", "selreq-steer"],
+    "history": {
+      "seq": 4,
+      "time": 1725753600000,
+      "role": "assistant",
+      "text": "The passage argues that...",
+      "sourceKind": "model"
+    },
     "event": {
       "kind": "assistant-delta",
       "data": {

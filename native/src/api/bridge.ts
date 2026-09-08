@@ -41,6 +41,37 @@ export interface SessionSubmission {
   readonly duplicate: boolean
 }
 
+export interface SessionSummary {
+  readonly id: string
+  readonly title?: string
+  readonly status?: 'idle' | 'running' | 'queued' | 'unknown'
+  readonly createdAt?: number
+  readonly live?: boolean
+  readonly persisted?: boolean
+}
+
+export interface SessionHistoryEntry {
+  readonly seq: number
+  readonly time: number
+  readonly role: 'user' | 'assistant'
+  readonly text: string
+  readonly sourceKind?: string
+  readonly requestId?: string
+}
+
+export interface SessionHistoryPage {
+  readonly sessionId: string
+  readonly nextCursor?: number
+  readonly capturedThroughCursor: number
+  readonly entries: readonly SessionHistoryEntry[]
+}
+
+export interface SessionUnsubscription {
+  readonly sessionId: string
+  readonly subscriptionId: string
+  readonly released: boolean
+}
+
 export class SubmissionUnknownError extends Error {
   constructor(
     readonly sessionId: string,
@@ -58,6 +89,7 @@ export interface SessionAgentEvent {
   readonly subscriptionId: string
   readonly requestId?: string
   readonly requestIds?: readonly string[]
+  readonly history?: SessionHistoryEntry
   readonly event?: {
     readonly kind: AgentEventKind
     readonly data: {
@@ -101,6 +133,31 @@ export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invoke<SelectionSnapshot | null>('bridge_current_selection')
 }
 
+/** Lists live and persisted Harness sessions exposed by the bridge. */
+export function listSessions(): Promise<readonly SessionSummary[]> {
+  return invoke<readonly SessionSummary[]>('bridge_list_sessions')
+}
+
+/** Creates one Harness session through the bridge and returns its identity. */
+export function createSession(cwd?: string): Promise<string> {
+  return cwd === undefined
+    ? invoke<string>('bridge_create_session')
+    : invoke<string>('bridge_create_session', { cwd })
+}
+
+/** Reads one bounded durable history page; callers follow nextCursor to load more. */
+export function readSessionHistory(
+  sessionId: string,
+  afterCursor?: number,
+  limit?: number,
+): Promise<SessionHistoryPage> {
+  return invoke<SessionHistoryPage>('bridge_read_session_history', {
+    sessionId,
+    ...(afterCursor === undefined ? {} : { afterCursor }),
+    ...(limit === undefined ? {} : { limit }),
+  })
+}
+
 export async function submitSessionPrompt(
   sessionId: string | null,
   content: string,
@@ -120,6 +177,11 @@ export async function submitSessionPrompt(
 /** Opens a pipe owned solely by the event stream for one Harness session. */
 export function subscribeSession(sessionId: string, subscriptionId: string, cursor?: number): Promise<void> {
   return invoke<void>('bridge_subscribe_session', { sessionId, subscriptionId, cursor })
+}
+
+/** Releases exactly one dedicated session subscription pipe. */
+export function unsubscribeSession(sessionId: string, subscriptionId: string): Promise<SessionUnsubscription> {
+  return invoke<SessionUnsubscription>('bridge_unsubscribe_session', { sessionId, subscriptionId })
 }
 
 /** Requests the Harness cancellation operation for the selected session only. */

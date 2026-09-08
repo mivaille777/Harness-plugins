@@ -2,6 +2,11 @@ use serde::Serialize;
 #[cfg(windows)]
 use std::collections::HashMap;
 use std::env;
+#[cfg(windows)]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::State;
 #[cfg(windows)]
@@ -12,7 +17,8 @@ const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
 
 use crate::protocol::{
     BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionMaterial,
-    SelectionSnapshot, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
+    SelectionSnapshot, SessionCreatedPayload, SessionHistoryResultPayload,
+    SessionListResultPayload, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +29,14 @@ pub struct SessionSubmission {
     pub message_id: String,
     pub delivery: String,
     pub duplicate: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUnsubscription {
+    pub session_id: String,
+    pub subscription_id: String,
+    pub released: bool,
 }
 
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v3";
@@ -52,15 +66,39 @@ struct BridgeInner {
     #[cfg(windows)]
     client: Option<tokio::net::windows::named_pipe::NamedPipeClient>,
     #[cfg(windows)]
-    subscriptions: HashMap<String, SubscriptionTask>,
+    subscriptions: HashMap<String, SubscriptionSlot>,
     #[cfg(windows)]
     subscription_epoch: u64,
 }
 
 #[cfg(windows)]
-struct SubscriptionTask {
+enum SubscriptionSlot {
+    Opening(OpeningSubscription),
+    Active(ActiveSubscription),
+}
+
+#[cfg(windows)]
+struct OpeningSubscription {
     id: String,
+    generation: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[cfg(windows)]
+struct ActiveSubscription {
+    id: String,
+    generation: u64,
     handle: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(windows)]
+impl SubscriptionSlot {
+    fn id(&self) -> &str {
+        match self {
+            Self::Opening(slot) => &slot.id,
+            Self::Active(slot) => &slot.id,
+        }
+    }
 }
 
 impl BridgeRuntime {
@@ -221,178 +259,319 @@ impl BridgeRuntime {
         if subscription_id.trim().is_empty() {
             return Err("subscription id must not be empty".to_owned());
         }
-        let epoch = self.inner.lock().await.subscription_epoch;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let generation = {
+            let mut inner = self.inner.lock().await;
+            inner.subscription_epoch = inner.subscription_epoch.wrapping_add(1);
+            let generation = inner.subscription_epoch;
+            let previous = inner.subscriptions.insert(
+                session_id.clone(),
+                SubscriptionSlot::Opening(OpeningSubscription {
+                    id: subscription_id.clone(),
+                    generation,
+                    cancelled: cancelled.clone(),
+                }),
+            );
+            drop(inner);
+            if let Some(previous) = previous {
+                stop_subscription(previous).await;
+            }
+            generation
+        };
 
-        let mut last_error = None;
-        let mut client = None;
-        for attempt in 0..20 {
-            match ClientOptions::new().open(&self.endpoint) {
-                Ok(opened) => {
-                    client = Some(opened);
-                    break;
+        let result: Result<(), String> = async {
+            let mut last_error = None;
+            let mut client = None;
+            for attempt in 0..20 {
+                if cancelled.load(Ordering::Acquire) {
+                    return Err("session subscription was cancelled while opening".to_owned());
                 }
-                Err(error) => {
-                    last_error = Some(error.to_string());
-                    let retryable = matches!(error.raw_os_error(), Some(2 | 231));
-                    if !retryable || attempt == 19 {
+                match ClientOptions::new().open(&self.endpoint) {
+                    Ok(opened) => {
+                        client = Some(opened);
                         break;
                     }
-                    sleep(Duration::from_millis(50)).await;
+                    Err(error) => {
+                        last_error = Some(error.to_string());
+                        let retryable = matches!(error.raw_os_error(), Some(2 | 231));
+                        if !retryable || attempt == 19 {
+                            break;
+                        }
+                        sleep(Duration::from_millis(50)).await;
+                    }
                 }
             }
-        }
-        let Some(mut client) = client else {
-            return Err(format!(
-                "cannot open session event pipe {}: {}",
-                self.endpoint,
-                last_error.unwrap_or_else(|| "unknown error".to_owned())
-            ));
-        };
-
-        let hello_id = request_id("subscription-hello");
-        let hello = bridge_hello(hello_id.clone());
-        let response = exchange(&mut client, &hello, self.request_timeout).await?;
-        ensure_response_id(&response, &hello_id)?;
-        ensure_hello_response(response)?;
-
-        let subscribe_id = subscription_id.clone();
-        let payload = match cursor {
-            Some(cursor) => serde_json::json!({ "sessionId": session_id, "cursor": cursor }),
-            None => serde_json::json!({ "sessionId": session_id }),
-        };
-        let subscribe = IpcMessage {
-            protocol: IPC_PROTOCOL_VERSION,
-            id: subscribe_id.clone(),
-            type_name: "session.subscribe".to_owned(),
-            payload,
-        };
-        let frame = crate::protocol::encode_frame(&subscribe).map_err(|error| error.to_string())?;
-        timeout(self.request_timeout, async {
-            client
-                .write_all(&frame)
-                .await
-                .map_err(|error| error.to_string())?;
-            client.flush().await.map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|_| {
-            format!(
-                "session subscription timed out after {} ms",
-                self.request_timeout.as_millis()
-            )
-        })??;
-
-        let subscribed = read_message(&mut client, self.request_timeout).await?;
-        ensure_response_id(&subscribed, &subscribe_id)?;
-        if subscribed.type_name == "error.response" {
-            return Err(format!(
-                "Harness rejected session subscription: {}",
-                subscribed.payload
-            ));
-        }
-        if subscribed.type_name != "session.subscribed" {
-            return Err(format!(
-                "unexpected session.subscribe response: {}",
-                subscribed.type_name
-            ));
-        }
-        let acknowledged_id = subscribed
-            .payload
-            .get("subscriptionId")
-            .and_then(serde_json::Value::as_str);
-        if acknowledged_id != Some(subscription_id.as_str()) {
-            return Err("session.subscribed response has a different subscriptionId".to_owned());
-        }
-
-        let expected_session_id = session_id.clone();
-        let expected_subscription_id = subscription_id.clone();
-        let cleanup_app = app.clone();
-        let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(async move {
-            if start_rx.await.is_err() {
-                return;
+            let Some(mut client) = client else {
+                return Err(format!(
+                    "cannot open session event pipe {}: {}",
+                    self.endpoint,
+                    last_error.unwrap_or_else(|| "unknown error".to_owned())
+                ));
+            };
+            if !self.subscription_opening_is_current(&session_id, &subscription_id, generation, &cancelled).await {
+                return Err("session subscription was cancelled while opening".to_owned());
             }
-            loop {
-                match read_message_unbounded(&mut client).await {
-                    Ok(message) if message.type_name == "agent.event" => {
-                        let matches_session = message
-                            .payload
-                            .get("sessionId")
-                            .and_then(serde_json::Value::as_str)
-                            == Some(expected_session_id.as_str());
-                        if !matches_session {
+
+            let hello_id = request_id("subscription-hello");
+            let hello = bridge_hello(hello_id.clone());
+            let response = exchange(&mut client, &hello, self.request_timeout).await?;
+            ensure_response_id(&response, &hello_id)?;
+            ensure_hello_response(response)?;
+            if !self.subscription_opening_is_current(&session_id, &subscription_id, generation, &cancelled).await {
+                return Err("session subscription was cancelled while opening".to_owned());
+            }
+
+            let subscribe_id = subscription_id.clone();
+            let payload = match cursor {
+                Some(cursor) => serde_json::json!({ "sessionId": session_id, "cursor": cursor }),
+                None => serde_json::json!({ "sessionId": session_id }),
+            };
+            let subscribe = IpcMessage {
+                protocol: IPC_PROTOCOL_VERSION,
+                id: subscribe_id.clone(),
+                type_name: "session.subscribe".to_owned(),
+                payload,
+            };
+            let frame = crate::protocol::encode_frame(&subscribe).map_err(|error| error.to_string())?;
+            timeout(self.request_timeout, async {
+                client
+                    .write_all(&frame)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                client.flush().await.map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|_| {
+                format!(
+                    "session subscription timed out after {} ms",
+                    self.request_timeout.as_millis()
+                )
+            })??;
+
+            let subscribed = read_message(&mut client, self.request_timeout).await?;
+            ensure_response_id(&subscribed, &subscribe_id)?;
+            if subscribed.type_name == "error.response" {
+                return Err(format!(
+                    "Harness rejected session subscription: {}",
+                    subscribed.payload
+                ));
+            }
+            if subscribed.type_name != "session.subscribed" {
+                return Err(format!(
+                    "unexpected session.subscribe response: {}",
+                    subscribed.type_name
+                ));
+            }
+            let acknowledged_id = subscribed
+                .payload
+                .get("subscriptionId")
+                .and_then(serde_json::Value::as_str);
+            if acknowledged_id != Some(subscription_id.as_str()) {
+                return Err("session.subscribed response has a different subscriptionId".to_owned());
+            }
+
+            let expected_session_id = session_id.clone();
+            let expected_subscription_id = subscription_id.clone();
+            let cleanup_app = app.clone();
+            let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
+            let task = tokio::spawn(async move {
+                if start_rx.await.is_err() {
+                    return;
+                }
+                loop {
+                    match read_message_unbounded(&mut client).await {
+                        Ok(message) if message.type_name == "agent.event" => {
+                            let matches_session = message
+                                .payload
+                                .get("sessionId")
+                                .and_then(serde_json::Value::as_str)
+                                == Some(expected_session_id.as_str());
+                            if !matches_session {
+                                let _ = app.emit(
+                                    "session-agent-event",
+                                    serde_json::json!({
+                                        "sessionId": expected_session_id,
+                                        "subscriptionId": expected_subscription_id,
+                                        "error": "received event for a different session",
+                                    }),
+                                );
+                                break;
+                            }
+                            let _ = app.emit("session-agent-event", message.payload);
+                        }
+                        Ok(message) => {
                             let _ = app.emit(
                                 "session-agent-event",
                                 serde_json::json!({
                                     "sessionId": expected_session_id,
                                     "subscriptionId": expected_subscription_id,
-                                    "error": "received event for a different session",
+                                    "error": format!("unexpected subscription frame: {}", message.type_name),
                                 }),
                             );
                             break;
                         }
-                        let _ = app.emit("session-agent-event", message.payload);
-                    }
-                    Ok(message) => {
-                        let _ = app.emit(
-                            "session-agent-event",
-                            serde_json::json!({
-                                "sessionId": expected_session_id,
-                                "subscriptionId": expected_subscription_id,
-                                "error": format!("unexpected subscription frame: {}", message.type_name),
-                            }),
-                        );
-                        break;
-                    }
-                    Err(error) => {
-                        let _ = app.emit(
-                            "session-agent-event",
-                            serde_json::json!({
-                                "sessionId": expected_session_id,
-                                "subscriptionId": expected_subscription_id,
-                                "error": error,
-                            }),
-                        );
-                        break;
+                        Err(error) => {
+                            let _ = app.emit(
+                                "session-agent-event",
+                                serde_json::json!({
+                                    "sessionId": expected_session_id,
+                                    "subscriptionId": expected_subscription_id,
+                                    "error": error,
+                                }),
+                            );
+                            break;
+                        }
                     }
                 }
-            }
-            let runtime = cleanup_app.state::<BridgeRuntime>();
-            runtime
-                .remove_subscription(&expected_session_id, &expected_subscription_id)
-                .await;
-        });
+                let runtime = cleanup_app.state::<BridgeRuntime>();
+                runtime
+                    .remove_subscription(&expected_session_id, &expected_subscription_id, generation)
+                    .await;
+            });
 
-        let mut inner = self.inner.lock().await;
-        if inner.subscription_epoch != epoch {
-            task.abort();
-            return Err(
-                "bridge disconnected while the session subscription was opening".to_owned(),
-            );
+            if !self.promote_subscription(&session_id, &subscription_id, generation, &cancelled, task).await {
+                return Err("session subscription was cancelled while opening".to_owned());
+            }
+            let _ = start_tx.send(());
+            Ok(())
+        }.await;
+
+        if result.is_err() {
+            self.clear_opening_subscription(&session_id, &subscription_id, generation)
+                .await;
         }
-        if let Some(previous) = inner.subscriptions.insert(
-            session_id,
-            SubscriptionTask {
-                id: subscription_id,
-                handle: task,
-            },
-        ) {
-            previous.handle.abort();
-        }
-        let _ = start_tx.send(());
-        Ok(())
+        result
     }
 
     #[cfg(windows)]
-    async fn remove_subscription(&self, session_id: &str, subscription_id: &str) {
+    async fn subscription_opening_is_current(
+        &self,
+        session_id: &str,
+        subscription_id: &str,
+        generation: u64,
+        cancelled: &Arc<AtomicBool>,
+    ) -> bool {
+        if cancelled.load(Ordering::Acquire) {
+            return false;
+        }
+        let inner = self.inner.lock().await;
+        matches!(
+            inner.subscriptions.get(session_id),
+            Some(SubscriptionSlot::Opening(slot))
+                if slot.id == subscription_id
+                    && slot.generation == generation
+                    && !slot.cancelled.load(Ordering::Acquire)
+        )
+    }
+
+    #[cfg(windows)]
+    async fn promote_subscription(
+        &self,
+        session_id: &str,
+        subscription_id: &str,
+        generation: u64,
+        cancelled: &Arc<AtomicBool>,
+        task: tokio::task::JoinHandle<()>,
+    ) -> bool {
         let mut inner = self.inner.lock().await;
-        let matches = inner
-            .subscriptions
-            .get(session_id)
-            .is_some_and(|subscription| subscription.id == subscription_id);
+        let current = matches!(
+            inner.subscriptions.get(session_id),
+            Some(SubscriptionSlot::Opening(slot))
+                if slot.id == subscription_id
+                    && slot.generation == generation
+                    && Arc::ptr_eq(&slot.cancelled, cancelled)
+                    && !slot.cancelled.load(Ordering::Acquire)
+        );
+        if current {
+            inner.subscriptions.insert(
+                session_id.to_owned(),
+                SubscriptionSlot::Active(ActiveSubscription {
+                    id: subscription_id.to_owned(),
+                    generation,
+                    handle: task,
+                }),
+            );
+        }
+        current
+    }
+
+    #[cfg(windows)]
+    async fn clear_opening_subscription(
+        &self,
+        session_id: &str,
+        subscription_id: &str,
+        generation: u64,
+    ) {
+        let mut inner = self.inner.lock().await;
+        let matches = matches!(
+            inner.subscriptions.get(session_id),
+            Some(SubscriptionSlot::Opening(slot))
+                if slot.id == subscription_id && slot.generation == generation
+        );
         if matches {
             inner.subscriptions.remove(session_id);
         }
+    }
+
+    #[cfg(windows)]
+    async fn remove_subscription(&self, session_id: &str, subscription_id: &str, generation: u64) {
+        let mut inner = self.inner.lock().await;
+        let matches = matches!(
+            inner.subscriptions.get(session_id),
+            Some(SubscriptionSlot::Active(slot))
+                if slot.id == subscription_id && slot.generation == generation
+        );
+        if matches {
+            inner.subscriptions.remove(session_id);
+        }
+    }
+
+    #[cfg(windows)]
+    async fn unsubscribe_session(
+        &self,
+        session_id: String,
+        subscription_id: String,
+    ) -> Result<SessionUnsubscription, String> {
+        if session_id.trim().is_empty() {
+            return Err("session id must not be empty".to_owned());
+        }
+        if subscription_id.trim().is_empty() {
+            return Err("subscription id must not be empty".to_owned());
+        }
+        let slot = {
+            let mut inner = self.inner.lock().await;
+            let matches = inner
+                .subscriptions
+                .get(&session_id)
+                .is_some_and(|slot| slot.id() == subscription_id);
+            if matches {
+                inner.subscriptions.remove(&session_id)
+            } else {
+                None
+            }
+        };
+        let released = slot.is_some();
+        if let Some(slot) = slot {
+            stop_subscription(slot).await;
+        }
+        Ok(SessionUnsubscription {
+            session_id,
+            subscription_id,
+            released,
+        })
+    }
+
+    #[cfg(not(windows))]
+    async fn unsubscribe_session(
+        &self,
+        session_id: String,
+        subscription_id: String,
+    ) -> Result<SessionUnsubscription, String> {
+        Ok(SessionUnsubscription {
+            session_id,
+            subscription_id,
+            released: false,
+        })
     }
 
     #[cfg(not(windows))]
@@ -743,18 +922,247 @@ impl BridgeRuntime {
         Ok(None)
     }
 
-    async fn disconnect(&self) {
+    #[cfg(windows)]
+    async fn list_sessions(&self) -> Result<Vec<crate::protocol::SessionSummary>, String> {
+        self.connect().await?;
+        let request_id = request_id("session-list");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "session.list".to_owned(),
+            payload: serde_json::json!({}),
+        };
         let mut inner = self.inner.lock().await;
-        inner.connected = false;
-        inner.server_version = None;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let response = match exchange(client, &message, self.request_timeout).await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = format!("session list failed: {error}");
+                inner.connected = false;
+                inner.client = None;
+                inner.last_error = Some(message.clone());
+                return Err(message);
+            }
+        };
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session list: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "session.list.result" {
+            return Err(format!(
+                "unexpected session.list response: {}",
+                response.type_name
+            ));
+        }
+        let payload: SessionListResultPayload = serde_json::from_value(response.payload)
+            .map_err(|error| format!("invalid session.list.result payload: {error}"))?;
         inner.last_error = None;
-        #[cfg(windows)]
+        Ok(payload.sessions)
+    }
+
+    #[cfg(not(windows))]
+    async fn list_sessions(&self) -> Result<Vec<crate::protocol::SessionSummary>, String> {
+        self.connect().await?;
+        unreachable!()
+    }
+
+    #[cfg(windows)]
+    async fn create_session(&self, cwd: Option<String>) -> Result<String, String> {
+        if cwd.as_deref().is_some_and(|value| value.trim().is_empty()) {
+            return Err("session cwd must not be empty".to_owned());
+        }
+        self.connect().await?;
+        let request_id = request_id("session-create");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "session.create".to_owned(),
+            payload: match cwd {
+                Some(cwd) => serde_json::json!({ "cwd": cwd }),
+                None => serde_json::json!({}),
+            },
+        };
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let response = match exchange(client, &message, self.request_timeout).await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = mark_create_unknown(&mut inner, &request_id, error);
+                return Err(message);
+            }
+        };
+        if let Err(error) = ensure_response_id(&response, &request_id) {
+            return Err(mark_create_unknown(&mut inner, &request_id, error));
+        }
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session creation: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "session.created" {
+            return Err(mark_create_unknown(
+                &mut inner,
+                &request_id,
+                format!("unexpected session.create response: {}", response.type_name),
+            ));
+        }
+        let payload: SessionCreatedPayload = match serde_json::from_value(response.payload) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Err(mark_create_unknown(
+                    &mut inner,
+                    &request_id,
+                    format!("invalid session.created payload: {error}"),
+                ));
+            }
+        };
+        inner.last_error = None;
+        Ok(payload.session_id)
+    }
+
+    #[cfg(not(windows))]
+    async fn create_session(&self, _cwd: Option<String>) -> Result<String, String> {
+        self.connect().await?;
+        unreachable!()
+    }
+
+    #[cfg(windows)]
+    async fn read_session_history(
+        &self,
+        session_id: String,
+        after_cursor: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<SessionHistoryResultPayload, String> {
+        if session_id.trim().is_empty() {
+            return Err("session id must not be empty".to_owned());
+        }
+        if after_cursor.is_some_and(|value| value > 9_007_199_254_740_991) {
+            return Err("afterCursor must be a non-negative safe integer".to_owned());
+        }
+        if limit
+            .is_some_and(|value| value == 0 || value > crate::protocol::MAX_HISTORY_PAGE_ENTRIES)
         {
+            return Err(format!(
+                "limit must be a positive safe integer no greater than {}",
+                crate::protocol::MAX_HISTORY_PAGE_ENTRIES
+            ));
+        }
+        self.connect().await?;
+        let request_id = request_id("session-history");
+        let expected_session_id = session_id.clone();
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "sessionId".to_owned(),
+            serde_json::Value::String(session_id),
+        );
+        if let Some(after_cursor) = after_cursor {
+            payload.insert("afterCursor".to_owned(), serde_json::json!(after_cursor));
+        }
+        if let Some(limit) = limit {
+            payload.insert("limit".to_owned(), serde_json::json!(limit));
+        }
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "session.history".to_owned(),
+            payload: serde_json::Value::Object(payload),
+        };
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .client
+            .as_mut()
+            .ok_or_else(|| "bridge is not connected".to_owned())?;
+        let response = match exchange(client, &message, self.request_timeout).await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = format!("session history failed: {error}");
+                inner.connected = false;
+                inner.client = None;
+                inner.last_error = Some(message.clone());
+                return Err(message);
+            }
+        };
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected session history: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "session.history.result" {
+            return Err(format!(
+                "unexpected session.history response: {}",
+                response.type_name
+            ));
+        }
+        let payload: SessionHistoryResultPayload = serde_json::from_value(response.payload)
+            .map_err(|error| format!("invalid session.history.result payload: {error}"))?;
+        if payload.session_id.is_empty() || payload.session_id != expected_session_id {
+            return Err("session.history.result response has a different sessionId".to_owned());
+        }
+        inner.last_error = None;
+        Ok(payload)
+    }
+
+    #[cfg(not(windows))]
+    async fn read_session_history(
+        &self,
+        _session_id: String,
+        _after_cursor: Option<u64>,
+        _limit: Option<u64>,
+    ) -> Result<SessionHistoryResultPayload, String> {
+        self.connect().await?;
+        unreachable!()
+    }
+
+    async fn disconnect(&self) {
+        #[cfg(windows)]
+        let subscriptions = {
+            let mut inner = self.inner.lock().await;
+            inner.connected = false;
+            inner.server_version = None;
+            inner.last_error = None;
             inner.client = None;
             inner.subscription_epoch = inner.subscription_epoch.wrapping_add(1);
-            for (_, subscription) in inner.subscriptions.drain() {
-                subscription.handle.abort();
-            }
+            inner
+                .subscriptions
+                .drain()
+                .map(|(_, slot)| slot)
+                .collect::<Vec<_>>()
+        };
+        #[cfg(windows)]
+        for subscription in subscriptions {
+            stop_subscription(subscription).await;
+        }
+        #[cfg(not(windows))]
+        {
+            let mut inner = self.inner.lock().await;
+            inner.connected = false;
+            inner.server_version = None;
+            inner.last_error = None;
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn stop_subscription(slot: SubscriptionSlot) {
+    match slot {
+        SubscriptionSlot::Opening(opening) => {
+            opening.cancelled.store(true, Ordering::Release);
+        }
+        SubscriptionSlot::Active(active) => {
+            active.handle.abort();
+            let _ = active.handle.await;
         }
     }
 }
@@ -802,6 +1210,33 @@ pub async fn bridge_submit_prompt(
         .await
 }
 
+#[tauri::command]
+pub async fn bridge_list_sessions(
+    state: State<'_, BridgeRuntime>,
+) -> Result<Vec<crate::protocol::SessionSummary>, String> {
+    state.list_sessions().await
+}
+
+#[tauri::command]
+pub async fn bridge_create_session(
+    state: State<'_, BridgeRuntime>,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    state.create_session(cwd).await
+}
+
+#[tauri::command]
+pub async fn bridge_read_session_history(
+    state: State<'_, BridgeRuntime>,
+    session_id: String,
+    after_cursor: Option<u64>,
+    limit: Option<u64>,
+) -> Result<crate::protocol::SessionHistoryResultPayload, String> {
+    state
+        .read_session_history(session_id, after_cursor, limit)
+        .await
+}
+
 #[cfg(windows)]
 #[tauri::command]
 pub async fn bridge_subscribe_session(
@@ -814,6 +1249,15 @@ pub async fn bridge_subscribe_session(
     state
         .subscribe_session(app, session_id, subscription_id, cursor)
         .await
+}
+
+#[tauri::command]
+pub async fn bridge_unsubscribe_session(
+    state: State<'_, BridgeRuntime>,
+    session_id: String,
+    subscription_id: String,
+) -> Result<SessionUnsubscription, String> {
+    state.unsubscribe_session(session_id, subscription_id).await
 }
 
 #[tauri::command]
@@ -962,6 +1406,19 @@ fn mark_submission_unknown(
     inner.client = None;
     inner.last_error = Some(detail.clone());
     format!("SUBMISSION_UNKNOWN|{session_id}|{logical_request_id}|{detail}")
+}
+
+#[cfg(windows)]
+fn mark_create_unknown(
+    inner: &mut BridgeInner,
+    request_id: &str,
+    error: impl std::fmt::Display,
+) -> String {
+    inner.connected = false;
+    inner.client = None;
+    let message = format!("CREATE_UNKNOWN|{request_id}|{error}");
+    inner.last_error = Some(message.clone());
+    message
 }
 
 fn request_id(prefix: &str) -> String {

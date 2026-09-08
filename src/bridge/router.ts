@@ -10,6 +10,7 @@ export const BRIDGE_CAPABILITIES = [
   'selection.current',
   'selection.update',
   'session.list',
+  'session.history',
   'session.create',
   'session.submit.queue',
   'session.submit.steer',
@@ -36,7 +37,7 @@ export class BridgeMessageRouter {
 
   constructor(
     private readonly selectionContext: SelectionContextService,
-    private readonly sessions: Pick<SelectionCompanionSessionService, 'list' | 'create' | 'submit' | 'cancel' | 'subscribe'>,
+    private readonly sessions: Pick<SelectionCompanionSessionService, 'list' | 'history' | 'create' | 'submit' | 'cancel' | 'subscribe'>,
     options: BridgeMessageRouterOptions = {},
   ) {
     this.pluginVersion = options.pluginVersion ?? '0.1.0'
@@ -117,6 +118,19 @@ export class BridgeMessageRouter {
           payload: { sessions },
         }
       }
+      case 'session.history': {
+        const history = await this.sessions.history(
+          message.payload.sessionId,
+          message.payload.afterCursor,
+          message.payload.limit,
+        )
+        return {
+          protocol: IPC_PROTOCOL_VERSION,
+          id: message.id,
+          type: 'session.history.result',
+          payload: history,
+        }
+      }
       case 'session.create': {
         if (message.payload.agentPreset !== undefined) {
           return this.error(message.id, 'BRIDGE_UNAVAILABLE', 'agentPreset selection is not available through the native bridge')
@@ -179,6 +193,7 @@ export class BridgeMessageRouter {
         subscriptionId: id,
         ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
         ...(event.requestIds === undefined ? {} : { requestIds: event.requestIds }),
+        ...(event.history === undefined ? {} : { history: event.history }),
         event: { kind: event.kind, data: { cursor: event.cursor, persistent: event.persistent, value: event.data } },
       },
     }

@@ -4,7 +4,14 @@ import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: tauri.invoke }))
 
-import { SubmissionUnknownError, submitSessionPrompt } from './bridge'
+import {
+  SubmissionUnknownError,
+  createSession,
+  listSessions,
+  readSessionHistory,
+  submitSessionPrompt,
+  unsubscribeSession,
+} from './bridge'
 
 const material: SelectionSnapshot = {
   id: 'snapshot-1',
@@ -52,5 +59,34 @@ describe('submitSessionPrompt', () => {
       requestId: 'request-1',
       material,
     })
+  })
+})
+
+describe('session bridge commands', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('lists sessions through the Rust command without rewriting fields', async () => {
+    const sessions = [{ id: 'session-1', title: 'Fixed title', status: 'idle', createdAt: 12, live: true, persisted: true }]
+    tauri.invoke.mockResolvedValue(sessions)
+    await expect(listSessions()).resolves.toEqual(sessions)
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_list_sessions')
+  })
+
+  it('creates a session with an optional working directory', async () => {
+    tauri.invoke.mockResolvedValue('session-created')
+    await expect(createSession('D:/fixture')).resolves.toBe('session-created')
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_create_session', { cwd: 'D:/fixture' })
+    tauri.invoke.mockClear()
+    await expect(createSession()).resolves.toBe('session-created')
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_create_session')
+  })
+
+  it('reads paged history and releases an exact subscription', async () => {
+    const page = { sessionId: 'session-1', nextCursor: 9, capturedThroughCursor: 12, entries: [{ seq: 9, time: 10, role: 'assistant', text: 'Answer' }] }
+    tauri.invoke.mockResolvedValueOnce(page).mockResolvedValueOnce({ sessionId: 'session-1', subscriptionId: 'sub-1', released: true })
+    await expect(readSessionHistory('session-1', 4, 5)).resolves.toEqual(page)
+    expect(tauri.invoke).toHaveBeenNthCalledWith(1, 'bridge_read_session_history', { sessionId: 'session-1', afterCursor: 4, limit: 5 })
+    await expect(unsubscribeSession('session-1', 'sub-1')).resolves.toEqual({ sessionId: 'session-1', subscriptionId: 'sub-1', released: true })
+    expect(tauri.invoke).toHaveBeenNthCalledWith(2, 'bridge_unsubscribe_session', { sessionId: 'session-1', subscriptionId: 'sub-1' })
   })
 })

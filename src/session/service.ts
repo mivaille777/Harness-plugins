@@ -6,7 +6,12 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
-import type { AgentEventKind, SessionDeliveryMode, SessionSummary } from '../bridge/protocol.js'
+import { MAX_HISTORY_PAGE_ENTRIES, type AgentEventKind, type SessionDeliveryMode, type SessionSummary } from '../bridge/protocol.js'
+import {
+  projectSessionHistory,
+  sessionHistoryCursor,
+  type SessionHistoryEntry,
+} from './history.js'
 import { registerSelectionTools, type SelectionMaterial } from './material.js'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -22,14 +27,29 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 export const DEFAULT_SUBMISSION_RETENTION_MS = 5 * 60_000
+export const DEFAULT_HISTORY_PAGE_ENTRIES = MAX_HISTORY_PAGE_ENTRIES
 
 export interface SessionAgentEvent {
   readonly cursor: number
   readonly persistent: boolean
   readonly requestId?: string
   readonly requestIds?: readonly string[]
+  /** Human-visible durable entry carried alongside the live event when it has one. */
+  readonly history?: SessionHistoryEntry
   readonly kind: AgentEventKind
   readonly data: unknown
+}
+
+/** Detached durable transcript and raw-log cursor for one Lens session read. */
+export interface SessionHistoryResult {
+  /** Authoritative durable session identity returned by SessionQuery. */
+  readonly sessionId: string
+  /** Cursor for the next page, when visible entries remain after this page. */
+  readonly nextCursor?: number
+  /** Raw durable-log high-water mark; zero when the complete log is empty. */
+  readonly capturedThroughCursor: number
+  /** Append-origin user and assistant text entries in durable sequence order. */
+  readonly entries: readonly SessionHistoryEntry[]
 }
 
 /** Maps durable selection request messages to their enclosing Harness turn. */
@@ -38,16 +58,18 @@ export class RequestTurnTracker {
   private readonly requests = new Map<number, string[]>()
 
   project(event: SessionEvent): SessionAgentEvent {
+    let projected: SessionAgentEvent
     switch (event.type) {
       case 'turn/start':
         this.openTurn = event.data.turn
-        return { cursor: event.seq, persistent: true, kind: 'status', data: { status: 'running', turn: event.data.turn } }
+        projected = { cursor: event.seq, persistent: true, kind: 'status', data: { status: 'running', turn: event.data.turn } }
+        break
       case 'user/message': {
         if (event.data.source.kind === 'selection-companion' && this.openTurn !== undefined) {
           const requestIds = this.requests.get(this.openTurn) ?? []
           if (!requestIds.includes(event.data.source.requestId)) requestIds.push(event.data.source.requestId)
           this.requests.set(this.openTurn, requestIds)
-          return {
+          projected = {
             cursor: event.seq,
             persistent: true,
             requestId: event.data.source.requestId,
@@ -55,30 +77,38 @@ export class RequestTurnTracker {
             kind: 'status',
             data: { status: 'queued', turn: this.openTurn },
           }
+          break
         }
-        return { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type } }
+        projected = { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type } }
+        break
       }
       case 'assistant/chunk':
-        return this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-delta', event.data.chunk)
+        projected = this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-delta', event.data.chunk)
+        break
       case 'assistant/message':
-        return this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-complete', event.data.message)
+        projected = this.withStep(event.seq, event.data.turn, event.data.step, 'assistant-complete', event.data.message)
+        break
       case 'tool/call':
-        return this.withStep(event.seq, event.data.turn, event.data.step, 'tool-call', event.data)
+        projected = this.withStep(event.seq, event.data.turn, event.data.step, 'tool-call', event.data)
+        break
       case 'tool/result':
-        return this.withStep(event.seq, event.data.turn, event.data.step, 'tool-result', event.data)
+        projected = this.withStep(event.seq, event.data.turn, event.data.step, 'tool-result', event.data)
+        break
       case 'turn/end': {
-        const result = this.withTurn(event.seq, event.data.turn, 'status', {
+        projected = this.withTurn(event.seq, event.data.turn, 'status', {
           status: 'turn-end',
           turn: event.data.turn,
           reason: event.data.reason,
         })
         this.requests.delete(event.data.turn)
         if (this.openTurn === event.data.turn) this.openTurn = undefined
-        return result
+        break
       }
       default:
-        return { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type, data: event.data } }
+        projected = { cursor: event.seq, persistent: true, kind: 'status', data: { type: event.type, data: event.data } }
     }
+    const history = projectSessionHistory([event])[0]
+    return history === undefined ? projected : { ...projected, history }
   }
 
   private withTurn(
@@ -117,6 +147,8 @@ export interface SessionSubscription {
 
 export interface SelectionCompanionSessionOptions {
   readonly submissionRetentionMs?: number
+  /** Maximum visible history entries returned by one bridge response. */
+  readonly historyPageEntries?: number
   readonly now?: () => number
 }
 
@@ -150,14 +182,19 @@ export class SelectionCompanionSessionService extends Service {
   private readonly handles = new Map<string, { dispose(): Promise<void> }>()
   private readonly submissions = new Map<string, SubmissionReceipt>()
   private readonly submissionRetentionMs: number
+  private readonly historyPageEntries: number
   private readonly now: () => number
 
   constructor(ctx: Context, options: SelectionCompanionSessionOptions = {}) {
     super(ctx, 'selectionCompanionSessions')
     this.submissionRetentionMs = options.submissionRetentionMs ?? DEFAULT_SUBMISSION_RETENTION_MS
+    this.historyPageEntries = options.historyPageEntries ?? DEFAULT_HISTORY_PAGE_ENTRIES
     this.now = options.now ?? Date.now
     if (!Number.isSafeInteger(this.submissionRetentionMs) || this.submissionRetentionMs <= 0) {
       throw new RangeError('submissionRetentionMs must be a positive safe integer')
+    }
+    if (!Number.isSafeInteger(this.historyPageEntries) || this.historyPageEntries <= 0 || this.historyPageEntries > MAX_HISTORY_PAGE_ENTRIES) {
+      throw new RangeError(`historyPageEntries must be a positive safe integer no greater than ${MAX_HISTORY_PAGE_ENTRIES}`)
     }
     this.ctx.effect(() => async () => {
       await Promise.all([...this.handles.values()].map(handle => handle.dispose()))
@@ -167,11 +204,61 @@ export class SelectionCompanionSessionService extends Service {
 
   async list(): Promise<readonly SessionSummary[]> {
     const records = await this.ctx.sessionQuery.listSessions()
+    const titles = records.length === 0
+      ? []
+      : await this.ctx.sessionQuery.readTitleSnapshots(records.map(record => record.header.id))
+    const titleBySessionId = new Map<string, string>()
+    for (const title of titles) {
+      if (title.status === 'fulfilled' && title.value.title !== undefined) {
+        titleBySessionId.set(String(title.sessionId), title.value.title.title)
+      }
+    }
     return records.map(record => {
       const id = String(record.header.id)
       const agent = this.ctx.agents.get(record.header.id)
-      return { id, status: agent?.status ?? 'unknown' }
+      const title = titleBySessionId.get(id)
+      return {
+        id,
+        ...(title === undefined ? {} : { title }),
+        status: agent?.status ?? 'unknown',
+        createdAt: record.header.createdAt,
+        live: record.live,
+        persisted: record.persisted,
+      }
     })
+  }
+
+  /**
+   * Read the complete durable log for one session without resuming its agent.
+   * @param sessionId - Existing live-preferred session identity to project.
+   * @returns Human-visible transcript and the raw-log high-water cursor.
+   */
+  async history(
+    sessionId: string,
+    afterCursor = 0,
+    limit = this.historyPageEntries,
+  ): Promise<SessionHistoryResult> {
+    if (!Number.isSafeInteger(afterCursor) || afterCursor < 0) {
+      throw new RangeError('afterCursor must be a non-negative safe integer')
+    }
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > this.historyPageEntries) {
+      throw new RangeError(`limit must be a positive safe integer no greater than ${this.historyPageEntries}`)
+    }
+    const snapshot = await this.ctx.sessionQuery.readSession(SessionId(sessionId))
+    const capturedThroughCursor = sessionHistoryCursor(snapshot.events) ?? 0
+    if (afterCursor > capturedThroughCursor) {
+      throw new RangeError(`session cursor ${afterCursor} is ahead of durable high-water ${capturedThroughCursor}`)
+    }
+    const entries = projectSessionHistory(snapshot.events)
+    const available = entries.filter(entry => entry.seq > afterCursor)
+    const page = available.slice(0, limit)
+    const nextCursor = available.length > page.length ? page.at(-1)?.seq : undefined
+    return {
+      sessionId: String(snapshot.session.id),
+      ...(nextCursor === undefined ? {} : { nextCursor }),
+      capturedThroughCursor,
+      entries: page,
+    }
   }
 
   async create(cwd?: string): Promise<string> {

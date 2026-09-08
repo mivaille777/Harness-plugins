@@ -1,0 +1,9 @@
+{
+  "protocol": 3,
+  "id": "session-history-invalid-limit-1",
+  "type": "session.history",
+  "payload": {
+    "sessionId": "session-demo",
+    "limit": 33
+  }
+}

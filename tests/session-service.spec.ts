@@ -58,7 +58,8 @@ function setup(now: number | (() => number) = 10_000, initialEvents: SessionEven
   }
   runtime.agentDefaultModel = { currentSelection: () => ({ provider: 'test-provider', model: 'test-model' }) }
   runtime.sessionQuery = {
-    listSessions: async () => [{ header: { id: SessionId('persisted-session') } }],
+    listSessions: async () => [{ header: { id: SessionId('persisted-session'), createdAt: 1_234 }, live: false, persisted: true }],
+    readTitleSnapshots: async () => [],
     readSession: async (id: string) => ({ header: { id }, events: [] }),
   }
   const service = new SelectionCompanionSessionService(ctx, {
@@ -71,10 +72,90 @@ function setup(now: number | (() => number) = 10_000, initialEvents: SessionEven
 describe('SelectionCompanionSessionService', () => {
   it('creates an ordinary Harness agent and lists persisted sessions', async () => {
     const { service, create } = setup()
-    await expect(service.list()).resolves.toEqual([{ id: 'persisted-session', status: 'unknown' }])
+    await expect(service.list()).resolves.toEqual([{
+      id: 'persisted-session',
+      status: 'unknown',
+      createdAt: 1_234,
+      live: false,
+      persisted: true,
+    }])
     const id = await service.create('D:/fixture')
     expect(id).toMatch(/^selection-companion-/)
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ setup: registerSelectionTools }))
+  })
+
+  it('reads durable history in bounded pages without resuming a cold agent', async () => {
+    const { ctx, service, resume } = setup()
+    const runtime = ctx as unknown as Record<string, unknown>
+    const events = [
+      { seq: 1, time: 1, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, time: 2, surfaceOp: 'append', type: 'user/message', data: {
+        id: 'user-1', role: 'user', content: [{ type: 'text', text: 'First question' }],
+        source: { kind: 'plugin', plugin: 'fixture' },
+      } },
+      { seq: 3, time: 3, surfaceOp: 'append', type: 'assistant/message', data: {
+        turn: 1, step: 1, message: {
+          id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'First answer' }],
+          source: { kind: 'model', provider: 'fixture', model: 'fixture' },
+        },
+      } },
+      { seq: 4, time: 4, type: 'tool/result', data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'hidden' }] } } },
+      { seq: 5, time: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      { seq: 6, time: 6, surfaceOp: 'append', type: 'user/message', data: {
+        id: 'user-2', role: 'user', content: [{ type: 'text', text: 'Second question' }],
+        source: { kind: 'plugin', plugin: 'fixture' },
+      } },
+    ] as SessionEvent[]
+    ;(runtime.sessionQuery as { readSession: (id: string) => Promise<unknown> }).readSession = async id => ({
+      session: { id }, header: { id }, events,
+    })
+
+    const first = await service.history('persisted-session', 0, 1)
+    expect(first).toEqual({
+      sessionId: 'persisted-session',
+      nextCursor: 2,
+      capturedThroughCursor: 6,
+      entries: [{ seq: 2, time: 2, role: 'user', text: 'First question', sourceKind: 'plugin' }],
+    })
+    const second = await service.history('persisted-session', first.nextCursor, 1)
+    expect(second.entries).toEqual([{ seq: 3, time: 3, role: 'assistant', text: 'First answer', sourceKind: 'model' }])
+    expect(second.nextCursor).toBe(3)
+    const third = await service.history('persisted-session', second.nextCursor, 1)
+    expect(third.entries).toEqual([{ seq: 6, time: 6, role: 'user', text: 'Second question', sourceKind: 'plugin' }])
+    expect(third.nextCursor).toBeUndefined()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid history page request before reading the log', async () => {
+    const { service } = setup()
+    await expect(service.history('persisted-session', -1)).rejects.toThrow('afterCursor')
+    await expect(service.history('persisted-session', 0, 0)).rejects.toThrow('limit')
+    await expect(service.history('persisted-session', 0, 33)).rejects.toThrow('no greater than 32')
+  })
+
+  it('keeps the default durable history page bounded', async () => {
+    const { ctx, service } = setup()
+    const runtime = ctx as unknown as Record<string, unknown>
+    const events = Array.from({ length: 40 }, (_, index) => ({
+      seq: index + 1,
+      time: index + 1,
+      surfaceOp: 'append' as const,
+      type: 'user/message' as const,
+      data: {
+        id: `user-${index + 1}`,
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: `Question ${index + 1}` }],
+        source: { kind: 'plugin' as const, plugin: 'fixture' },
+      },
+    })) as SessionEvent[]
+    ;(runtime.sessionQuery as { readSession: (id: string) => Promise<unknown> }).readSession = async id => ({
+      session: { id }, header: { id }, events,
+    })
+
+    const page = await service.history('persisted-session')
+    expect(page.entries).toHaveLength(32)
+    expect(page.nextCursor).toBe(32)
+    expect(page.capturedThroughCursor).toBe(40)
   })
 
   it('records one normal Harness user message and deduplicates the same request', async () => {

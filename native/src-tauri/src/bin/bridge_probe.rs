@@ -149,6 +149,65 @@ async fn main() -> Result<(), String> {
         if exchange(&mut requests, &ping).await?.type_name != "bridge.pong" {
             return Err("ping did not return bridge.pong".to_owned());
         }
+        let list = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "probe-session-list".to_owned(),
+            type_name: "session.list".to_owned(),
+            payload: serde_json::json!({}),
+        };
+        let listed = exchange(&mut requests, &list).await?;
+        if listed.type_name != "session.list.result"
+            || listed
+                .payload
+                .pointer("/sessions/0/id")
+                .and_then(serde_json::Value::as_str)
+                != Some("session-integration")
+        {
+            return Err(format!(
+                "session.list did not return the fixture session: {listed:?}"
+            ));
+        }
+        let create = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "probe-session-create".to_owned(),
+            type_name: "session.create".to_owned(),
+            payload: serde_json::json!({ "cwd": "D:/integration-fixture" }),
+        };
+        let created = exchange(&mut requests, &create).await?;
+        if created.type_name != "session.created"
+            || created
+                .payload
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                != Some("session-integration")
+        {
+            return Err(format!(
+                "session.create did not return the fixture session: {created:?}"
+            ));
+        }
+        let history = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "probe-session-history".to_owned(),
+            type_name: "session.history".to_owned(),
+            payload: serde_json::json!({ "sessionId": "session-integration", "limit": 32 }),
+        };
+        let history_result = exchange(&mut requests, &history).await?;
+        if history_result.type_name != "session.history.result"
+            || history_result
+                .payload
+                .pointer("/entries/1/text")
+                .and_then(serde_json::Value::as_str)
+                != Some("Integration answer")
+            || history_result
+                .payload
+                .get("capturedThroughCursor")
+                .and_then(serde_json::Value::as_u64)
+                != Some(2)
+        {
+            return Err(format!(
+                "session.history did not return the durable fixture: {history_result:?}"
+            ));
+        }
         let submit = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
             id: "probe-submit".to_owned(),
@@ -176,7 +235,7 @@ async fn main() -> Result<(), String> {
         Ok::<(), String>(())
     };
     tokio::try_join!(event_work, request_work)?;
-    println!("PASS: 100 ordered events plus concurrent ping and submit");
+    println!("PASS: 100 ordered events plus ping, list, create, history, and submit");
     Ok(())
 }
 

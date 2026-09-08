@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionAgentEvent } from './api/bridge'
-import { initialRequestProjection, projectSessionEvent, type RequestProjection } from './sessionProjection'
+import { initialRequestProjection, mergeSessionHistory, projectSessionEvent, type RequestProjection } from './sessionProjection'
 
 const active = { sessionId: 'session-1', requestId: 'request-1', subscriptionId: 'subscription-1' }
 
@@ -136,5 +136,23 @@ describe('projectSessionEvent', () => {
       }),
     ])
     expect(state).toMatchObject({ phase: 'cancelled', answer: '', lastCursor: 2 })
+  })
+})
+
+describe('mergeSessionHistory', () => {
+  it('orders durable entries by sequence and replaces a duplicate sequence once', () => {
+    const current = [
+      { seq: 3, time: 3, role: 'assistant' as const, text: 'Answer' },
+      { seq: 1, time: 1, role: 'user' as const, text: 'Question' },
+    ]
+    const merged = mergeSessionHistory(current, [
+      { seq: 3, time: 4, role: 'assistant', text: 'Corrected answer' },
+      { seq: 5, time: 5, role: 'user', text: 'Next question' },
+    ])
+    expect(merged).toEqual([
+      { seq: 1, time: 1, role: 'user', text: 'Question' },
+      { seq: 3, time: 4, role: 'assistant', text: 'Corrected answer' },
+      { seq: 5, time: 5, role: 'user', text: 'Next question' },
+    ])
   })
 })

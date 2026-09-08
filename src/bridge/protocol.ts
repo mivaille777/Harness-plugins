@@ -4,6 +4,7 @@ import { normalizeSelectionMaterial, selectionMaterialSchema, type SelectionMate
 
 export const IPC_PROTOCOL_VERSION = 3 as const
 export const IPC_MAX_FRAME_BYTES = 1024 * 1024
+export const MAX_HISTORY_PAGE_ENTRIES = 32
 
 export const IPC_MESSAGE_TYPES = [
   'bridge.hello',
@@ -18,6 +19,8 @@ export const IPC_MESSAGE_TYPES = [
   'selection.expanded',
   'session.list',
   'session.list.result',
+  'session.history',
+  'session.history.result',
   'session.create',
   'session.created',
   'session.submit',
@@ -95,6 +98,47 @@ export interface SessionSummary {
   readonly id: string
   readonly title?: string
   readonly status?: 'idle' | 'running' | 'queued' | 'unknown'
+  /** Durable creation timestamp when SessionQuery exposes it. */
+  readonly createdAt?: number
+  /** Whether the session is currently held by a live AgentRegistry entry. */
+  readonly live?: boolean
+  /** Whether a durable session record exists for this summary. */
+  readonly persisted?: boolean
+}
+
+/** A durable user- or assistant-authored text entry for the Lens history view. */
+export interface SessionHistoryEntry {
+  /** Durable session-log sequence used as the stable entry identity. */
+  readonly seq: number
+  /** Durable event timestamp in Unix epoch milliseconds. */
+  readonly time: number
+  /** Conversation role displayed by the history view. */
+  readonly role: 'user' | 'assistant'
+  /** Text blocks joined in their durable message order. */
+  readonly text: string
+  /** Durable message-source kind when the source recorded one. */
+  readonly sourceKind?: string
+  /** Selection Companion request identity when the source recorded one. */
+  readonly requestId?: string
+}
+
+/** A bounded page request over the complete durable session log. */
+export interface SessionHistoryPayload {
+  readonly sessionId: string
+  /** Exclusive raw-log cursor; omitted means the beginning of the log. */
+  readonly afterCursor?: number
+  /** Maximum number of visible entries requested in this page. */
+  readonly limit?: number
+}
+
+/** One bounded page of durable history and the raw-log cursor captured with it. */
+export interface SessionHistoryResultPayload {
+  readonly sessionId: string
+  /** Cursor after which another page may be requested, when visible entries remain. */
+  readonly nextCursor?: number
+  /** Raw durable-log high-water mark observed for this read. */
+  readonly capturedThroughCursor: number
+  readonly entries: readonly SessionHistoryEntry[]
 }
 
 export interface PromptTextPart {
@@ -107,6 +151,8 @@ export interface AgentEventPayload {
   readonly subscriptionId: string
   readonly requestId?: string
   readonly requestIds?: readonly string[]
+  /** Durable history entry projected from this event, when it has user-facing text. */
+  readonly history?: SessionHistoryEntry
   readonly event: {
     readonly kind: AgentEventKind
     readonly data: {
@@ -135,6 +181,8 @@ export type IpcMessage =
   | IpcEnvelope<'selection.expanded', SelectionExpandedPayload>
   | IpcEnvelope<'session.list', Record<string, never>>
   | IpcEnvelope<'session.list.result', { readonly sessions: readonly SessionSummary[] }>
+  | IpcEnvelope<'session.history', SessionHistoryPayload>
+  | IpcEnvelope<'session.history.result', SessionHistoryResultPayload>
   | IpcEnvelope<'session.create', { readonly cwd?: string; readonly agentPreset?: string }>
   | IpcEnvelope<'session.created', { readonly sessionId: string }>
   | IpcEnvelope<'session.submit', {
@@ -165,10 +213,20 @@ export type IpcMessage =
 const idSchema = z.string().min(1).max(128)
 const nonEmptyString = z.string().min(1)
 const nonNegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const positiveSafeInteger = nonNegativeSafeInteger.min(1)
+const historyPageLimit = positiveSafeInteger.max(MAX_HISTORY_PAGE_ENTRIES)
 const emptyPayloadSchema = z.object({}).strict()
 const scopeSchema = z.enum(['selection', 'local', 'section', 'page'])
 const deliveryModeSchema = z.enum(['queue', 'steer'])
 const sessionStatusSchema = z.enum(['idle', 'running', 'queued', 'unknown'])
+const sessionHistoryEntrySchema = z.object({
+  seq: nonNegativeSafeInteger,
+  time: nonNegativeSafeInteger,
+  role: z.enum(['user', 'assistant']),
+  text: nonEmptyString,
+  sourceKind: nonEmptyString.optional(),
+  requestId: nonEmptyString.optional(),
+}).strict()
 const agentEventKindSchema = z.enum([
   'status',
   'assistant-delta',
@@ -374,8 +432,32 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
           id: nonEmptyString,
           title: z.string().optional(),
           status: sessionStatusSchema.optional(),
+          createdAt: nonNegativeSafeInteger.optional(),
+          live: z.boolean().optional(),
+          persisted: z.boolean().optional(),
         }).strict()),
       }).strict().parse(payload)
+    case 'session.history':
+      return z.object({
+        sessionId: nonEmptyString,
+        afterCursor: nonNegativeSafeInteger.optional(),
+        limit: historyPageLimit.optional(),
+      }).strict().parse(payload)
+    case 'session.history.result':
+      return z.object({
+        sessionId: nonEmptyString,
+        nextCursor: nonNegativeSafeInteger.optional(),
+        capturedThroughCursor: nonNegativeSafeInteger,
+        entries: z.array(sessionHistoryEntrySchema),
+      }).strict().superRefine((value, context) => {
+        if (value.nextCursor !== undefined && value.nextCursor >= value.capturedThroughCursor) {
+          context.addIssue({
+            code: 'custom',
+            path: ['nextCursor'],
+            message: 'nextCursor must be below capturedThroughCursor when another page remains',
+          })
+        }
+      }).parse(payload)
     case 'session.create':
       return z.object({ cwd: nonEmptyString.optional(), agentPreset: nonEmptyString.optional() }).strict().parse(payload)
     case 'session.created':
@@ -410,6 +492,7 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         subscriptionId: nonEmptyString,
         requestId: nonEmptyString.optional(),
         requestIds: z.array(nonEmptyString).min(1).optional(),
+        history: sessionHistoryEntrySchema.optional(),
         event: z.object({
           kind: agentEventKindSchema,
           data: z.object({
@@ -418,7 +501,23 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
             value: z.unknown(),
           }).strict(),
         }).strict(),
-      }).strict().parse(payload)
+      }).strict().superRefine((value, context) => {
+        if (value.history === undefined) return
+        if (!value.event.data.persistent) {
+          context.addIssue({
+            code: 'custom',
+            path: ['history'],
+            message: 'history requires a persistent event',
+          })
+        }
+        if (value.history.seq !== value.event.data.cursor) {
+          context.addIssue({
+            code: 'custom',
+            path: ['history', 'seq'],
+            message: 'history.seq must equal event.data.cursor',
+          })
+        }
+      }).parse(payload)
     case 'error.response':
       return z.object({
         code: errorCodeSchema,

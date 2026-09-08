@@ -15,6 +15,7 @@ interface TestSessions {
   readonly listeners: Set<(event: SessionAgentEvent) => void>
   readonly disposed: { value: number }
   list(): Promise<readonly []>
+  history(): Promise<{ readonly sessionId: string; readonly capturedThroughCursor: number; readonly entries: readonly [] }>
   create(): Promise<string>
   submit(): Promise<SessionSubmissionResult>
   cancel(): boolean
@@ -28,6 +29,7 @@ function createSessions(): TestSessions {
     listeners,
     disposed,
     async list() { return [] },
+    async history() { return { sessionId: 'session-transport', capturedThroughCursor: 0, entries: [] } },
     async create() { return 'session-transport' },
     async submit() { return { requestId: 'request-test', messageId: 'message-test', delivery: 'queued', duplicate: false } },
     cancel() { return true },

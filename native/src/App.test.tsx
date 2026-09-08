@@ -6,7 +6,20 @@ const api = vi.hoisted(() => {
   class SubmissionUnknownError extends Error {
     constructor(readonly sessionId: string, readonly requestId: string, message: string) { super(message) }
   }
-  return { getCaptureStatus: vi.fn(), getCurrentSelection: vi.fn(), pauseCapture: vi.fn(), resumeCapture: vi.fn(), submitSessionPrompt: vi.fn(), subscribeSession: vi.fn(), cancelSession: vi.fn(), SubmissionUnknownError }
+  return {
+    getCaptureStatus: vi.fn(),
+    getCurrentSelection: vi.fn(),
+    listSessions: vi.fn(),
+    createSession: vi.fn(),
+    readSessionHistory: vi.fn(),
+    pauseCapture: vi.fn(),
+    resumeCapture: vi.fn(),
+    submitSessionPrompt: vi.fn(),
+    subscribeSession: vi.fn(),
+    unsubscribeSession: vi.fn(),
+    cancelSession: vi.fn(),
+    SubmissionUnknownError,
+  }
 })
 const hide = vi.hoisted(() => vi.fn())
 const eventApi = vi.hoisted(() => ({
@@ -27,9 +40,65 @@ const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransition
 const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { pageAvailable: false }, capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {
-  beforeEach(() => { vi.clearAllMocks(); eventApi.handler = null; eventApi.listen.mockImplementation(async (_name: string, handler: (event: { payload: unknown }) => void) => { eventApi.handler = handler; return eventApi.unlisten }); api.getCaptureStatus.mockResolvedValue(capture); api.getCurrentSelection.mockResolvedValue(selection); api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' }); api.resumeCapture.mockResolvedValue(capture); api.submitSessionPrompt.mockResolvedValue({ sessionId: 'session-1', requestId: 'request-1' }); api.subscribeSession.mockResolvedValue(undefined); api.cancelSession.mockResolvedValue(true) })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+    eventApi.handler = null
+    eventApi.listen.mockImplementation(async (_name: string, handler: (event: { payload: unknown }) => void) => { eventApi.handler = handler; return eventApi.unlisten })
+    api.getCaptureStatus.mockResolvedValue(capture)
+    api.getCurrentSelection.mockResolvedValue(selection)
+    api.listSessions.mockResolvedValue([])
+    api.createSession.mockResolvedValue('session-new')
+    api.readSessionHistory.mockResolvedValue({ sessionId: 'session-1', capturedThroughCursor: 0, entries: [] })
+    api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' })
+    api.resumeCapture.mockResolvedValue(capture)
+    api.submitSessionPrompt.mockResolvedValue({ sessionId: 'session-1', requestId: 'request-1' })
+    api.subscribeSession.mockResolvedValue(undefined)
+    api.unsubscribeSession.mockResolvedValue({ sessionId: 'session-1', subscriptionId: 'subscription', released: true })
+    api.cancelSession.mockResolvedValue(true)
+  })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
-  it('does not submit while composing Chinese input and subscribes after composition completes', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(api.submitSessionPrompt).not.toHaveBeenCalled(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)); await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledWith('session-1', expect.any(String), undefined)); expect(await screen.findByText(/Waiting for Harness session session-1/)).toBeInTheDocument() })
+  it('restores the remembered session and renders paged durable history before subscribing', async () => {
+    window.localStorage.setItem('dsh-selection-companion.session', 'session-2')
+    api.listSessions.mockResolvedValueOnce([
+      { id: 'session-1', title: 'First session', status: 'idle', createdAt: 1, live: false, persisted: true },
+      { id: 'session-2', title: 'Remembered session', status: 'running', createdAt: 2, live: true, persisted: true },
+    ])
+    api.readSessionHistory.mockImplementation(async (id: string, afterCursor?: number) => afterCursor === 0
+      ? { sessionId: id, nextCursor: 3, capturedThroughCursor: 6, entries: [{ seq: 2, time: 2, role: 'user', text: 'Earlier question' }] }
+      : { sessionId: id, capturedThroughCursor: 6, entries: [{ seq: 4, time: 4, role: 'assistant', text: 'Earlier answer' }] })
+    render(<App />)
+    expect(await screen.findByTestId('history-entry-2')).toHaveTextContent('Earlier question')
+    expect(await screen.findByTestId('history-entry-4')).toHaveTextContent('Earlier answer')
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledWith('session-2', expect.any(String), 6))
+  })
+  it('keeps a history restore failure visible without creating a replacement session', async () => {
+    api.listSessions.mockResolvedValueOnce([{ id: 'session-missing', title: 'Unavailable session', status: 'unknown', persisted: false }])
+    api.readSessionHistory.mockRejectedValueOnce(new Error('durable log unavailable'))
+    render(<App />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('durable log unavailable')
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(api.subscribeSession).not.toHaveBeenCalled()
+  })
+  it('releases the old session and restores its own draft when switching', async () => {
+    api.listSessions.mockResolvedValueOnce([
+      { id: 'session-1', title: 'First session', status: 'idle', createdAt: 1, live: true, persisted: true },
+      { id: 'session-2', title: 'Second session', status: 'idle', createdAt: 2, live: true, persisted: true },
+    ])
+    api.readSessionHistory.mockImplementation(async (id: string) => ({ sessionId: id, capturedThroughCursor: 0, entries: [] }))
+    render(<App />)
+    const input = await screen.findByLabelText('Ask about this selection')
+    fireEvent.change(input, { target: { value: 'draft for first session' } })
+    const selector = await screen.findByRole('combobox', { name: 'Harness session' })
+    fireEvent.change(selector, { target: { value: 'session-2' } })
+    await waitFor(() => expect(api.unsubscribeSession).toHaveBeenCalledWith('session-1', expect.any(String)))
+    expect((await screen.findByLabelText('Ask about this selection') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Ask about this selection'), { target: { value: 'draft for second session' } })
+    fireEvent.change(selector, { target: { value: 'session-1' } })
+    await waitFor(() => expect(api.unsubscribeSession).toHaveBeenCalledTimes(2))
+    expect((await screen.findByLabelText('Ask about this selection') as HTMLTextAreaElement).value).toBe('draft for first session')
+  })
+  it('does not submit while composing Chinese input and subscribes after composition completes', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(api.submitSessionPrompt).not.toHaveBeenCalled(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)); await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledWith('session-1', expect.any(String), 0)); expect(await screen.findByText(/Waiting for Harness session session-1/)).toBeInTheDocument() })
   it('hides on Escape and keeps pause separate from Lens close', async () => { render(<App />); await screen.findByText('Fixture page'); fireEvent.keyDown(window, { key: 'Escape' }); expect(hide).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: 'Pause capture' })); await waitFor(() => expect(api.pauseCapture).toHaveBeenCalledTimes(1)) })
   it('renders correlated text and completes only on turn end', async () => {
     render(<App />)

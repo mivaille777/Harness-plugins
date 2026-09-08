@@ -8,6 +8,7 @@ pub const IPC_PROTOCOL_VERSION: u32 = 3;
 pub const IPC_MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const IPC_FRAME_HEADER_BYTES: usize = 4;
 pub const DEFAULT_IPC_REQUEST_TIMEOUT_MS: u64 = 30_000;
+pub const MAX_HISTORY_PAGE_ENTRIES: u64 = 32;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub const IPC_MESSAGE_TYPES: &[&str] = &[
@@ -23,6 +24,8 @@ pub const IPC_MESSAGE_TYPES: &[&str] = &[
     "selection.expanded",
     "session.list",
     "session.list.result",
+    "session.history",
+    "session.history.result",
     "session.create",
     "session.created",
     "session.submit",
@@ -264,13 +267,65 @@ pub struct SessionListResultPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryPayload {
+    pub session_id: String,
+    #[serde(default)]
+    pub after_cursor: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryResultPayload {
+    pub session_id: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
+    pub captured_through_cursor: u64,
+    pub entries: Vec<SessionHistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryEntry {
+    pub seq: u64,
+    pub time: u64,
+    pub role: SessionHistoryRole,
+    pub text: String,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionHistoryRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionSummary {
     pub id: String,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<SessionStatus>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<bool>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persisted: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -396,6 +451,8 @@ pub struct AgentEventPayload {
     pub request_id: Option<String>,
     #[serde(default)]
     pub request_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub history: Option<SessionHistoryEntry>,
     pub event: AgentEvent,
 }
 
@@ -573,6 +630,42 @@ impl IpcMessage {
                     require_text(&session.id, "sessions.id")?;
                 }
             }
+            "session.history" => {
+                let payload: SessionHistoryPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
+                if let Some(after_cursor) = payload.after_cursor {
+                    require_safe_integer(after_cursor, "afterCursor")?;
+                }
+                if let Some(limit) = payload.limit {
+                    if limit == 0 {
+                        return Err(ProtocolError::InvalidMessage(
+                            "limit must be a positive safe integer".into(),
+                        ));
+                    }
+                    require_safe_integer(limit, "limit")?;
+                    if limit > MAX_HISTORY_PAGE_ENTRIES {
+                        return Err(ProtocolError::InvalidMessage(format!(
+                            "limit must be no greater than {MAX_HISTORY_PAGE_ENTRIES}"
+                        )));
+                    }
+                }
+            }
+            "session.history.result" => {
+                let payload: SessionHistoryResultPayload = typed_payload(&self.payload)?;
+                require_text(&payload.session_id, "sessionId")?;
+                require_safe_integer(payload.captured_through_cursor, "capturedThroughCursor")?;
+                if let Some(next_cursor) = payload.next_cursor {
+                    require_safe_integer(next_cursor, "nextCursor")?;
+                    if next_cursor >= payload.captured_through_cursor {
+                        return Err(ProtocolError::InvalidMessage(
+                            "nextCursor must be below capturedThroughCursor when another page remains".into(),
+                        ));
+                    }
+                }
+                for entry in &payload.entries {
+                    entry.validate()?;
+                }
+            }
             "session.create" => {
                 let payload: SessionCreatePayload = typed_payload(&self.payload)?;
                 if let Some(cwd) = &payload.cwd {
@@ -656,6 +749,19 @@ impl IpcMessage {
                     }
                 }
                 require_safe_integer(payload.event.data.cursor, "event.data.cursor")?;
+                if let Some(history) = &payload.history {
+                    history.validate()?;
+                    if !payload.event.data.persistent {
+                        return Err(ProtocolError::InvalidMessage(
+                            "history requires a persistent event".into(),
+                        ));
+                    }
+                    if history.seq != payload.event.data.cursor {
+                        return Err(ProtocolError::InvalidMessage(
+                            "history.seq must equal event.data.cursor".into(),
+                        ));
+                    }
+                }
             }
             "error.response" => {
                 let payload: ErrorResponsePayload = typed_payload(&self.payload)?;
@@ -700,6 +806,21 @@ impl SelectionSnapshot {
                     "invalid selection geometry".into(),
                 ));
             }
+        }
+        Ok(())
+    }
+}
+
+impl SessionHistoryEntry {
+    fn validate(&self) -> Result<(), ProtocolError> {
+        require_safe_integer(self.seq, "entries.seq")?;
+        require_safe_integer(self.time, "entries.time")?;
+        require_text(&self.text, "entries.text")?;
+        if let Some(source_kind) = &self.source_kind {
+            require_text(source_kind, "entries.sourceKind")?;
+        }
+        if let Some(request_id) = &self.request_id {
+            require_text(request_id, "entries.requestId")?;
         }
         Ok(())
     }
@@ -915,6 +1036,8 @@ mod tests {
         include_str!("../../../tests/protocol/session.submit.rust-null-optionals.request.json"),
         include_str!("../../../tests/protocol/session.submitted.response.json"),
         include_str!("../../../tests/protocol/session.cancel.request.json"),
+        include_str!("../../../tests/protocol/session.history.request.json"),
+        include_str!("../../../tests/protocol/session.history.response.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
         include_str!("../../../tests/protocol/error.response.json"),
     ];
@@ -923,6 +1046,8 @@ mod tests {
         include_str!("../../../tests/protocol/invalid/selection.expand.missing-scope.json"),
         include_str!("../../../tests/protocol/invalid/selection.update.unknown-field.json"),
         include_str!("../../../tests/protocol/invalid/session.subscribe.negative-cursor.json"),
+        include_str!("../../../tests/protocol/invalid/session.history.negative-cursor.json"),
+        include_str!("../../../tests/protocol/invalid/session.history.limit-too-large.json"),
         include_str!("../../../tests/protocol/invalid/session.submit.empty-content.json"),
         include_str!(
             "../../../tests/protocol/invalid/session.submit.blank-material-selection.json"
@@ -931,6 +1056,7 @@ mod tests {
         include_str!("../../../tests/protocol/invalid/session.submit.invalid-material-scope.json"),
         include_str!("../../../tests/protocol/invalid/session.submitted.missing-message-id.json"),
         include_str!("../../../tests/protocol/invalid/agent.event.missing-persistence.json"),
+        include_str!("../../../tests/protocol/invalid/agent.event.history-cursor-mismatch.json"),
     ];
 
     #[test]

@@ -53,7 +53,7 @@ flowchart LR
 | R03 | 已完成自动验证和 Windows 管道验证 | `00ccb6a` 与 `docs/evidence/r03-request-identity-and-recovery.md` 记录幂等、未知提交恢复、取消竞态和持久回执 | scoped 选区工具、审批、真实模型、可见窗口 |
 | R04 | 自动检查与 Windows 管道通过待实测 | `5ec3a8a`、[R04 证据](evidence/r04-session-bound-selection-tools.md)记录 V3 材料、Agent scoped 工具、TS/Rust/Native 同步和真实 Node/Rust Named Pipe | 受支持 profile 中的工具可见性、真实模型、可见 Tauri 窗口、截图和真实进程重启 |
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
-| R06 | API 核查完成，可独立开发 | [R06 API 审计](evidence/r06-session-history-api-audit.md)确认 rc.2 有 durable list/read/replay API，当前缺 Native 命令、Lens 投影、切换释放和恢复状态 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和重启证据 |
+| R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
 | R07 | 待开发 | `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 当前仍以退出码 2 表示未实现 | 真实模型、原生窗口、截图或完整产品 smoke |
 | R08 | 待开发 | 任务手册给出人因、来源、安装和发布要求 | 产品级可访问性、视觉、人因或安装验收 |
 
@@ -188,13 +188,13 @@ R05 的真实审批证明属于 R07：真实 profile 触发待办后，分别记
 
 R06 让用户新建、选择和恢复 Harness session，在 Lens 与完整 Harness 中查看同一历史。现有 `session.list`、`session.create`、订阅和 durable replay 是基础，不等于已经拥有 UI 历史选择或重启恢复。Native 只允许保存当前 session identity、确认 cursor、草稿归属等最小恢复元数据，不能保存第二份回答正文或把恢复失败静默替换为新会话。
 
-rc.2 的 `sessionQuery.listSessions()`、`readSession()`、`readTitleSnapshots()`、`readSurface()` 和 `listEvents()` 已由发布类型核实；完整人类历史必须从 `readSession().events` 用 `isAppendSurfaceEvent()` 投影，不能以压缩后的 `readSurface()` 代替。现有 bridge 在 `session.subscribed` 后再刷 replay events，时序安全；但 Native 尚未暴露 list/create/history/unsubscribe，Lens 也没有 session selector。完整审计见 [R06 session-history API audit](evidence/r06-session-history-api-audit.md)。
+rc.2 的 `sessionQuery.listSessions()`、`readSession()`、`readTitleSnapshots()`、`readSurface()` 和 `listEvents()` 已由发布类型核实；完整人类历史从 `readSession().events` 用 `isAppendSurfaceEvent()` 投影，不能以压缩后的 `readSurface()` 代替。当前实现以最多 32 条可见消息为一页，并返回 `capturedThroughCursor`；Native 通过 request/reply 管道读取 list/create/history，订阅管道只负责持续事件，Lens 在读取 durable history 后从该高水位游标续订。完整 API 审计见 [R06 session-history API audit](evidence/r06-session-history-api-audit.md)，实现证据见 [R06 session-history implementation](evidence/r06-session-history-implementation.md)，分页和订阅所有权见 [R06 decision](decisions/2026-09-08-session-history-paging.md)。
 
 ### 7.2 实施步骤
 
 1. 用 `sessionQuery.listSessions()`、`readTitleSnapshots()` 和既有 bridge 路由返回真实 id、创建时间、live/persisted 状态、可选标题和明确错误；不要从文件系统扫描或复制 SessionStore。
 2. 新增纯历史投影，只从 `readSession().events` 和 `isAppendSurfaceEvent()` 生成完整 user/assistant history。历史正文使用 durable `assistant/message`，不把 streaming chunk 作为第二份正文。
-3. 增加 Native list/create/history/unsubscribe 命令和 TS API。读取历史后以最后 durable cursor 订阅；服务端必须先确认订阅再发送 cursor 之后的 event，避免 history/subscribe 间丢事件。
+3. 增加 Native list/create/history/unsubscribe 命令和 TS API。历史读取采用有界分页，完成读取后以 `capturedThroughCursor` 订阅；服务端先确认订阅再发送 cursor 之后的 event，避免 history/subscribe 间丢事件。旧订阅使用 session、subscription 和 generation 精确释放。
 4. 实现 Lens 的新建、选择和恢复状态。每次切换先释放/隔离旧 subscription，再从 durable history 重建，然后只从确认的 cursor 继续监听。切换不会默认取消后台 Harness task。
 5. 把草稿、固定材料、pending request、interaction 和 subscription generation 都按 session/request 归属。旧代事件、另一个 session 的消息和过期 cursor 不能污染当前视图。
 6. 探测当前 Harness 是否公开受支持的会话导航 API。rc.2 没有 Native 可用的完整 Harness navigation API 时，显示明确不可用状态；不能猜测 URL、更不能在 URL 中放选区正文、令牌或凭据。
@@ -202,17 +202,17 @@ rc.2 的 `sessionQuery.listSessions()`、`readSession()`、`readTitleSnapshots()
 
 ### 7.3 R06 验收与命令
 
-新增 `test:session:history` 后，覆盖两个 session 快速切换、草稿/材料隔离、重载、删除、读取失败、历史全文与 replay 一致、cursor 重建一致、完整 Harness 入口以及旧订阅迟到事件。
+`test:session:history` 已覆盖历史投影、分页面读取、冷 session 不 resume、列表状态、无效游标和订阅恢复；Native 的 `test:lens:session` 覆盖历史合并、命令转发、选择切换、旧代事件隔离和失败状态。双 session 删除、完整 Harness 导航、真实重载和待审批恢复仍归 R07/H05 的实机验收。
 
 ```powershell
 pnpm test:session:history
 pnpm test:session:replay
 pnpm test:lens:session
-pnpm test:session:interaction
 pnpm test:contract
+pnpm test:bridge:integration
 ```
 
-只有重启后的 Lens 先从 durable log 重建、再续订，并且用户在完整 Harness 会话看到同一材料和回答，R06 才能验收。
+这些命令证明插件内的历史投影、分页协议、Native 命令和 Windows 管道行为。只有真实 profile 重启后的 Lens 先从 durable log 重建、再续订，并且用户在完整 Harness 会话看到同一材料和回答，R06 才能完成产品级验收；R05 的 `test:session:interaction` 仍需 H05 发布后运行。
 
 ## 8. R07：真实运行器与闭环证据
 
@@ -363,8 +363,10 @@ R04 只允许 selection 范围。验证 material 的严格 schema、durable 恢�
 
 ### 13.4 R06 提示词
 
+R06 的插件实现和自动验证已完成。以下提示词用于复核、回归或在宿主 API 变化后继续修正；若复核通过，直接进入 R07，不要重复实现已经合入的 history、list/create 和 unsubscribe 语义。
+
 ```text
-执行 R06。先读取 docs/evidence/r06-session-history-api-audit.md，使用已核实的 rc.2 `sessionQuery.listSessions/readSession/readTitleSnapshots` 和 `isAppendSurfaceEvent()`。以 Harness durable session log 为唯一历史来源，完成 Lens 的 session.list、新建、选择、重载恢复；本地只保存 session identity、cursor、草稿归属等最小恢复元数据，绝不保存第二份回答正文或猜测 URL。补齐 Native list/create/history/unsubscribe，读取历史后从确认 cursor 续订。
+复核 R06。先读取 docs/evidence/r06-session-history-api-audit.md 和 docs/evidence/r06-session-history-implementation.md，使用已核实的 rc.2 `sessionQuery.listSessions/readSession/readTitleSnapshots` 和 `isAppendSurfaceEvent()`。以 Harness durable session log 为唯一历史来源，检查 Lens 的 session.list、新建、选择、重载恢复；本地只保存 session identity、cursor、草稿归属等最小恢复元数据，绝不保存第二份回答正文或猜测 URL。检查 Native list/create/history/unsubscribe，确认读取历史后从确认 cursor 续订。
 
 切换 session 时隔离旧 subscription、草稿、固定材料、pending request 和 interaction；先重建 durable history，再从确认 cursor 续订。覆盖双 session 快速切换、迟到事件、重载、删除、读取失败、旧日志、profile/模型变化、待审批恢复和完整入口 identity。新增并运行 test:session:history、session:replay、lens:session、session:interaction 和必要 contract；恢复失败必须给出用户下一步，不能静默新建会话。
 ```

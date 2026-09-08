@@ -23,6 +23,7 @@ describe('dsh-selection-companion bundle entry', () => {
     new RequiredHarnessService(ctx, 'agents')
     new RequiredHarnessService(ctx, 'agentDefaultModel')
     new RequiredHarnessService(ctx, 'sessionQuery')
+    new RequiredHarnessService(ctx, 'tools')
     const plugin = vi.spyOn(ctx, 'plugin')
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
