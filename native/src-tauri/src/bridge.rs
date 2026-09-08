@@ -1436,6 +1436,8 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn material_snapshot() -> SelectionSnapshot {
         serde_json::from_value(serde_json::json!({
             "id": "snapshot-submit",
@@ -1584,7 +1586,10 @@ mod tests {
 
     #[tokio::test]
     async fn initial_status_is_disconnected() {
-        let runtime = BridgeRuntime::from_environment().unwrap();
+        let runtime = {
+            let _guard = ENV_LOCK.lock().unwrap();
+            BridgeRuntime::from_environment().unwrap()
+        };
         let status = runtime.status().await;
         assert!(!status.connected);
         assert_eq!(status.protocol, IPC_PROTOCOL_VERSION);
@@ -1593,6 +1598,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_request_timeout_configuration() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let previous = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS").ok();
         env::set_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS", "0");
         assert!(BridgeRuntime::from_environment().is_err());
