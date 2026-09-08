@@ -60,8 +60,8 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 | R02 | P0 | T03 / T05-A | 基线；与 R01 协调事件类型 | TS/Rust 订阅与恢复 | 自动检查与 Windows 管道通过；见 `docs/evidence/r02-continuous-session-subscriptions.md` |
 | R03 | P0 | T05-B/C | R01、R02 接口稳定 | 请求身份、去重、取消 | 自动检查与 Windows 管道通过待实测；提交 `00ccb6a`，见 `docs/evidence/r03-request-identity-and-recovery.md` |
 | R04 | P0 | T05-D | R03 材料/请求身份约定 | Agent 工具与持久材料 | 自动检查与 Windows 管道通过待实测；见 `docs/evidence/r04-session-bound-selection-tools.md` |
-| R05 | P0 | T05-C/D | R01～R04；可提前核查宿主 API | 审批和 ask-user 交互 | 待开发 |
-| R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 待开发 |
+| R05 | P0 | T05-C/D | R01～R04；H05 发布 API 是插件实现前置 | 审批和 ask-user 交互 | 宿主前置任务 H05 已识别；见 `docs/host-tasks/r05-durable-session-interactions.md` |
+| R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | API 核查完成，可独立开发；见 `docs/evidence/r06-session-history-api-audit.md` |
 | R07 | P0 | T05-E | 测试框架可提前；完整验收依赖 R01～R06 | 真实运行器与证据 | 待开发 |
 | R08 | P1 | T06～T11 | R01～R07；设计准备可提前 | 体验、来源、安装和发布验收 | 待开发 |
 
@@ -81,7 +81,7 @@ R01～R04 已完成规定的自动验证；从当前基线默认按 R05→R06→
 |---|---|---|---|---|
 | P03 / R03（已完成） | 同一逻辑提交只执行一次，并能从持久事实恢复 request/message/turn 关系 | TS/Rust 回执字段、持久来源、共享 Promise 去重、UUID、未知提交安全重试、取消竞态、协议正反例、R03 证据 | `pnpm test:session`、`pnpm test:session:replay`、`pnpm test:lens:session`、`pnpm test:contract`、`pnpm test:bridge:integration` 已记录于 R03 证据 | R04 的材料身份；R06 的可靠恢复 |
 | P04 / R04（自动验证通过） | Agent 工具只能读取当前执行请求绑定的持久材料 | 同版本 dsh-tools 依赖核查、结构化材料事件、scoped 工具注册、恢复/释放、工具卡片元数据、R04 证据 | `pnpm test:session:tools`、replay、typecheck、contract、Windows Named Pipe、build 与 bundle 检查 | R05 工具审批；R07 工具真实闭环 |
-| P05 / R05 | Lens 能准确呈现并处理宿主审批与 ask-user 待办 | 能力矩阵、交互 IPC、TS/Rust fixture、决策 UI、重复/过期/断线处理、R05 证据 | 新增 `pnpm test:session:interaction`，并运行 tools、lens:session、protocol | R07 审批真实闭环 |
+| P05 / R05 | Lens 能准确呈现并处理宿主审批与 ask-user 待办 | 先完成并发布 H05 durable interaction seam；再交付能力矩阵、IPC、TS/Rust fixture、决策 UI、重复/过期/断线处理、R05 证据 | H05 focused tests；发布后新增 `pnpm test:session:interaction` 并运行 tools、lens:session、protocol | R07 审批真实闭环 |
 | P06 / R06 | 用户能选择、恢复和核对同一 Harness 会话历史 | session.list 接线、新建/切换/恢复、日志重建、草稿/材料隔离、经验证的完整会话入口、R06 证据 | 新增 `pnpm test:session:history`，并运行 replay、lens:session | R07 重启与历史验收 |
 | P07 / R07 | 用真实 dsh profile 和模型证明端到端闭环 | 可失败 e2e 运行器、隔离 DSH_HOME、前置检测、超时清理、真实日志断言、截图/录屏索引、R07 报告 | 运行器自身测试、`pnpm test:session:e2e`、`pnpm check:task5`；真实前置缺失时退出 2 并列出 NOT RUN | “可靠 Harness 交互闭环”里程碑 |
 | P08-A / T06 | 用户可控制材料范围并核查回答来源 | 授权范围、revision 校验、预算/截断、来源 UI、安全渲染、失败降级 | 新增 `pnpm test:context-expansion`，并更新 replay | 可信的上下文扩展 |
@@ -312,23 +312,27 @@ pnpm verify:bundle
 
 当 Harness 等待用户决定时，Lens 能呈现并提交决定。沿用宿主的交互 ID、权限、生命周期和日志，不建立另一套审批状态源。
 
+**2026-09-08 API 核查结果。** 发布运行时 `0.1.1-rc.2` 的 approval 和 user-questions 均不提供可恢复 pending interaction、公开 response id、待办查询或原子答复；后者还限制为单 provider。插件不能诚实完成 R05，先执行并发布 [H05：会话持久交互宿主能力](host-tasks/r05-durable-session-interactions.md)。详见 [API 审计](evidence/r05-host-api-audit.md) 与 [决策记录](decisions/2026-09-08-r05-requires-host-owned-interactions.md)。
+
 ### 预计修改面与禁止范围
 
-- 宿主适配：新增 `src/session/` 交互投影/答复模块，或在现有 service 中加入很薄的适配；不得复制宿主权限判断。
+- 宿主能力：H05 在 DeepSeek Harness 仓库新增并发布 session-owned interaction seam；插件不得复制宿主权限判断。
+- 插件适配：仅在 H05 发布并装配到目标 profile 后，新增 `src/session/` 交互投影/答复模块或在现有 service 中加入很薄的适配。
 - 协议与 Native：`src/bridge/protocol.ts`、router/server、Rust protocol/bridge、`native/src/api/bridge.ts` 及 fixture。
 - Lens：`native/src/App.tsx`、投影模块、类型化文案和交互测试；复杂组件可拆分到 `native/src/components/`。
 - 不在 R05 新增独立审批数据库、自动批准策略、额外网页权限、会话历史页或模型调用路径。
 
 ### 实现步骤
 
-1. 核对同版本 interaction、approval、permission、ask-user 的实际服务及事件，建立能力矩阵：如何取得待办、如何答复、谁有权限、取消/过期的处理和是否可在完整界面完成。
-2. 为读待办和提交答复增加已验证的 IPC 消息，带 session、interaction identity 和关联事实；不凭客户端传值宣称授权。两端严格校验并增加共享 fixture。
-3. Lens 显示请求目的、作用范围、必要的工具参数和可选答案；提交结果前保持 submitting-decision，成功后依据宿主状态更新。输入应支持中文和键盘。
-4. 客户端能力不足时提供真实可用的完整 Harness 交互入口并说明等待原因；不能将待审批显示为卡死、已执行或已完成。
-5. 处理重复答复、答复途中断线、另一客户端已答复、interaction 过期、工具取消、会话切换及重启恢复。
-6. 关闭 Lens 不自动同意/拒绝；按宿主策略结束或保留待办。隐私敏感参数只展示决策所需内容，不写入普通诊断日志。
+1. 按 H05 任务书实现 stable interactionId、durable pending/terminal event、session query、原子答复、取消/expiry 和 restart 语义；先完成宿主失败用例与发布。
+2. 核对发布 H05 的实际服务、事件、权限和 profile 装配，建立 plugin consumption probe；本机主仓库较高版本源码不代替发布证据。
+3. 为读待办和提交答复增加已验证的 IPC 消息，带 session、interaction identity 和关联事实；不凭客户端传值宣称授权。两端严格校验并增加共享 fixture。
+4. Lens 显示请求目的、作用范围、必要的工具参数和可选答案；提交结果前保持 submitting-decision，成功后依据宿主状态更新。输入应支持中文和键盘。
+5. 客户端能力不足时提供真实可用的完整 Harness 交互入口并说明等待原因；不能将待审批显示为卡死、已执行或已完成。
+6. 处理重复答复、答复途中断线、另一客户端已答复、interaction 过期、工具取消、会话切换及重启恢复。
+7. 关闭 Lens 不自动同意/拒绝；按宿主策略结束或保留待办。隐私敏感参数只展示决策所需内容，不写入普通诊断日志。
 
-实现顺序为：同版本能力矩阵与失败探针 → 待办只读投影 → 幂等答复命令 → Lens 决策组件 → 断线/过期/另一客户端竞态。只读投影通过不能视为“审批已完成”，必须证明决策确实改变宿主待办并控制执行体。
+实现顺序为：H05 失败探针与发布 → plugin consumption probe → 待办只读投影 → 幂等答复命令 → Lens 决策组件 → 断线/过期/另一客户端竞态。只读投影通过不能视为“审批已完成”，必须证明决策确实改变宿主待办并控制执行体。
 
 ### 测试与验收
 
@@ -642,7 +646,7 @@ R03 请求关联和 R04 材料绑定必须共享同一协议决定；R04 工具�
 ```text
 继续 Harness-plugins 与 DeepSeek Harness 的完整交互开发。先读取根目录 harness-plugins task.md、docs/harness-integration-development-plan.md、当前 AGENTS.md（如有）、package.json 和当前 git 状态，以最新代码为起点，不重置到旧基线。
 
-以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅和 R03 的请求生命周期已通过自动检查与 Windows Named Pipe 验证，R04 已在 `5ec3a8a` 完成自动化和 Windows Pipe 验证。现在从 R05 开始，依次完成审批、历史恢复及真实 e2e。纠正旧文档中“宿主没有工具能力”的判断：同版本 tools 包存在，Agent 有 setup；真实发布 profile 仍须在 R07 验证，不能混用另一源码版本 API。
+以 R01～R08 为执行清单。R01 的回答投影已通过自动检查，R02 的连续订阅和 R03 的请求生命周期已通过自动检查与 Windows Named Pipe 验证，R04 已在 `5ec3a8a` 完成自动化和 Windows Pipe 验证。R05 先完成并发布 H05 会话持久交互宿主能力，再做插件审批适配；R06 的独立部分可在其 API 核查后并行推进，随后完成真实 e2e。不要混用主仓库较高版本源码与 rc.2 profile；真实发布 profile 仍须在 R07 验证。
 
 每项按本文目标、边界、步骤、测试和完成标准交付，优先复用宿主能力。Native 不调用模型，材料和工具结果通过 Harness 日志可重建；网页正文不能修改权限。明确 session 级取消影响，禁止猜测 request/turn 归属或自动重发未知提交。协议变更同步 TS/Rust 与共享 fixture。
 

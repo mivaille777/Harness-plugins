@@ -52,8 +52,8 @@ flowchart LR
 | R02 | 已完成自动验证和 Windows 管道验证 | `c2e685e` 与 `docs/evidence/r02-continuous-session-subscriptions.md` 记录连续订阅、恢复和 Node/Rust Named Pipe | 真实 Harness profile 的整条产品路径 |
 | R03 | 已完成自动验证和 Windows 管道验证 | `00ccb6a` 与 `docs/evidence/r03-request-identity-and-recovery.md` 记录幂等、未知提交恢复、取消竞态和持久回执 | scoped 选区工具、审批、真实模型、可见窗口 |
 | R04 | 自动检查与 Windows 管道通过待实测 | `5ec3a8a`、[R04 证据](evidence/r04-session-bound-selection-tools.md)记录 V3 材料、Agent scoped 工具、TS/Rust/Native 同步和真实 Node/Rust Named Pipe | 受支持 profile 中的工具可见性、真实模型、可见 Tauri 窗口、截图和真实进程重启 |
-| R05 | 待开发 | 只有计划和现有 session 投影基础 | 审批、ask-user 或自动批准能力 |
-| R06 | 待开发 | bridge 已有 `session.list`/`session.create` 消息与基础 service 路径 | Lens 历史选择、可靠重启恢复和完整 Harness 导航 |
+| R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
+| R06 | API 核查完成，可独立开发 | [R06 API 审计](evidence/r06-session-history-api-audit.md)确认 rc.2 有 durable list/read/replay API，当前缺 Native 命令、Lens 投影、切换释放和恢复状态 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和重启证据 |
 | R07 | 待开发 | `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 当前仍以退出码 2 表示未实现 | 真实模型、原生窗口、截图或完整产品 smoke |
 | R08 | 待开发 | 任务手册给出人因、来源、安装和发布要求 | 产品级可访问性、视觉、人因或安装验收 |
 
@@ -154,17 +154,22 @@ R05 让 Lens 显示 Harness 正在等待的 approval 或 ask-user，并把用户
 
 开始编码前先执行只读 API 核查：确认当前 dsh 版本中 interaction、approval、permission 和 ask-user 的服务定义、注入方式、待办事件、答复调用、授权主体、过期/取消语义及日志事件。把实际包版本、导出位置、最小探针和失败结果写入 R05 决策记录。若同版本发布 API 没有支持所需语义，停止在适配层，提交带可复现失败用例的独立宿主任务；不得用猜测的接口、模拟状态或客户端字段绕开限制。
 
+该核查已在 `0.1.1-rc.2` 完成。`ctx.approval.request()` 只提供 turn 内的一次性 waterfall 决定，`ctx.userQuestions` 只允许一个 provider；两者都没有 Lens 可以安全使用的 `interactionId`、pending 查询、原子答复、多客户端仲裁或重启恢复 API。详见 [R05 host API audit](evidence/r05-host-api-audit.md) 和 [R05 决策](decisions/2026-09-08-r05-requires-host-owned-interactions.md)。因此插件 R05 暂停在宿主适配边界，先执行 [H05：会话持久交互宿主能力](host-tasks/r05-durable-session-interactions.md)。
+
 ### 6.2 实施步骤与边界
 
-1. 定义由宿主 durable state 驱动的 interaction projection：`sessionId`、`interactionId`、显示所需目的/范围/参数摘要、状态和到期信息。敏感参数只显示作出决定所需的最小内容，诊断日志不得保存材料正文。
-2. 在 TS/Rust 协议中加入读取待办和提交答复的严格消息；如果 strict V3 schema 的必需能力发生不兼容变化，统一升级协议和 pipe 名，并更新正反 fixture。客户端传入的 session 或 interaction id 不能被当作授权证明。
-3. 在 plugin 中调用真实宿主 interaction service；按服务的幂等规则处理重复答复，按 durable 事件恢复断线、过期、另一客户端已答复和 session 重载。
-4. 在 Lens 中显示明确的待决原因、影响范围、允许/拒绝/回答选项、提交中状态和恢复入口。关闭 Lens 不得隐式同意或拒绝；中文输入、键盘焦点、Esc 和异常状态都要可操作。
-5. 当本地 Lens 不具备某种交互能力时，提供经测试的完整 Harness 会话入口，而不是把等待状态伪装为完成或卡死。
+R05 分为两个不可混淆的交付物。H05 在 DeepSeek Harness 仓库新增并发布 session-owned interaction capability；P05 才在本插件消费该发布 API。H05 没有发布包版本、profile composition、稳定 interaction event 和 focused test 证据之前，P05 不得添加本地待办表、第二个 user-question provider、虚构 interaction id 或自动批准代码。
+
+1. 先在 H05 中定义由宿主 durable state 驱动的 interaction projection：`sessionId`、`interactionId`、显示所需目的/范围/参数摘要、状态和到期信息。敏感参数只显示作出决定所需的最小内容，诊断日志不得保存材料正文。
+2. H05 发布并在目标 profile 装配后，锁定发布版本、export、session event、查询与答复语义，建立最小编译/运行 probe；不能以本机主仓库较高版本源码代替。
+3. 再在 TS/Rust 协议中加入读取待办和提交答复的严格消息；如果 strict V3 schema 的必需能力发生不兼容变化，统一升级协议和 pipe 名，并更新正反 fixture。客户端传入的 session 或 interaction id 不能被当作授权证明。
+4. 在 plugin 中调用真实宿主 interaction service；按服务的幂等规则处理重复答复，按 durable 事件恢复断线、过期、另一客户端已答复和 session 重载。
+5. 在 Lens 中显示明确的待决原因、影响范围、允许/拒绝/回答选项、提交中状态和恢复入口。关闭 Lens 不得隐式同意或拒绝；中文输入、键盘焦点、Esc 和异常状态都要可操作。
+6. 当本地 Lens 不具备某种交互能力时，提供经测试的完整 Harness 会话入口，而不是把等待状态伪装为完成或卡死。
 
 ### 6.3 R05 验收与命令
 
-新增 `test:session:interaction` 和对应 package script 后，至少证明未批准前执行体没有运行；允许只执行一次；拒绝不执行；重复、过期、另一客户端抢先答复、断线、取消和跨 session 答复均安全结束；本来不需要审批的只读工具不被额外阻塞。
+H05 的失败用例、实现方法和宿主命令在 [H05 任务书](host-tasks/r05-durable-session-interactions.md) 中固定。只有它发布到目标 profile 后，P05 才新增 `test:session:interaction` 和对应 package script，证明未批准前执行体没有运行；允许只执行一次；拒绝不执行；重复、过期、另一客户端抢先答复、断线、取消和跨 session 答复均安全结束；本来不需要审批的只读工具不被额外阻塞。
 
 ```powershell
 pnpm test:session:interaction
@@ -183,13 +188,17 @@ R05 的真实审批证明属于 R07：真实 profile 触发待办后，分别记
 
 R06 让用户新建、选择和恢复 Harness session，在 Lens 与完整 Harness 中查看同一历史。现有 `session.list`、`session.create`、订阅和 durable replay 是基础，不等于已经拥有 UI 历史选择或重启恢复。Native 只允许保存当前 session identity、确认 cursor、草稿归属等最小恢复元数据，不能保存第二份回答正文或把恢复失败静默替换为新会话。
 
+rc.2 的 `sessionQuery.listSessions()`、`readSession()`、`readTitleSnapshots()`、`readSurface()` 和 `listEvents()` 已由发布类型核实；完整人类历史必须从 `readSession().events` 用 `isAppendSurfaceEvent()` 投影，不能以压缩后的 `readSurface()` 代替。现有 bridge 在 `session.subscribed` 后再刷 replay events，时序安全；但 Native 尚未暴露 list/create/history/unsubscribe，Lens 也没有 session selector。完整审计见 [R06 session-history API audit](evidence/r06-session-history-api-audit.md)。
+
 ### 7.2 实施步骤
 
-1. 用 `sessionQuery` 和既有 bridge 路由核对 session list 的真实标题、状态、时间和错误语义；不要从文件系统扫描或复制 SessionStore。
-2. 实现 Lens 的新建、选择和恢复状态。每次切换先停止/隔离旧 subscription，再从 durable history 重建，然后只从确认的 cursor 继续监听。切换不会默认取消后台 Harness task。
-3. 把草稿、固定材料、pending request、interaction 和 subscription generation 都按 session/request 归属。旧代事件、另一个 session 的消息和过期 cursor 不能污染当前视图。
-4. 找到当前 Harness 支持的会话导航 API 或 URL，写最小自动验证证明打开的目标 session identity。不能猜测 URL、更不能在 URL 中放选区正文、令牌或凭据。
-5. 为 session 删除、无法恢复、旧日志格式、模型不可用、profile 变化、待审批重启和读取失败提供可解释的下一步；恢复失败时不自动创建相似新会话。
+1. 用 `sessionQuery.listSessions()`、`readTitleSnapshots()` 和既有 bridge 路由返回真实 id、创建时间、live/persisted 状态、可选标题和明确错误；不要从文件系统扫描或复制 SessionStore。
+2. 新增纯历史投影，只从 `readSession().events` 和 `isAppendSurfaceEvent()` 生成完整 user/assistant history。历史正文使用 durable `assistant/message`，不把 streaming chunk 作为第二份正文。
+3. 增加 Native list/create/history/unsubscribe 命令和 TS API。读取历史后以最后 durable cursor 订阅；服务端必须先确认订阅再发送 cursor 之后的 event，避免 history/subscribe 间丢事件。
+4. 实现 Lens 的新建、选择和恢复状态。每次切换先释放/隔离旧 subscription，再从 durable history 重建，然后只从确认的 cursor 继续监听。切换不会默认取消后台 Harness task。
+5. 把草稿、固定材料、pending request、interaction 和 subscription generation 都按 session/request 归属。旧代事件、另一个 session 的消息和过期 cursor 不能污染当前视图。
+6. 探测当前 Harness 是否公开受支持的会话导航 API。rc.2 没有 Native 可用的完整 Harness navigation API 时，显示明确不可用状态；不能猜测 URL、更不能在 URL 中放选区正文、令牌或凭据。
+7. 为 session 删除、无法恢复、旧日志格式、模型不可用、profile 变化、待审批重启和读取失败提供可解释的下一步；恢复失败时不自动创建相似新会话。
 
 ### 7.3 R06 验收与命令
 
@@ -347,7 +356,7 @@ R04 只允许 selection 范围。验证 material 的严格 schema、durable 恢�
 ### 13.3 R05 提示词
 
 ```text
-执行 R05。先对当前已安装 dsh 版本做只读 interaction/approval/ask-user API 探针，记录实际服务、事件、权限、答复、过期和 durable log 语义；不要依据文档或其他源码版本猜测 API。若存在真实 API，新增薄的 Harness adapter、严格 IPC、TS/Rust fixture 和 Lens decision UI，始终使用宿主 interactionId、session scope 和权限，不自建审批数据库或自动批准。
+执行 R05。先读取 docs/evidence/r05-host-api-audit.md、docs/decisions/2026-09-08-r05-requires-host-owned-interactions.md 和 docs/host-tasks/r05-durable-session-interactions.md。当前 rc.2 profile 缺少可恢复、可竞答的 pending interaction API，因此不要添加插件内存表、第二个 user-question provider、虚构 interactionId 或自动批准。先在 DeepSeek Harness 完成 H05 并取得发布包版本、profile composition、event/query/respond 语义和 focused-test 证据；再在插件做薄的 Harness adapter、严格 IPC、TS/Rust fixture 和 Lens decision UI。
 
 覆盖允许、拒绝、ask-user、重复、过期、断线、另一客户端先答复、取消、重启和跨 session 拒绝。断言未批准前执行体不调用，答复最多执行一次；客户端能力不足时提供经验证的完整 Harness 入口。新增并运行 test:session:interaction，同时跑 tools、lens:session、protocol、contract 和协议改动后的 Windows pipe。报告 API 证据、实际测试和 R07 仍需的真实审批证据。
 ```
@@ -355,7 +364,7 @@ R04 只允许 selection 范围。验证 material 的严格 schema、durable 恢�
 ### 13.4 R06 提示词
 
 ```text
-执行 R06。以 Harness durable session log 为唯一历史来源，完成 Lens 的 session.list、新建、选择、重载恢复和完整 Harness 会话入口。先核对 sessionQuery 与实际导航 API；本地只保存 session identity、cursor、草稿归属等最小恢复元数据，绝不保存第二份回答正文或猜测 URL。
+执行 R06。先读取 docs/evidence/r06-session-history-api-audit.md，使用已核实的 rc.2 `sessionQuery.listSessions/readSession/readTitleSnapshots` 和 `isAppendSurfaceEvent()`。以 Harness durable session log 为唯一历史来源，完成 Lens 的 session.list、新建、选择、重载恢复；本地只保存 session identity、cursor、草稿归属等最小恢复元数据，绝不保存第二份回答正文或猜测 URL。补齐 Native list/create/history/unsubscribe，读取历史后从确认 cursor 续订。
 
 切换 session 时隔离旧 subscription、草稿、固定材料、pending request 和 interaction；先重建 durable history，再从确认 cursor 续订。覆盖双 session 快速切换、迟到事件、重载、删除、读取失败、旧日志、profile/模型变化、待审批恢复和完整入口 identity。新增并运行 test:session:history、session:replay、lens:session、session:interaction 和必要 contract；恢复失败必须给出用户下一步，不能静默新建会话。
 ```

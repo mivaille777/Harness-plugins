@@ -466,15 +466,15 @@ pnpm test:session:e2e
 | T05-D | 向 Agent 提供会话绑定的选区工具，并保证模型的工具读取不会拿到其他会话的新选区。 | 在 Agent 创建/恢复时将不可变 snapshot 绑定到该 Agent scope；注册审阅后的 `selection_current`/`selection_read_context` 工具。工具只读取该 session 的持久材料；范围扩展留给 T06。使用 Harness 审批与工具结果日志。 | 新增 `pnpm test:session:tools`：跨 session 隔离、快照清除后重放、工具审批、恶意网页文本。 | 真实 profile 中核对工具调用、审批 UI 与 session log 可重建输入。 |
 | T05-E | 取得可审查的真实闭环证据。 | 使用隔离 `DSH_HOME`、已安装的打包 bundle、非敏感固定网页 fixture 和显式配置的模型凭据；不改动用户日常 profile。保存命令、版本、SHA、日志与截图路径，密钥不入库。 | `pnpm test:session:e2e` 仅在 `DEEPSEEK_API_KEY` 和 Windows 环境齐全时执行；前置缺失时必须以明确 skip/exit 2 报告。 | 浏览器选区 → Lens 解释 → 回答 → 追问 → 完整 Harness 会话历史 → 重启后回放；每项记录 PASS/FAIL。 |
 
-**2026-09-08 当前状态。** R01 已在 `1f5107b` 完成回答投影自动检查；R02 已在 `c2e685e` 完成连续订阅自动检查及实际 Windows Named Pipe 验证；R03 已在 `00ccb6a` 完成请求身份、并发幂等、未知提交恢复、取消竞态和 Protocol V2 自动检查及 Windows 管道验证。R04 已将提交材料升级为 Protocol V3，完成 durable 材料、Agent-scoped `selection_current`/`selection_read_context`、同快照安全重试、TS/Rust fixture、真实 ToolRuntime 测试和实际 Windows Named Pipe 验证；其状态为“自动检查与 Windows 管道通过待实测”，详见 `docs/evidence/r04-session-bound-selection-tools.md`。真实模型、受支持 profile 工具调用、可见 Tauri 窗口与进程重启仍待 R07；T05 整体保持“开发中”，下一实现任务为 R05 的审批和 ask-user 宿主适配。
+**2026-09-08 当前状态。** R01 已在 `1f5107b` 完成回答投影自动检查；R02 已在 `c2e685e` 完成连续订阅自动检查及实际 Windows Named Pipe 验证；R03 已在 `00ccb6a` 完成请求身份、并发幂等、未知提交恢复、取消竞态和 Protocol V2 自动检查及 Windows 管道验证。R04 已将提交材料升级为 Protocol V3，完成 durable 材料、Agent-scoped `selection_current`/`selection_read_context`、同快照安全重试、TS/Rust fixture、真实 ToolRuntime 测试和实际 Windows Named Pipe 验证；其状态为“自动检查与 Windows 管道通过待实测”，详见 `docs/evidence/r04-session-bound-selection-tools.md`。R05 的 rc.2 宿主 API 审计证明缺少可恢复、可竞答的 pending interaction capability；插件不以本地状态伪造闭环，先完成 `docs/host-tasks/r05-durable-session-interactions.md`。R06 的 session-query API 核查已完成，可在 H05 期间独立实现 durable history、选择与恢复，详见 `docs/evidence/r06-session-history-api-audit.md`。真实模型、受支持 profile 工具调用、可见 Tauri 窗口与进程重启仍待 R07；T05 整体保持“开发中”。
 
 **从当前状态到完整 DeepSeek Harness 交互的剩余交付包。** 每个交付包的完整步骤、文件边界、失败场景、命令和 Codex 提示词位于详细计划的同名章节；后续开发不得跳过前置验收。
 
 | 顺序 | 交付包 | 目标 | 自动测试 | 必须补充的真实证据 |
 |---|---|---|---|---|
 | 1 | R04 会话绑定工具（自动验证通过） | scoped 注册 `selection_current`、`selection_read_context`，只读取当前执行请求的持久材料 | session:tools、replay、typecheck、contract、bundle 与 Windows Pipe 已通过 | 受支持 profile 的工具可见、工具结果日志和真实模型路径由 R07 验证 |
-| 2 | R05 审批与 ask-user | 投影宿主待办并安全答复，不建立第二套审批状态 | 新增 session:interaction，加 tools、lens:session、protocol | 未批准前工具不执行；允许、拒绝、过期、另一客户端已处理均与宿主一致 |
-| 3 | R06 会话与历史 | 新建、选择、切换、重启恢复并打开同一完整 Harness 会话 | 新增 session:history，加 replay、lens:session | Lens 与 Harness 历史一致；重启不静默创建替代会话；草稿和材料不串换 |
+| 2 | H05 → R05 审批与 ask-user | 先发布宿主 durable interaction seam，再投影宿主待办并安全答复，不建立第二套审批状态 | H05 focused tests；发布后新增 session:interaction，加 tools、lens:session、protocol | 未批准前工具不执行；允许、拒绝、过期、另一客户端已处理均与宿主一致 |
+| 3 | R06 会话与历史（可独立推进） | 新建、选择、切换、重启恢复并打开同一完整 Harness 会话 | 新增 session:history，加 replay、lens:session | Lens 与 Harness 历史一致；重启不静默创建替代会话；草稿和材料不串换 |
 | 4 | R07 真实闭环 | 把 session:e2e 占位脚本改为真实、可失败、可清理的运行器 | 运行器测试、session:e2e、check:task5 | 浏览器选区→回答→追问→工具/审批→完整历史→重启回放；日志、截图和候选 SHA 对齐 |
 | 5 | R08.1/R08.2 | 上下文范围、来源、安全渲染、中文、可访问性和高级视觉 | context-expansion、ui:a11y、ui:visual、Lens e2e | Narrator、125%/200% DPI、多屏、窄窗、长回答及完整状态截图 |
 | 6 | R08.3/R08.4/R08.5 | 性能与人因、安装升级卸载、发布候选证据 | perf、human-factors、installer、check:release | 真人任务数据、干净 Windows 安装 smoke、同一候选 SHA 的兼容矩阵与证据索引 |
@@ -486,8 +486,8 @@ T08 的 Word、PDF 和其他应用 Provider 是可选交付包。未取得用户
 **下一位 Codex 提示词。**
 
 ```text
-从 feat/t05-session-integration 的当前 HEAD 继续，不重置到旧基线。先读 docs/codex-next-development-guide.md 与 docs/harness-integration-development-plan.md；R01～R04 已完成规定的自动验证，下一步从 R05 开始，随后执行 R06～R08。每项均有独立的目标、实现边界、测试、证据门槛与 Codex 提示词。
-R01～R04 已形成投影、订阅、请求生命周期和会话绑定材料基础。现在先对同版本 Harness 的 interaction、approval、permission 与 ask-user API 做最小只读探针；只有实际发布包与失败用例证明缺口时，才能提出独立宿主修改。随后按 R05、R06 完成审批和历史恢复。
+从 feat/t05-session-integration 的当前 HEAD 继续，不重置到旧基线。先读 docs/codex-next-development-guide.md、docs/harness-integration-development-plan.md、docs/evidence/r05-host-api-audit.md、docs/host-tasks/r05-durable-session-interactions.md 和 docs/evidence/r06-session-history-api-audit.md；R01～R04 已完成规定的自动验证。R05 先完成 H05 宿主 capability 并取得发布包/profile 证据，随后才在插件实现审批 UI；R06 的 durable history、选择、恢复和订阅释放现在可独立推进。
+R01～R04 已形成投影、订阅、请求生命周期和会话绑定材料基础。rc.2 的 interaction、approval、permission 与 ask-user API 已完成只读探针，结论是缺少 R05 所需的 durable pending/atomic response 语义。不要创建本地待办表或第二个 provider；先完成独立宿主修改，再做插件适配与历史恢复。
 按 R07 将 test:session:e2e 改为实际运行器，缺少凭据仍可开发框架和负例；真实调用缺前置时明确未验证。更新实际命令、退出码和证据，模拟、TCP、Named Pipe、真实模型及人工验收分别报告。
 ```
 
