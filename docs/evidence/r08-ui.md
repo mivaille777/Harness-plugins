@@ -4,7 +4,7 @@ Date: 2026-09-08
 
 Repository and branch: `mivaille777/Harness-plugins`, `feat/t05-session-integration`
 
-Candidate code SHA: record the commit that contains the R08 UI change; the evidence commit may update this field after the code commit is created.
+Candidate code SHA: `9bdd0e8` (the commit containing the R08 UI change); this evidence document is updated in the following documentation commit.
 
 Environment: Windows, Tauri development binary using WebView2, Node `v24.11.1`, pnpm `11.7.0`, system locale `zh-CN`, dark color scheme. The page was rendered by the real Tauri WebView2 target with a temporary local bridge and a non-sensitive deterministic session fixture. The bridge did not call a DeepSeek model. CDP viewport capture was used only to make the two review sizes reproducible; it does not prove native focus, monitor geometry, DPI conversion or browser UI Automation.
 
