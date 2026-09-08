@@ -25,9 +25,9 @@ TextPattern.GetSelection()
 SelectionSnapshot
         ↓
 Tauri / Rust Native Companion
-        ↓ Protocol V2
+        ↓ Protocol V3
 Windows Named Pipe
-\\.\pipe\dsh-selection-companion-v2
+\\.\pipe\dsh-selection-companion-v3
         ↓
 dsh-selection-companion Cordis plugin
         ↓
@@ -36,6 +36,7 @@ BridgeMessageRouter
 ctx.selectionContext
         ↓
 Harness Session / Agent services
+durable request material + Agent-scoped selection tools
 ```
 
 The Native Companion does **not** call an LLM, write Harness Session files directly, or maintain a second conversation history.
@@ -60,18 +61,18 @@ Completed:
 
 ## Task 3 — versioned TypeScript ↔ Rust IPC
 
-Protocol V2:
+Protocol V3:
 
 ```json
 {
-  "protocol": 2,
+  "protocol": 3,
   "id": "request-id",
   "type": "selection.update",
   "payload": {}
 }
 ```
 
-Harness/native pipe framing is a 4-byte unsigned big-endian JSON length followed by UTF-8 JSON, limited to 1 MiB.
+Harness/native pipe framing is a 4-byte unsigned big-endian JSON length followed by UTF-8 JSON, limited to 1 MiB. V3 does not negotiate with V2. In V3, every `session.submit` also carries a required, strict `material` object: the fixed snapshot identity, revision, capture time, selected text, source, optional document identity, and the literal `selection` authorization and actual scopes. The current material is complete only for the selected text; it excludes provider context, geometry, confidence, and page expansion data.
 
 ## Task 4 — Native Companion + Windows Named Pipe
 
@@ -95,6 +96,8 @@ agent.event
 ```
 
 `BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
+
+`BridgeRuntime::submit_prompt(...)` projects the exact Lens snapshot into the V3 `session.submit.payload.material` object. The native retry path preserves that same snapshot instead of reading the newest global capture. Harness persists the material with the normal `selection-companion` user-message source, so a later browser selection cannot replace the material associated with an earlier request.
 
 ## Task 5 — Extensionless Browser Accessibility Provider
 
@@ -311,13 +314,14 @@ pnpm test:lens:session
 pnpm test:session
 pnpm test:session:transport
 pnpm test:session:replay
+pnpm test:session:tools
 pnpm test:browser-accessibility
 pnpm test:capture
 cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
 
-The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action queues one durable Harness user message, creating a session on first use and reusing it for later prompts. The Lens subscribes on a dedicated pipe, renders correlated answer text, tracks the host turn terminal state, preserves shared-turn request identities, and offers safe recovery when a submit reply is unknown. See [session integration](docs/session-integration.md) and [Selection Lens](docs/selection-lens.md) for the current limits.
+The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action queues one durable Harness user message with the exact snapshot it displayed, creating a session on first use and reusing it for later prompts. The Lens subscribes on a dedicated pipe, renders correlated answer text, tracks the host turn terminal state, preserves shared-turn request identities, and offers safe recovery when a submit reply is unknown. See [session integration](docs/session-integration.md), [session-bound selection tools](docs/session-tools.md), and [Selection Lens](docs/selection-lens.md) for the current limits.
 
 Session checks:
 
@@ -384,7 +388,7 @@ Expected logs include:
 
 ```text
 [selection-companion] plugin loaded!
-selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v2
+selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v3
 ```
 
 ### 3. Start Native Companion
@@ -481,7 +485,7 @@ The optional Browser DOM extension has its own separate checks and is not a Task
 - generic Windows UIA provider for arbitrary desktop applications
 - Word COM provider
 - lazy full-page context expansion
-- Agent `selection_current` / `selection_read_context` tools
+- a real supported `dsh` profile/model run that invokes and records `selection_current` / `selection_read_context`
 - Lens approval / ask-user interaction
 - persisted Lens session selection and complete Harness history navigation
 - real-model session e2e runner and visible Tauri interaction evidence

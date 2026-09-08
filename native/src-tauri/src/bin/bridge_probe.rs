@@ -157,7 +157,17 @@ async fn main() -> Result<(), String> {
                 "sessionId": "session-integration",
                 "requestId": "request-integration",
                 "mode": "queue",
-                "content": [{ "type": "text", "text": "deterministic integration fixture" }]
+                "content": [{ "type": "text", "text": "deterministic integration fixture" }],
+                "material": {
+                    "snapshotId": "snapshot-integration",
+                    "revision": 1,
+                    "capturedAt": 1000,
+                    "selection": { "text": "Deterministic integration selection." },
+                    "source": { "kind": "browser", "app": "Bridge probe" },
+                    "authorizedScope": "selection",
+                    "actualScope": "selection",
+                    "completeness": "complete"
+                }
             }),
         };
         if exchange(&mut requests, &submit).await?.type_name != "session.submitted" {

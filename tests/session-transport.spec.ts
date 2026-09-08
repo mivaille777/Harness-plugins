@@ -46,7 +46,7 @@ function createSessions(): TestSessions {
 
 function subscribeMessage(id: string, cursor?: number): IpcMessage {
   return {
-    protocol: 2,
+    protocol: 3,
     id,
     type: 'session.subscribe',
     payload: { sessionId: 'session-transport', ...(cursor === undefined ? {} : { cursor }) },

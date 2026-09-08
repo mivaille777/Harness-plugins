@@ -101,9 +101,14 @@ export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invoke<SelectionSnapshot | null>('bridge_current_selection')
 }
 
-export async function submitSessionPrompt(sessionId: string | null, content: string, requestId: string): Promise<SessionSubmission> {
+export async function submitSessionPrompt(
+  sessionId: string | null,
+  content: string,
+  requestId: string,
+  material: SelectionSnapshot,
+): Promise<SessionSubmission> {
   try {
-    return await invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId })
+    return await invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId, material })
   } catch (error) {
     const message = String(error)
     const match = /^SUBMISSION_UNKNOWN\|([^|]+)\|([^|]+)\|(.*)$/s.exec(message)

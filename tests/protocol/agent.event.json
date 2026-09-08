@@ -1,5 +1,5 @@
 {
-  "protocol": 2,
+  "protocol": 3,
   "id": "event-1",
   "type": "agent.event",
   "payload": {

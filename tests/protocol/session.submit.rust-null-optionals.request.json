@@ -1,0 +1,35 @@
+{
+  "protocol": 3,
+  "id": "submit-rust-null-optionals-1",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-rust-null-optionals",
+    "requestId": "request-rust-null-optionals",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain the fixed selection."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-rust-null-optionals",
+      "revision": 1,
+      "capturedAt": 1000,
+      "selection": {
+        "text": "A fixed selection emitted by Rust.",
+        "language": null
+      },
+      "source": {
+        "kind": "desktop",
+        "app": null,
+        "process": null,
+        "windowTitle": null
+      },
+      "document": null,
+      "authorizedScope": "selection",
+      "actualScope": "selection",
+      "completeness": "complete"
+    }
+  }
+}

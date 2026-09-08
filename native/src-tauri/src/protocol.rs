@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-pub const IPC_PROTOCOL_VERSION: u32 = 2;
+pub const IPC_PROTOCOL_VERSION: u32 = 3;
 pub const IPC_MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const IPC_FRAME_HEADER_BYTES: usize = 4;
 pub const DEFAULT_IPC_REQUEST_TIMEOUT_MS: u64 = 30_000;
@@ -304,6 +304,34 @@ pub struct SessionSubmitPayload {
     pub request_id: String,
     pub mode: SessionDeliveryMode,
     pub content: Vec<PromptContentPart>,
+    pub material: SelectionMaterial,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionMaterial {
+    pub snapshot_id: String,
+    pub revision: u64,
+    pub captured_at: u64,
+    pub selection: SelectionValue,
+    pub source: SelectionSource,
+    #[serde(default)]
+    pub document: Option<SelectionDocument>,
+    pub authorized_scope: SelectionMaterialScope,
+    pub actual_scope: SelectionMaterialScope,
+    pub completeness: SelectionMaterialCompleteness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionMaterialScope {
+    Selection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionMaterialCompleteness {
+    Complete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -572,6 +600,7 @@ impl IpcMessage {
                         PromptContentPart::Text { text } => require_text(text, "content.text")?,
                     }
                 }
+                payload.material.validate()?;
             }
             "session.submitted" => {
                 let payload: SessionSubmittedPayload = typed_payload(&self.payload)?;
@@ -671,6 +700,39 @@ impl SelectionSnapshot {
                     "invalid selection geometry".into(),
                 ));
             }
+        }
+        Ok(())
+    }
+}
+
+impl SelectionMaterial {
+    pub fn from_snapshot(snapshot: &SelectionSnapshot) -> Self {
+        Self {
+            snapshot_id: snapshot.id.clone(),
+            revision: snapshot.revision,
+            captured_at: snapshot.captured_at,
+            selection: snapshot.selection.clone(),
+            source: snapshot.source.clone(),
+            document: snapshot.document.clone(),
+            authorized_scope: SelectionMaterialScope::Selection,
+            actual_scope: SelectionMaterialScope::Selection,
+            completeness: SelectionMaterialCompleteness::Complete,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        require_text(&self.snapshot_id, "material.snapshotId")?;
+        if self.snapshot_id.chars().count() > 256 {
+            return Err(ProtocolError::InvalidMessage(
+                "material.snapshotId must be at most 256 characters".into(),
+            ));
+        }
+        require_safe_integer(self.revision, "material.revision")?;
+        require_safe_integer(self.captured_at, "material.capturedAt")?;
+        if self.selection.text.trim().is_empty() {
+            return Err(ProtocolError::InvalidMessage(
+                "material.selection.text must not be blank".into(),
+            ));
         }
         Ok(())
     }
@@ -850,6 +912,7 @@ mod tests {
         include_str!("../../../tests/protocol/bridge.hello.response.json"),
         include_str!("../../../tests/protocol/selection.update.request.json"),
         include_str!("../../../tests/protocol/session.submit.request.json"),
+        include_str!("../../../tests/protocol/session.submit.rust-null-optionals.request.json"),
         include_str!("../../../tests/protocol/session.submitted.response.json"),
         include_str!("../../../tests/protocol/session.cancel.request.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
@@ -861,6 +924,11 @@ mod tests {
         include_str!("../../../tests/protocol/invalid/selection.update.unknown-field.json"),
         include_str!("../../../tests/protocol/invalid/session.subscribe.negative-cursor.json"),
         include_str!("../../../tests/protocol/invalid/session.submit.empty-content.json"),
+        include_str!(
+            "../../../tests/protocol/invalid/session.submit.blank-material-selection.json"
+        ),
+        include_str!("../../../tests/protocol/invalid/session.submit.missing-material.json"),
+        include_str!("../../../tests/protocol/invalid/session.submit.invalid-material-scope.json"),
         include_str!("../../../tests/protocol/invalid/session.submitted.missing-message-id.json"),
         include_str!("../../../tests/protocol/invalid/agent.event.missing-persistence.json"),
     ];
@@ -890,11 +958,51 @@ mod tests {
             Err(ProtocolError::ProtocolMismatch(1))
         ));
 
-        let unknown = r#"{"protocol":2,"id":"x","type":"unknown.method","payload":{}}"#;
+        let unknown = r#"{"protocol":3,"id":"x","type":"unknown.method","payload":{}}"#;
         assert!(matches!(
             IpcMessage::from_json(unknown),
             Err(ProtocolError::UnknownMessageType(_))
         ));
+    }
+
+    #[test]
+    fn session_submit_v3_requires_and_preserves_fixed_material() {
+        let submit = IpcMessage::from_json(FIXTURES[3]).unwrap();
+        assert_eq!(IPC_PROTOCOL_VERSION, 3);
+        assert_eq!(submit.protocol, IPC_PROTOCOL_VERSION);
+
+        let payload: SessionSubmitPayload = serde_json::from_value(submit.payload.clone()).unwrap();
+        assert_eq!(payload.material.snapshot_id, "selection-demo");
+        assert_eq!(payload.material.revision, 7);
+        assert_eq!(
+            payload.material.selection.text,
+            "Gaussian-process posterior uncertainty"
+        );
+        assert_eq!(
+            payload.material.authorized_scope,
+            SelectionMaterialScope::Selection
+        );
+        assert_eq!(
+            payload.material.actual_scope,
+            SelectionMaterialScope::Selection
+        );
+        assert_eq!(
+            payload.material.completeness,
+            SelectionMaterialCompleteness::Complete
+        );
+
+        let missing_material = serde_json::json!({
+            "protocol": IPC_PROTOCOL_VERSION,
+            "id": "submit-without-material",
+            "type": "session.submit",
+            "payload": {
+                "sessionId": "session-demo",
+                "requestId": "request-demo",
+                "mode": "queue",
+                "content": [{ "type": "text", "text": "Explain the selection." }]
+            }
+        });
+        assert!(IpcMessage::from_json(&missing_material.to_string()).is_err());
     }
 
     #[test]

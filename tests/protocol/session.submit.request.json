@@ -1,5 +1,5 @@
 {
-  "protocol": 2,
+  "protocol": 3,
   "id": "submit-1",
   "type": "session.submit",
   "payload": {
@@ -11,6 +11,29 @@
         "type": "text",
         "text": "Explain the currently selected passage."
       }
-    ]
+    ],
+    "material": {
+      "snapshotId": "selection-demo",
+      "revision": 7,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Gaussian-process posterior uncertainty",
+        "language": "en"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome",
+        "process": "chrome.exe",
+        "windowTitle": "Safe Bayesian Optimization"
+      },
+      "document": {
+        "title": "Safe Bayesian Optimization",
+        "url": "https://example.test/paper",
+        "section": "3.2 Acquisition Function"
+      },
+      "authorizedScope": "selection",
+      "actualScope": "selection",
+      "completeness": "complete"
+    }
   }
 }

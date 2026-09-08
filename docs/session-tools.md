@@ -1,19 +1,44 @@
 # Session-bound selection tools
 
-T05-D requires a Harness tool capability that can register a tool for one Agent instance, route calls through the host approval flow, and append the tool result to that Agent's durable session log.
-The published `@deepseek-ai/dsh-tools@0.1.1-rc.2` package exists, and the installed Agent declarations expose `setup(agentCtx)` for creation and resume, explicitly including scoped tool composition. The plugin does not yet declare or integrate the tool package. Its matching-version exports and profile assembly still require implementation verification.
+The companion declares `@deepseek-ai/dsh-tools@0.1.1-rc.2` as a peer and uses the matching runtime's Agent `setup(agentCtx)` hook on both create and resume. The setup function registers the two tools through the Agent-scoped `ToolRuntime`; it does not create a process-global selection registry.
 
-The Selection Companion must not substitute a global current-selection callback, a prompt convention, or a native IPC read for this missing capability.
-Those alternatives would let a later browser selection contaminate an earlier session and would bypass the host's tool approval and result logging.
+## Fixed request material
 
-The integration must verify and use the following host capabilities:
+Every Protocol V3 `session.submit` carries a validated `material` object, and the Harness service saves that object in the durable `selection-companion` source of the ordinary user message. The object contains the snapshot identity and revision, capture time, selected text, source, optional document identity, and literal `authorizedScope`, `actualScope`, and `completeness` values of `selection`, `selection`, and `complete`.
 
-- An Agent creation or resume option accepting Agent-local tool definitions.
-- A tool handler context containing the Agent's session id and a host approval operation.
-- A durable, model-visible tool result event written by the host after approval.
-- A disposer tied to the Agent lifecycle.
+This is intentionally smaller than a capture snapshot. It does not include local, section, or page context, geometry, provider information, confidence, or capabilities. Native retry retains the exact Lens snapshot used for the first attempt. Clearing native capture memory or receiving a newer browser selection therefore cannot change the durable request material.
 
-Once available, the plugin will bind an immutable selection snapshot to that Agent-local tool context and expose `selection_current` and `selection_read_context`.
-Both handlers will read only the snapshot stored for that session. Rehydration must read the persisted selection material from the session log, so clearing native memory cannot change a replayed tool result.
+## Available tools
 
-The earlier conclusion that T05-D required a new upstream tool capability is withdrawn. Follow R04 of [the integration development plan](harness-integration-development-plan.md) to verify matching-version dependencies and implement scoped tools, durable request-bound material, policy integration, and recovery tests. Existing submission and Lens code do not complete this work.
+`selection_current` has no parameters. It returns the request and snapshot identities, capture time, source and document metadata, selected-character count, language when present, and the authorization/completeness fields. It does not return the selected text.
+
+`selection_read_context` requires `scope: "selection"`. It returns the same metadata and the exact persisted selected text. Its rendered result labels that text as untrusted reference data, not instructions. The parameter cannot request `local`, `section`, or `page`, and the implementation does not expand, refetch, or infer surrounding page content.
+
+Both tools use generic read call/result presentation with source, scope, and completeness metadata. They check the host cancellation signal before resolving material. They add no companion-owned approval decision, permission store, or Lens approval UI; those interactions remain R05 work and must use a verified Harness host flow.
+
+## Resolution and isolation
+
+At execution, a tool verifies that the execution Agent is the Agent whose setup registered it. It locates its unique durable `tool/call`, reads the associated turn, and selects the latest preceding `selection-companion` user message in that same turn. It validates the saved material again before returning it. A missing call, duplicate call ID, missing material, or cross-Agent execution fails visibly.
+
+This lookup deliberately does not read `ctx.selectionContext`, Native IPC, a last-submitted cache, or the assembled prompt. It is valid after Agent resume because the source message belongs to the durable session log. Tool registrations belong to the Agent setup scope and must disappear when that scope is disposed.
+
+## Acceptance status and verification
+
+R04 source integration is present, but R04 is not accepted by this document. A supported `dsh` profile/model invocation, host-policy behavior, durable tool-result observation, and visible native interaction have not been recorded here. Do not treat a unit or WebView result as evidence of those real paths.
+
+Run the focused checks from the plugin repository root after changing this surface:
+
+~~~powershell
+pnpm typecheck
+pnpm test:protocol
+pnpm test:session
+pnpm test:session:replay
+pnpm test:session:tools
+pnpm test:lens:session
+pnpm --dir native build
+pnpm test:contract
+pnpm test:bridge:integration
+pnpm verify:bundle
+~~~
+
+`test:bridge:integration` is Windows-only. The last required R04 check is a real supported profile that exposes both tool names, invokes each tool for a submitted selection, verifies that another session and a newer capture cannot alter the result, and inspects the host's durable tool events. See R04 of [the integration development plan](harness-integration-development-plan.md) for the full acceptance matrix.

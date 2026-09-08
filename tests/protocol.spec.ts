@@ -63,13 +63,13 @@ describe('IPC message validation', () => {
       id: 'hello-2',
       type: 'bridge.ping',
       payload: { sentAt: 1 },
-    })).toThrow('unsupported IPC protocol 1; expected 2')
+    })).toThrow('unsupported IPC protocol 1; expected 3')
   })
 
   it('rejects unknown message types', () => {
     try {
       parseIpcMessage({
-        protocol: 2,
+        protocol: 3,
         id: 'unknown-1',
         type: 'unknown.method',
         payload: {},
@@ -83,7 +83,7 @@ describe('IPC message validation', () => {
 
   it('rejects unknown selection fields at the IPC boundary', () => {
     expect(() => parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'selection-1',
       type: 'selection.update',
       payload: {
@@ -106,6 +106,38 @@ describe('IPC message validation', () => {
         },
       },
     })).toThrow(IpcProtocolError)
+  })
+
+  it('normalizes Rust null spellings for absent material fields before durable storage', () => {
+    const parsed = parseIpcMessage({
+      protocol: 3,
+      id: 'submit-rust-optional-fields',
+      type: 'session.submit',
+      payload: {
+        sessionId: 'session-1',
+        requestId: 'request-1',
+        mode: 'queue',
+        content: [{ type: 'text', text: 'Explain this fixed selection.' }],
+        material: {
+          ...selectionMaterialFixture(),
+          selection: { text: 'Protocol fixture selection.', language: null },
+          source: { kind: 'browser', app: null, process: null, windowTitle: null },
+          document: null,
+        },
+      },
+    })
+
+    if (parsed.type !== 'session.submit') throw new Error('expected session.submit message')
+    expect(parsed.payload.material).toEqual({
+      snapshotId: 'snapshot-protocol',
+      revision: 1,
+      capturedAt: 1_000,
+      selection: { text: 'Protocol fixture selection.' },
+      source: { kind: 'browser' },
+      authorizedScope: 'selection',
+      actualScope: 'selection',
+      completeness: 'complete',
+    })
   })
 })
 
@@ -133,9 +165,9 @@ describe('IPC length-prefixed framing', () => {
       .toThrow('declares')
   })
 
-  it('rejects payloads larger than the v2 one-megabyte limit', () => {
+  it('rejects payloads larger than the v3 one-megabyte limit', () => {
     const oversized: IpcMessage = {
-      protocol: 2,
+      protocol: 3,
       id: 'large-1',
       type: 'session.submit',
       payload: {
@@ -143,12 +175,26 @@ describe('IPC length-prefixed framing', () => {
         requestId: 'request-1',
         mode: 'queue',
         content: [{ type: 'text', text: 'x'.repeat(IPC_MAX_FRAME_BYTES) }],
+        material: selectionMaterialFixture(),
       },
     }
 
     expect(() => encodeIpcFrame(oversized)).toThrow(IpcProtocolError)
   })
 })
+
+function selectionMaterialFixture() {
+  return {
+    snapshotId: 'snapshot-protocol',
+    revision: 1,
+    capturedAt: 1_000,
+    selection: { text: 'Protocol fixture selection.' },
+    source: { kind: 'browser' as const, app: 'Chrome' },
+    authorizedScope: 'selection' as const,
+    actualScope: 'selection' as const,
+    completeness: 'complete' as const,
+  }
+}
 
 describe('pending request lifecycle', () => {
   it('rejects duplicate ids, expires timed-out requests, and resets after reconnect/restart', () => {

@@ -17,8 +17,14 @@ const eventApi = vi.hoisted(() => ({
 vi.mock('./api/bridge', () => api)
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide }) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: eventApi.listen }))
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value
+  for (const child of Object.values(value)) deepFreeze(child)
+  Object.freeze(value)
+  return value
+}
 const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
-const selection = { id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { pageAvailable: false }, capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 }
+const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { pageAvailable: false }, capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {
   beforeEach(() => { vi.clearAllMocks(); eventApi.handler = null; eventApi.listen.mockImplementation(async (_name: string, handler: (event: { payload: unknown }) => void) => { eventApi.handler = handler; return eventApi.unlisten }); api.getCaptureStatus.mockResolvedValue(capture); api.getCurrentSelection.mockResolvedValue(selection); api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' }); api.resumeCapture.mockResolvedValue(capture); api.submitSessionPrompt.mockResolvedValue({ sessionId: 'session-1', requestId: 'request-1' }); api.subscribeSession.mockResolvedValue(undefined); api.cancelSession.mockResolvedValue(true) })
@@ -98,7 +104,7 @@ describe('selection lens', () => {
     finishSubmit?.({ sessionId: 'session-1', requestId: 'request-1' })
     await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
   })
-  it('retries an unknown submission with the same logical request identity', async () => {
+  it('retries an unknown submission with the same logical request identity and fixed snapshot', async () => {
     api.submitSessionPrompt
       .mockRejectedValueOnce(new api.SubmissionUnknownError('session-recovered', 'request-recovered', 'reply lost'))
       .mockResolvedValueOnce({ sessionId: 'session-recovered', requestId: 'request-recovered', messageId: 'message-recovered', delivery: 'queued', duplicate: true })
@@ -112,6 +118,15 @@ describe('selection lens', () => {
     await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(2))
     expect(api.submitSessionPrompt.mock.calls[1]?.[0]).toBe('session-recovered')
     expect(api.submitSessionPrompt.mock.calls[1]?.[2]).toBe('request-recovered')
+    expect(api.submitSessionPrompt.mock.calls[0]?.[3]).toBe(selection)
+    expect(api.submitSessionPrompt.mock.calls[1]?.[3]).toBe(api.submitSessionPrompt.mock.calls[0]?.[3])
+    expect(Object.isFrozen(api.submitSessionPrompt.mock.calls[1]?.[3])).toBe(true)
+    expect(api.submitSessionPrompt.mock.calls[1]?.[3]).toMatchObject({
+      id: 's1',
+      revision: 2,
+      selection: { text: '中文 selection 🚀' },
+      document: { title: 'Fixture page' },
+    })
     await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
   })
   it('keeps a completed turn when the cancellation reply arrives late', async () => {

@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { snapshotJsonValue } from '@deepseek-ai/dsh-session'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BRIDGE_CAPABILITIES,
   BridgeMessageRouter,
@@ -13,10 +14,11 @@ import {
 function setup(now = 42_000) {
   const ctx = new Context()
   new SelectionContextService(ctx)
+  const submit = vi.fn(async (..._args: unknown[]) => ({ requestId: 'request-test', messageId: 'message-test', delivery: 'queued' as const, duplicate: false }))
   const sessions = {
     list: async () => [],
     create: async () => 'session-created',
-    submit: async () => ({ requestId: 'request-test', messageId: 'message-test', delivery: 'queued' as const, duplicate: false }),
+    submit,
     cancel: () => true,
     subscribe: async () => ({ dispose: () => undefined }),
   }
@@ -24,12 +26,12 @@ function setup(now = 42_000) {
     pluginVersion: '0.1.0-test',
     now: () => now,
   })
-  return { ctx, router }
+  return { ctx, router, submit }
 }
 
 function selectionUpdate() {
   return parseIpcMessage({
-    protocol: 2,
+    protocol: 3,
     id: 'selection-update-1',
     type: 'selection.update',
     payload: {
@@ -57,6 +59,19 @@ function selectionUpdate() {
   })
 }
 
+function selectionMaterial() {
+  return {
+    snapshotId: 'selection-1',
+    revision: 1,
+    capturedAt: 1_000,
+    selection: { text: 'DeepSeek Harness selection context' },
+    source: { kind: 'browser', app: 'Chrome' },
+    authorizedScope: 'selection' as const,
+    actualScope: 'selection' as const,
+    completeness: 'complete' as const,
+  }
+}
+
 describe('BridgeMessageRouter', () => {
   it('exposes bounded server defaults', () => {
     expect(DEFAULT_BRIDGE_IDLE_TIMEOUT_MS).toBe(30_000)
@@ -68,21 +83,21 @@ describe('BridgeMessageRouter', () => {
     new SelectionContextService(clientContext)
     expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
   })
-  it('negotiates Protocol V2 and advertises session capabilities', async () => {
+  it('negotiates Protocol V3 and advertises session capabilities', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'hello-1',
       type: 'bridge.hello',
       payload: {
         client: { name: 'native-test', version: '0.1.0', platform: 'windows' },
-        supportedProtocols: [2],
+        supportedProtocols: [3],
       },
     }))
 
     expect(response.type).toBe('bridge.hello.result')
     if (response.type !== 'bridge.hello.result') throw new Error('unexpected response')
-    expect(response.payload.protocol).toBe(2)
+    expect(response.payload.protocol).toBe(3)
     expect(response.payload.server.version).toBe('0.1.0-test')
     expect(response.payload.capabilities).toEqual(BRIDGE_CAPABILITIES)
   })
@@ -90,7 +105,7 @@ describe('BridgeMessageRouter', () => {
   it('returns a deterministic pong', async () => {
     const { router } = setup(99_999)
     const response = await router.handle(parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'ping-1',
       type: 'bridge.ping',
       payload: { sentAt: 12_345 },
@@ -116,7 +131,7 @@ describe('BridgeMessageRouter', () => {
     const { router } = setup()
     await router.handle(selectionUpdate())
     const response = await router.handle(parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'current-1',
       type: 'selection.current',
       payload: {},
@@ -131,7 +146,7 @@ describe('BridgeMessageRouter', () => {
   it('returns the durable message receipt for a submitted request', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'submit-transport-1',
       type: 'session.submit',
       payload: {
@@ -139,10 +154,11 @@ describe('BridgeMessageRouter', () => {
         requestId: 'request-test',
         mode: 'queue',
         content: [{ type: 'text', text: 'Explain the fixed material.' }],
+        material: selectionMaterial(),
       },
     }))
     expect(response).toEqual({
-      protocol: 2,
+      protocol: 3,
       id: 'submit-transport-1',
       type: 'session.submitted',
       payload: {
@@ -155,10 +171,50 @@ describe('BridgeMessageRouter', () => {
     })
   })
 
-  it('fails closed for Protocol V2 operations that remain unavailable', async () => {
+  it('normalizes Rust null optional material before routing the durable submission', async () => {
+    const { router, submit } = setup()
+
+    await router.handle(parseIpcMessage({
+      protocol: 3,
+      id: 'submit-rust-null-material',
+      type: 'session.submit',
+      payload: {
+        sessionId: 'session-1',
+        requestId: 'request-rust-null',
+        mode: 'queue',
+        content: [{ type: 'text', text: 'Explain this fixed material.' }],
+        material: {
+          snapshotId: 'snapshot-rust-null',
+          revision: 1,
+          capturedAt: 1_000,
+          selection: { text: 'Fixed native material.', language: null },
+          source: { kind: 'desktop', app: null, process: null, windowTitle: null },
+          document: null,
+          authorizedScope: 'selection',
+          actualScope: 'selection',
+          completeness: 'complete',
+        },
+      },
+    }))
+
+    const material = submit.mock.calls[0]?.[4]
+    expect(snapshotJsonValue(material)).toEqual(material)
+    expect(material).toEqual({
+      snapshotId: 'snapshot-rust-null',
+      revision: 1,
+      capturedAt: 1_000,
+      selection: { text: 'Fixed native material.' },
+      source: { kind: 'desktop' },
+      authorizedScope: 'selection',
+      actualScope: 'selection',
+      completeness: 'complete',
+    })
+  })
+
+  it('fails closed for Protocol V3 operations that remain unavailable', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 2,
+      protocol: 3,
       id: 'session-list-1',
       type: 'selection.expand',
       payload: { snapshotId: 'snapshot-1', scope: 'page' },

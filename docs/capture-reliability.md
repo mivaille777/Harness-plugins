@@ -1,8 +1,10 @@
 # Capture reliability and privacy
 
-The native companion keeps at most one unpublished selection. A UI Automation event enters a capacity-one trigger channel, and a capture result replaces the latest unpublished value. The publisher reads that latest value only after the bridge is ready. This policy applies only before a selection is sent to Harness. It never replaces a selection that a user has already submitted to a later session flow.
+The native companion keeps at most one unpublished selection. A UI Automation event enters a capacity-one trigger channel, and a capture result replaces the latest unpublished value. The publisher reads that latest value only after the bridge is ready. This policy applies only before a selection is sent to Harness. It never replaces the exact snapshot that a user has already fixed in a Lens session submission.
 
-The native diagnostics surface exposes a capture phase, queue depth, timestamps, error summary, and counters. It does not expose selected text or full URLs. A phase of `noSelection`, `notApplicable`, `excluded`, or `error` is status for the local capture runtime. Protocol V2 has no selection-clear message, so those phases do not delete an immutable snapshot already stored in Harness.
+The native diagnostics surface exposes a capture phase, queue depth, timestamps, error summary, and counters. It does not expose selected text or full URLs. A phase of `noSelection`, `notApplicable`, `excluded`, or `error` is status for the local capture runtime. Protocol V3 has no selection-clear message, so those phases do not delete an immutable snapshot already stored in Harness.
+
+When the user submits an explicit Lens action, the native bridge projects that displayed snapshot into the required V3 `material` object and sends it with the normal session request. The material keeps the selected text, source, optional document identity, capture identity and revision, and fixed `selection` authorization fields. It excludes browser context, page text, geometry, capabilities, provider, and confidence. A retry retains the same Lens snapshot. Later UI Automation captures remain local/current-selection updates and cannot rewrite material already persisted in a Harness user message.
 
 ## Pause and lifecycle
 
@@ -42,3 +44,5 @@ pnpm test:native-ui
 4. Verify Chinese, emoji, a long selection, and an excluded host or application using only non-sensitive fixture content.
 
 Record the Windows, browser, DPI, Harness, and commit versions with the [test evidence template](test-evidence-template.md). A successful build or Rust test does not prove those UIA interactions.
+
+The capture checks also do not prove a supported profile/model call to the session-bound selection tools or a visible Tauri session interaction. Record those as separate R04/R07 evidence after the focused protocol, session, tool, and native checks pass.

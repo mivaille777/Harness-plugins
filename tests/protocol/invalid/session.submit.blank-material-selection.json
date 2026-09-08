@@ -1,18 +1,23 @@
 {
   "protocol": 3,
-  "id": "submit-invalid-1",
+  "id": "submit-blank-material-selection-1",
   "type": "session.submit",
   "payload": {
     "sessionId": "session-1",
-    "requestId": "request-1",
+    "requestId": "request-blank-material-selection",
     "mode": "queue",
-    "content": [],
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain the selected material."
+      }
+    ],
     "material": {
-      "snapshotId": "selection-invalid-content",
+      "snapshotId": "snapshot-blank-material-selection",
       "revision": 1,
-      "capturedAt": 1725753600000,
+      "capturedAt": 1000,
       "selection": {
-        "text": "Selected text"
+        "text": " \t "
       },
       "source": {
         "kind": "browser"

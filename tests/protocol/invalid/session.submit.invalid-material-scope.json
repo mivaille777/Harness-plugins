@@ -1,14 +1,19 @@
 {
   "protocol": 3,
-  "id": "submit-invalid-1",
+  "id": "submit-invalid-material-scope-1",
   "type": "session.submit",
   "payload": {
     "sessionId": "session-1",
     "requestId": "request-1",
     "mode": "queue",
-    "content": [],
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain the selected text."
+      }
+    ],
     "material": {
-      "snapshotId": "selection-invalid-content",
+      "snapshotId": "selection-invalid-scope",
       "revision": 1,
       "capturedAt": 1725753600000,
       "selection": {
@@ -18,7 +23,7 @@
         "kind": "browser"
       },
       "authorizedScope": "selection",
-      "actualScope": "selection",
+      "actualScope": "page",
       "completeness": "complete"
     }
   }

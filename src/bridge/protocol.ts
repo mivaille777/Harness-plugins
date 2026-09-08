@@ -1,7 +1,8 @@
 import { z, ZodError } from 'zod'
 import { normalizeSelectionSnapshot, type SelectionSnapshot } from '../context/snapshot.js'
+import { normalizeSelectionMaterial, selectionMaterialSchema, type SelectionMaterial } from '../session/material.js'
 
-export const IPC_PROTOCOL_VERSION = 2 as const
+export const IPC_PROTOCOL_VERSION = 3 as const
 export const IPC_MAX_FRAME_BYTES = 1024 * 1024
 
 export const IPC_MESSAGE_TYPES = [
@@ -141,6 +142,7 @@ export type IpcMessage =
       readonly requestId: string
       readonly mode: SessionDeliveryMode
       readonly content: readonly PromptTextPart[]
+      readonly material: SelectionMaterial
     }>
   | IpcEnvelope<'session.submitted', {
       readonly accepted: boolean
@@ -384,7 +386,8 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         requestId: nonEmptyString,
         mode: deliveryModeSchema,
         content: z.array(z.object({ type: z.literal('text'), text: nonEmptyString }).strict()).min(1),
-      }).strict().parse(payload)
+        material: selectionMaterialSchema,
+      }).strict().transform(value => ({ ...value, material: normalizeSelectionMaterial(value.material) })).parse(payload)
     case 'session.submitted':
       return z.object({
         accepted: z.literal(true),

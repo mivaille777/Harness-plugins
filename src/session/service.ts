@@ -7,6 +7,7 @@ import { createUserMessage, type ContentBlock, type UserMessage } from '@deepsee
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type { AgentEventKind, SessionDeliveryMode, SessionSummary } from '../bridge/protocol.js'
+import { registerSelectionTools, type SelectionMaterial } from './material.js'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -15,6 +16,7 @@ declare module '@deepseek-ai/dsh-llm' {
       readonly requestId: string
       readonly deliveryMode: SessionDeliveryMode
       readonly contentDigest: string
+      readonly material: SelectionMaterial
     }
   }
 }
@@ -143,7 +145,7 @@ declare module '@deepseek-ai/cordis' {
  * It owns no model client or history: every prompt is a normal durable Harness user message.
  */
 export class SelectionCompanionSessionService extends Service {
-  static inject = ['agents', 'agentDefaultModel', 'sessionQuery']
+  static inject = ['agents', 'agentDefaultModel', 'sessionQuery', 'tools']
 
   private readonly handles = new Map<string, { dispose(): Promise<void> }>()
   private readonly submissions = new Map<string, SubmissionReceipt>()
@@ -179,6 +181,7 @@ export class SelectionCompanionSessionService extends Service {
       sessionId: id,
       meta: { cwd: resolve(cwd ?? process.cwd()) },
       agentOptions: { provider: selection.provider, model: selection.model },
+      setup: registerSelectionTools,
     })
     this.handles.set(String(id), handle)
     return String(id)
@@ -189,9 +192,10 @@ export class SelectionCompanionSessionService extends Service {
     requestId: string,
     mode: SessionDeliveryMode,
     content: readonly ContentBlock[],
+    material: SelectionMaterial,
   ): Promise<SessionSubmissionResult> {
     this.expireSubmissions()
-    const fingerprint = submissionFingerprint(mode, content)
+    const fingerprint = submissionFingerprint(mode, content, material)
     const previous = this.submissions.get(requestId)
     if (previous !== undefined) {
       if (previous.sessionId !== sessionId) throw new Error(`requestId ${requestId} belongs to another session`)
@@ -199,7 +203,7 @@ export class SelectionCompanionSessionService extends Service {
       return previous.result
     }
 
-    const result = this.acceptSubmission(sessionId, requestId, mode, content, fingerprint)
+    const result = this.acceptSubmission(sessionId, requestId, mode, content, material, fingerprint)
     const receipt: SubmissionReceipt = {
       sessionId,
       fingerprint,
@@ -221,6 +225,7 @@ export class SelectionCompanionSessionService extends Service {
     requestId: string,
     mode: SessionDeliveryMode,
     content: readonly ContentBlock[],
+    material: SelectionMaterial,
     fingerprint: string,
   ): Promise<SessionSubmissionResult> {
     const agent = await this.resolveAgent(sessionId)
@@ -238,7 +243,7 @@ export class SelectionCompanionSessionService extends Service {
     }
     const message = createUserMessage({
       content: [...content],
-      source: { kind: 'selection-companion', requestId, deliveryMode: mode, contentDigest: fingerprint },
+      source: { kind: 'selection-companion', requestId, deliveryMode: mode, contentDigest: fingerprint, material },
     })
     if (mode === 'queue') agent.followup(message)
     else agent.steer(message)
@@ -343,6 +348,7 @@ export class SelectionCompanionSessionService extends Service {
     const handle = await this.ctx.agents.resume({
       resumeSessionId: id,
       agentOptions: { provider: selection.provider, model: selection.model },
+      setup: registerSelectionTools,
     })
     this.handles.set(String(id), handle)
     return handle.agent
@@ -357,8 +363,12 @@ export class SelectionCompanionSessionService extends Service {
 
 }
 
-function submissionFingerprint(mode: SessionDeliveryMode, content: readonly ContentBlock[]): string {
-  return createHash('sha256').update(JSON.stringify({ mode, content })).digest('hex')
+function submissionFingerprint(
+  mode: SessionDeliveryMode,
+  content: readonly ContentBlock[],
+  material: SelectionMaterial,
+): string {
+  return createHash('sha256').update(JSON.stringify({ mode, content, material })).digest('hex')
 }
 
 interface DurableSelectionMessage extends UserMessage {
@@ -367,6 +377,7 @@ interface DurableSelectionMessage extends UserMessage {
     readonly requestId: string
     readonly deliveryMode: SessionDeliveryMode
     readonly contentDigest: string
+    readonly material: SelectionMaterial
   }
 }
 

@@ -125,7 +125,13 @@ export class BridgeMessageRouter {
         return { protocol: IPC_PROTOCOL_VERSION, id: message.id, type: 'session.created', payload: { sessionId } }
       }
       case 'session.submit': {
-        const result = await this.sessions.submit(message.payload.sessionId, message.payload.requestId, message.payload.mode, message.payload.content)
+        const result = await this.sessions.submit(
+          message.payload.sessionId,
+          message.payload.requestId,
+          message.payload.mode,
+          message.payload.content,
+          message.payload.material,
+        )
         return {
           protocol: IPC_PROTOCOL_VERSION,
           id: message.id,

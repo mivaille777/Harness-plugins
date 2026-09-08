@@ -11,8 +11,8 @@ use tokio::sync::Mutex;
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
 
 use crate::protocol::{
-    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionSnapshot,
-    IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
+    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionMaterial,
+    SelectionSnapshot, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,7 +25,7 @@ pub struct SessionSubmission {
     pub duplicate: bool,
 }
 
-pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v2";
+pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v3";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -550,6 +550,7 @@ impl BridgeRuntime {
         session_id: Option<String>,
         content: String,
         logical_request_id: String,
+        material_snapshot: SelectionSnapshot,
     ) -> Result<SessionSubmission, String> {
         if content.trim().is_empty() {
             return Err("session prompt must not be empty".to_owned());
@@ -557,6 +558,10 @@ impl BridgeRuntime {
         if logical_request_id.trim().is_empty() {
             return Err("logical request id must not be empty".to_owned());
         }
+        material_snapshot
+            .validate()
+            .map_err(|error| error.to_string())?;
+        let material = SelectionMaterial::from_snapshot(&material_snapshot);
         self.connect().await?;
         let mut inner = self.inner.lock().await;
         let client = inner
@@ -605,7 +610,8 @@ impl BridgeRuntime {
                 "sessionId": session_id,
                 "requestId": logical_request_id,
                 "mode": "queue",
-                "content": [{ "type": "text", "text": content }]
+                "content": [{ "type": "text", "text": content }],
+                "material": material
             }),
         };
         let response = match exchange(client, &submit, self.request_timeout).await {
@@ -719,6 +725,7 @@ impl BridgeRuntime {
         _session_id: Option<String>,
         _content: String,
         _logical_request_id: String,
+        _material_snapshot: SelectionSnapshot,
     ) -> Result<SessionSubmission, String> {
         self.connect().await?;
         unreachable!()
@@ -788,8 +795,11 @@ pub async fn bridge_submit_prompt(
     session_id: Option<String>,
     content: String,
     request_id: String,
+    material: SelectionSnapshot,
 ) -> Result<SessionSubmission, String> {
-    state.submit_prompt(session_id, content, request_id).await
+    state
+        .submit_prompt(session_id, content, request_id, material)
+        .await
 }
 
 #[cfg(windows)]
@@ -969,9 +979,30 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
 
+    fn material_snapshot() -> SelectionSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "id": "snapshot-submit",
+            "revision": 1,
+            "capturedAt": 1_000,
+            "selection": { "text": "fixed selected material" },
+            "source": { "kind": "browser", "app": "Chrome" },
+            "document": { "title": "Fixed document", "url": "https://example.test/fixed" },
+            "context": { "pageAvailable": false },
+            "capabilities": {
+                "localContext": false,
+                "sectionContext": false,
+                "pageContext": false,
+                "screenshot": false
+            },
+            "provider": "test-provider",
+            "confidence": 1.0
+        }))
+        .unwrap()
+    }
+
     #[test]
     fn default_pipe_matches_harness_transport() {
-        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v2");
+        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v3");
     }
 
     #[test]
@@ -1049,12 +1080,40 @@ mod tests {
                 Some("session-unknown".to_owned()),
                 "fixed prompt".to_owned(),
                 "request-unknown".to_owned(),
+                material_snapshot(),
             )
             .await
             .unwrap_err();
         let submitted = server_task.await.unwrap();
 
         assert_eq!(submitted.type_name, "session.submit");
+        assert_eq!(submitted.protocol, IPC_PROTOCOL_VERSION);
+        assert_eq!(IPC_PROTOCOL_VERSION, 3);
+        assert_eq!(
+            submitted.payload["material"],
+            serde_json::json!({
+                "snapshotId": "snapshot-submit",
+                "revision": 1,
+                "capturedAt": 1_000,
+                "selection": { "text": "fixed selected material", "language": null },
+                "source": {
+                    "kind": "browser",
+                    "app": "Chrome",
+                    "process": null,
+                    "windowTitle": null
+                },
+                "document": {
+                    "title": "Fixed document",
+                    "url": "https://example.test/fixed",
+                    "filePath": null,
+                    "section": null,
+                    "frameUrl": null
+                },
+                "authorizedScope": "selection",
+                "actualScope": "selection",
+                "completeness": "complete"
+            })
+        );
         assert_eq!(
             submitted
                 .payload

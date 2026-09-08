@@ -1,7 +1,35 @@
 import { Context } from '@deepseek-ai/cordis'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId, snapshotJsonValue, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
+import { normalizeSelectionMaterial, registerSelectionTools } from '../src/session/material.js'
 import { SelectionCompanionSessionService } from '../src/session/service.js'
+
+function material() {
+  return normalizeSelectionMaterial({
+    snapshotId: 'snapshot-test',
+    revision: 1,
+    capturedAt: 1_000,
+    selection: { text: 'Fixed selected material.' },
+    source: { kind: 'browser', app: 'Chrome' },
+    authorizedScope: 'selection',
+    actualScope: 'selection',
+    completeness: 'complete',
+  })
+}
+
+function rustNullMaterial() {
+  return {
+    snapshotId: 'snapshot-rust-null',
+    revision: 1,
+    capturedAt: 1_000,
+    selection: { text: 'A fixed Rust selection.', language: null },
+    source: { kind: 'desktop', app: null, process: null, windowTitle: null },
+    document: null,
+    authorizedScope: 'selection',
+    actualScope: 'selection',
+    completeness: 'complete',
+  }
+}
 
 function setup(now: number | (() => number) = 10_000, initialEvents: SessionEvent[] = []) {
   const ctx = new Context()
@@ -13,18 +41,20 @@ function setup(now: number | (() => number) = 10_000, initialEvents: SessionEven
   const makeAgent = (id: string) => ({
     id: SessionId(id), status: 'idle', session: { events: initialEvents }, followup, steer, cancel,
   })
+  const create = vi.fn(async (options: { sessionId: string }) => {
+    const agent = makeAgent(options.sessionId)
+    agents.set(options.sessionId, agent)
+    return { agent, dispose: async () => { agents.delete(options.sessionId) } }
+  })
+  const resume = vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
+    const agent = makeAgent(resumeSessionId)
+    agents.set(resumeSessionId, agent)
+    return { agent, dispose: async () => { agents.delete(resumeSessionId) } }
+  })
   runtime.agents = {
     get: (id: string) => agents.get(id),
-    create: vi.fn(async (options: { sessionId: string }) => {
-      const agent = makeAgent(options.sessionId)
-      agents.set(options.sessionId, agent)
-      return { agent, dispose: async () => { agents.delete(options.sessionId) } }
-    }),
-    resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
-      const agent = makeAgent(resumeSessionId)
-      agents.set(resumeSessionId, agent)
-      return { agent, dispose: async () => { agents.delete(resumeSessionId) } }
-    }),
+    create,
+    resume,
   }
   runtime.agentDefaultModel = { currentSelection: () => ({ provider: 'test-provider', model: 'test-model' }) }
   runtime.sessionQuery = {
@@ -35,22 +65,23 @@ function setup(now: number | (() => number) = 10_000, initialEvents: SessionEven
     now: typeof now === 'function' ? now : () => now,
     submissionRetentionMs: 100,
   })
-  return { ctx, agents, followup, steer, cancel, service }
+  return { ctx, agents, create, resume, followup, steer, cancel, service }
 }
 
 describe('SelectionCompanionSessionService', () => {
   it('creates an ordinary Harness agent and lists persisted sessions', async () => {
-    const { service } = setup()
+    const { service, create } = setup()
     await expect(service.list()).resolves.toEqual([{ id: 'persisted-session', status: 'unknown' }])
     const id = await service.create('D:/fixture')
     expect(id).toMatch(/^selection-companion-/)
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ setup: registerSelectionTools }))
   })
 
   it('records one normal Harness user message and deduplicates the same request', async () => {
     const { service, followup } = setup()
     const sessionId = await service.create()
-    const first = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }])
-    const duplicate = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }])
+    const first = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }], material())
+    const duplicate = await service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }], material())
     expect(followup).toHaveBeenCalledTimes(1)
     expect(duplicate).toEqual(first)
     expect(followup.mock.calls[0]?.[0]).toMatchObject({
@@ -61,14 +92,52 @@ describe('SelectionCompanionSessionService', () => {
         requestId: 'request-1',
         deliveryMode: 'queue',
         contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        material: expect.objectContaining({ snapshotId: 'snapshot-test', authorizedScope: 'selection' }),
       },
     })
-    await expect(service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'must conflict' }]))
+    await expect(service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'must conflict' }], material()))
       .rejects.toThrow('different content or delivery mode')
-    await expect(service.submit(sessionId, 'request-1', 'steer', [{ type: 'text', text: 'Explain this fixed selection.' }]))
+    await expect(service.submit(sessionId, 'request-1', 'steer', [{ type: 'text', text: 'Explain this fixed selection.' }], material()))
       .rejects.toThrow('different content or delivery mode')
-    await expect(service.submit('another-session', 'request-1', 'queue', [{ type: 'text', text: 'x' }]))
+    await expect(service.submit(sessionId, 'request-1', 'queue', [{ type: 'text', text: 'Explain this fixed selection.' }], normalizeSelectionMaterial({
+      ...material(),
+      snapshotId: 'snapshot-replaced',
+    }))).rejects.toThrow('different content or delivery mode')
+    await expect(service.submit('another-session', 'request-1', 'queue', [{ type: 'text', text: 'x' }], material()))
       .rejects.toThrow('belongs to another session')
+  })
+
+  it('persists Rust null optional material as lossless JSON and recovers it after restart', async () => {
+    const fixedMaterial = normalizeSelectionMaterial(rustNullMaterial())
+    expect(snapshotJsonValue(fixedMaterial)).toEqual(fixedMaterial)
+    expect(fixedMaterial).toEqual({
+      snapshotId: 'snapshot-rust-null',
+      revision: 1,
+      capturedAt: 1_000,
+      selection: { text: 'A fixed Rust selection.' },
+      source: { kind: 'desktop' },
+      authorizedScope: 'selection',
+      actualScope: 'selection',
+      completeness: 'complete',
+    })
+
+    const firstRuntime = setup()
+    const sessionId = await firstRuntime.service.create()
+    const content = [{ type: 'text' as const, text: 'Persist the Rust material.' }]
+    const accepted = await firstRuntime.service.submit(sessionId, 'request-rust-null', 'queue', content, fixedMaterial)
+    const message = firstRuntime.followup.mock.calls[0]?.[0]
+    expect(snapshotJsonValue(message?.source)).toEqual(message?.source)
+
+    const persisted = [{
+      seq: 1,
+      time: 1,
+      type: 'agent/inbox/spliced',
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    } as SessionEvent]
+    const restarted = setup(20_000, persisted)
+    await expect(restarted.service.submit('persisted-session', 'request-rust-null', 'queue', content, fixedMaterial))
+      .resolves.toEqual({ ...accepted, duplicate: true })
+    expect(restarted.followup).not.toHaveBeenCalled()
   })
 
   it('shares one in-flight submission across concurrent calls', async () => {
@@ -76,9 +145,9 @@ describe('SelectionCompanionSessionService', () => {
     const { service, followup } = setup(() => now)
     const sessionId = await service.create()
     const content = [{ type: 'text' as const, text: 'One logical submission.' }]
-    const firstPending = service.submit(sessionId, 'request-concurrent', 'queue', content)
+    const firstPending = service.submit(sessionId, 'request-concurrent', 'queue', content, material())
     now += 101
-    const secondPending = service.submit(sessionId, 'request-concurrent', 'queue', content)
+    const secondPending = service.submit(sessionId, 'request-concurrent', 'queue', content, material())
     const [first, second] = await Promise.all([firstPending, secondPending])
     expect(first).toEqual(second)
     expect(followup).toHaveBeenCalledTimes(1)
@@ -87,7 +156,7 @@ describe('SelectionCompanionSessionService', () => {
   it('recovers a persisted request receipt after service restart', async () => {
     const firstRuntime = setup()
     const sessionId = await firstRuntime.service.create()
-    const accepted = await firstRuntime.service.submit(sessionId, 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }])
+    const accepted = await firstRuntime.service.submit(sessionId, 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }], material())
     const message = firstRuntime.followup.mock.calls[0]?.[0]
     const persisted = [{
       seq: 1,
@@ -96,9 +165,10 @@ describe('SelectionCompanionSessionService', () => {
       data: { target: 'next-turn', start: 0, inserted: [message] },
     } as SessionEvent]
     const restarted = setup(20_000, persisted)
-    const duplicate = await restarted.service.submit('persisted-session', 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }])
+    const duplicate = await restarted.service.submit('persisted-session', 'request-persisted', 'queue', [{ type: 'text', text: 'Persist me.' }], material())
     expect(duplicate).toEqual({ ...accepted, duplicate: true })
     expect(restarted.followup).not.toHaveBeenCalled()
+    expect(restarted.resume).toHaveBeenCalledWith(expect.objectContaining({ setup: registerSelectionTools }))
   })
 
   it('expires only the in-memory receipt and rechecks durable history', async () => {
@@ -106,16 +176,16 @@ describe('SelectionCompanionSessionService', () => {
     const { service, followup } = setup(() => now)
     const sessionId = await service.create()
     const content = [{ type: 'text' as const, text: 'Retention fixture.' }]
-    await service.submit(sessionId, 'request-expiring', 'queue', content)
+    await service.submit(sessionId, 'request-expiring', 'queue', content, material())
     now += 101
-    await service.submit(sessionId, 'request-expiring', 'queue', content)
+    await service.submit(sessionId, 'request-expiring', 'queue', content, material())
     expect(followup).toHaveBeenCalledTimes(2)
   })
 
   it('uses the host steering operation only when explicitly requested and cancels a live session', async () => {
     const { service, steer, cancel } = setup()
     const sessionId = await service.create()
-    await service.submit(sessionId, 'request-steer', 'steer', [{ type: 'text', text: 'Change focus.' }])
+    await service.submit(sessionId, 'request-steer', 'steer', [{ type: 'text', text: 'Change focus.' }], material())
     expect(steer).toHaveBeenCalledTimes(1)
     expect(service.cancel(sessionId)).toBe(true)
     expect(cancel).toHaveBeenCalledWith({ kind: 'user' })
