@@ -324,7 +324,7 @@ cargo test --manifest-path native/src-tauri/Cargo.toml
 cargo check --manifest-path native/src-tauri/Cargo.toml
 ```
 
-The native Lens fixes a retrieved selection and provides Explain, Translate, and Ask controls. Each explicit action queues one durable Harness user message with the exact snapshot it displayed, creating a session on first use and reusing it for later prompts. The Lens subscribes on a dedicated pipe, renders correlated answer text, tracks the host turn terminal state, preserves shared-turn request identities, and offers safe recovery when a submit reply is unknown. See [session integration](docs/session-integration.md), [session-bound selection tools](docs/session-tools.md), and [Selection Lens](docs/selection-lens.md) for the current limits.
+The native Lens fixes a retrieved selection and provides Explain and Ask controls for perception-enhancing reading support. Translation is outside this product's scope. Each explicit action queues one durable Harness user message with the exact snapshot it displayed, creating a session on first use and reusing it for later prompts. The Lens subscribes on a dedicated pipe, renders correlated answer text, tracks the host turn terminal state, preserves shared-turn request identities, and offers safe recovery when a submit reply is unknown. See [session integration](docs/session-integration.md), [session-bound selection tools](docs/session-tools.md), and [Selection Lens](docs/selection-lens.md) for the current limits.
 
 Session checks:
 

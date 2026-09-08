@@ -58,6 +58,16 @@ describe('selection lens', () => {
     api.cancelSession.mockResolvedValue(true)
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
+  it('keeps the primary Lens controls labelled and keyboard discoverable', async () => {
+    render(<App />)
+    const main = await screen.findByTestId('selection-lens')
+    expect(main).toHaveAttribute('lang', 'en-US')
+    expect(screen.getByRole('combobox', { name: 'Harness session' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close selection companion' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Explain' })).toBeEnabled()
+    expect(screen.getByLabelText('Ask about this selection')).toHaveAttribute('placeholder', 'Ask a follow-up question')
+    expect(screen.getByText('No request active')).toHaveAttribute('aria-live', 'polite')
+  })
   it('restores the remembered session and renders paged durable history before subscribing', async () => {
     window.localStorage.setItem('dsh-selection-companion.session', 'session-2')
     api.listSessions.mockResolvedValueOnce([
@@ -181,7 +191,6 @@ describe('selection lens', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
     expect(await screen.findByText('Submission status unknown')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Explain' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Translate' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Use latest selection' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
     await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(2))

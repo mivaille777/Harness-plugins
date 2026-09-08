@@ -22,7 +22,7 @@
 
 ## 1. 最终目标与完成门槛
 
-产品的首个完整浏览器闭环是：用户在 Chrome、Edge 或声明支持的 Chromium 浏览器中选择文本，以主动动作打开 Lens；Lens 固定该次材料，向同一 Harness session 提交解释、翻译或追问；Harness 的 Agent、工具、审批和会话日志成为唯一执行与持久化所有者；Lens 与完整 Harness 界面可以展示同一请求、回答、工具结果和历史；用户能够停止、恢复、核对来源，并返回原始阅读任务。
+产品的首个完整浏览器闭环是：用户在 Chrome、Edge 或声明支持的 Chromium 浏览器中选择文本，以主动动作打开 Lens；Lens 固定该次材料，向同一 Harness session 提交解释或上下文追问；Harness 的 Agent、工具、审批和会话日志成为唯一执行与持久化所有者；Lens 与完整 Harness 界面可以展示同一请求、回答、工具结果和历史；用户能够停止、恢复、核对来源，并返回原始阅读任务。语言转换不属于本产品范围，Lens 不提供翻译入口。
 
 “感知增强”只指降低用户理解所选材料时的切换、记忆和误发成本。它不允许后台持续调用模型、擅自扩大网页范围、把采集完整度伪装成答案可信度，或建立与 Harness 并行的对话历史。
 
@@ -260,7 +260,7 @@ R08 分为五个可独立提交的子项。它们依赖 R01 至 R07 的语义稳
 
 ### 9.2 R08.2：人因、无障碍与视觉系统
 
-先列出 R01 至 R07 的真实 Lens 状态，再建立类型化中英文字典、设计 token、主题和状态组件。稳定的信息顺序是材料与来源、问题/草稿、执行状态、回答与工具、下一步操作；长来源、原始诊断和细节放在渐进披露中。
+先列出 R01 至 R07 的真实 Lens 状态，再建立类型化本地化字典、设计 token、主题和状态组件。稳定的信息顺序是材料与来源、问题/草稿、执行状态、回答与工具、下一步操作；长来源、原始诊断和细节放在渐进披露中。字典不得加入翻译产品动作。
 
 界面要降低工作记忆和模式错误：始终可识别当前固定材料、session 和请求状态；选区变化不悄悄替换已提交材料；停止、关闭、暂停、重试和切换上下文各有独立含义。主要操作保持位置稳定、命中区域充分且不覆盖浏览器拖选路径。流式回答只在用户位于底部时跟随，用户上滚后保持位置；本地交互要先给出即时反馈，模型时延单独显示。
 
@@ -294,7 +294,7 @@ R08 分为五个可独立提交的子项。它们依赖 R01 至 R07 的语义稳
 | Native | `pnpm --dir native test`、`pnpm test:lens:session`、`pnpm --dir native build`、`pnpm test:rust` | Rust bridge、Tauri API、Lens 和投影改动 |
 | 跨语言 Windows | `pnpm test:contract`、`pnpm test:bridge:integration` | 每次协议或 Rust/TS bridge 改动；后者仅以实际 Windows Named Pipe 结果计数 |
 | R05 以后拟新增 | `pnpm test:session:interaction`、`pnpm test:session:history`、`pnpm test:context-expansion`、`pnpm test:ui:a11y`、`pnpm test:ui:visual`、`pnpm test:perf`、`pnpm test:human-factors:fixtures`、`pnpm report:human-factors`、`pnpm test:installer`、`pnpm check:release` | 先实现测试与 package script，再允许写入验收记录 |
-| 真实 e2e | `pnpm test:session:e2e`、`pnpm test:lens:e2e` | 当前为退出 2 占位，R07 完成后才可计作真实证据 |
+| 真实 e2e | `pnpm test:session:e2e`、`pnpm test:lens:e2e` | 运行器已可执行；退出 2 表示真实前置缺失或未验证，只有 L2/L3 实际路径通过才计作对应证据 |
 
 每份 `docs/evidence/r0x-*.md` 至少写明：候选 SHA、Harness 和 npm 包版本、Windows/Node/pnpm/Rust/浏览器/DPI 环境、修改范围、实际命令、退出码、关键断言、PASS/FAIL/NOT RUN、日志/截图路径、脱敏方式、已知限制和下一步。不得把未运行、退出 2 或只运行 mock 的结果概括为 PASS。
 
@@ -384,7 +384,7 @@ R06 的插件实现和自动验证已完成。以下提示词用于复核、回�
 ### 13.6 R08 提示词
 
 ```text
-执行 R08，并按 R08.1 至 R08.5 分成可审阅提交。先完成来源范围授权、revision/document 校验、预算/截断和安全渲染；然后依据全部真实 Lens 状态建立类型化中英文字典、设计 token、键盘/焦点/live region、滚动锚定、reduced motion、主题和 DPI 适配。新增可失败的 context、a11y、visual 测试，并用实际 Tauri 窗口采集指定状态截图。
+执行 R08，并按 R08.1 至 R08.5 分成可审阅提交。先完成来源范围授权、revision/document 校验、预算/截断和安全渲染；然后依据全部真实 Lens 状态建立类型化 locale 字典（仅管理界面文案，不提供翻译产品动作）、设计 token、键盘/焦点/live region、滚动锚定、reduced motion、主题和 DPI 适配。新增可失败的 context、a11y、visual 测试，并用实际 Tauri 窗口采集指定状态截图。
 
 在做性能或人因结论前冻结协议和匿名数据 schema；把本地交互时延与模型时延分开，缺失或空数据必须失败。完成安装、诊断、升级、卸载和干净 Windows smoke，最后以同一候选 SHA 生成 release manifest、兼容矩阵、已知限制和 check:release。不要把未测量的理解提升、未验证 Provider、NOT RUN 或开发目录启动描述为产品通过。
 ```

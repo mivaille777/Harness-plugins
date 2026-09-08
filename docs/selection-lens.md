@@ -2,7 +2,7 @@
 
 The Lens reads `selection.current` through the native bridge and fixes the returned snapshot in its local view. Selecting new browser text does not replace that displayed material until the user chooses **Use latest selection**. The preview names its source and revision so a user can tell which material a session request will use.
 
-Explain, Translate, and Ask send an explicit, fixed-material prompt to one Harness session. The Lens creates the session on its first action and reuses its returned id for later prompts. Selected webpage text is labelled as untrusted reference data. The Lens does not create another LLM client or conversation store.
+Explain and Ask send an explicit, fixed-material prompt to one Harness session. Translation is outside the product scope; the Lens is a perception-enhancing reading aid rather than a translation tool. The Lens creates the session on its first action and reuses its returned id for later prompts. Selected webpage text is labelled as untrusted reference data. The Lens does not create another LLM client or conversation store.
 
 The Lens projects only events carrying its active session and request ids. It displays `text-delta` content, excludes reasoning and tool-argument streams, and uses a complete assistant message to restore or calibrate one turn/step without duplicating streamed text. A complete assistant message ends a step rather than the request; the correlated `turn/end` reason determines completed, cancelled, limited, interrupted, blocked, or failed state. A session connection error remains visible even when the transport cannot provide a request id.
 

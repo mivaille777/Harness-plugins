@@ -40,6 +40,8 @@
     "test:lens:session": "pnpm --dir native exec vitest run src/sessionProjection.test.ts src/App.test.tsx src/api/bridge.test.ts",
     "test:lens:e2e": "node scripts/test-lens-e2e.mjs",
     "test:lens:runner": "node scripts/test-lens-runner.mjs",
+    "test:ui:a11y": "pnpm --dir native exec vitest run src/App.test.tsx -t \"primary Lens controls labelled\"",
+    "test:ui:visual": "node scripts/test-ui-visual.mjs",
     "test:r07:runner": "node scripts/test-r07-runner.mjs",
     "test:session": "vitest run tests/session-service.spec.ts tests/bridge-server.spec.ts",
     "test:session:history": "vitest run tests/session-history.spec.ts tests/session-service.spec.ts tests/session-transport.spec.ts",
