@@ -54,7 +54,7 @@ flowchart LR
 | R04 | 自动检查与 Windows 管道通过待实测 | `5ec3a8a`、[R04 证据](evidence/r04-session-bound-selection-tools.md)记录 V3 材料、Agent scoped 工具、TS/Rust/Native 同步和真实 Node/Rust Named Pipe | 受支持 profile 中的工具可见性、真实模型、可见 Tauri 窗口、截图和真实进程重启 |
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
 | R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
-| R07 | 待开发 | `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 当前仍以退出码 2 表示未实现 | 真实模型、原生窗口、截图或完整产品 smoke |
+| R07 | 运行器框架已实现，真实层待执行 | `test:session:e2e` 已支持隔离 `dsh --profile headless` 的 L1 无密钥运行；`test:lens:e2e` 已支持真实 Tauri/浏览器驱动协议、截图校验和退出码 0/1/2；`test:r07:runner`、`test:lens:runner` 覆盖纯函数和报告负例 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
 | R08 | 待开发 | 任务手册给出人因、来源、安装和发布要求 | 产品级可访问性、视觉、人因或安装验收 |
 
 R04 将必需材料字段引入 `session.submit`，因此 IPC 已由 V2 升为 V3，默认 pipe 名保持版本隔离。当前 README、协议、会话集成和工具说明已经描述 V3；历史 R03 决策与证据保留其发生时的 V2 事实。R04 的持久绑定规则见[决策记录](decisions/2026-09-08-session-bound-selection-material.md)，实际命令和边界见[R04 证据](evidence/r04-session-bound-selection-tools.md)。
@@ -218,7 +218,7 @@ pnpm test:bridge:integration
 
 ### 8.1 目标与运行层次
 
-R07 将当前无条件退出 2 的 `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 改造成可执行、可失败的运行器。它区分无密钥集成、真实模型和可见原生交互，不能以 mock provider、直接调用内部函数或静态网页替代受支持的 `dsh --profile` 产品启动。
+ R07 将 `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 改造成可执行、可失败的运行器。当前提交已完成 L1 profile smoke 和 L3 驱动框架：它区分无密钥集成、真实模型和可见原生交互，不能以 mock provider、直接调用内部函数或静态网页替代受支持的 `dsh --profile` 产品启动。L1 使用本地确定性 OpenAI-compatible SSE，只证明进程/profile/durable session 路径；它不计为真实 DeepSeek 模型证据。
 
 | 层级 | 目的 | 通过条件 | 未满足前置时的结果 |
 |---|---|---|---|
@@ -228,23 +228,25 @@ R07 将当前无条件退出 2 的 `scripts/test-session-e2e.mjs` 和 `scripts/t
 
 ### 8.2 实施步骤
 
-1. 为每次运行生成唯一且受控的 `DSH_HOME`、pipe 名、端口、日志目录和临时 profile；只删除运行器创建且已验证位于测试根目录内的路径。不得输出环境变量中的密钥值。
+ 1. 为每次运行生成唯一且受控的 `DSH_HOME`、端口、日志目录和临时 profile；只删除运行器创建且已验证位于测试根目录内的路径。不得输出环境变量中的密钥值。`test:session:e2e` 的 JSON 报告默认保存在系统临时目录，避免清理阶段删除证据。
 2. 检查 Windows、Node、pnpm、Rust、dsh CLI、bundle、profile、模型配置、浏览器和 Tauri 前置。退出码 0 只表示选定层级完整通过；1 表示执行失败；2 表示真实前置缺失或未验证。
 3. 通过受支持的 dsh profile 安装/启动 bundle，等待可检测的 ready 状态。运行器不应重实现 SessionService、ToolRuntime、审批或 durable log，只观察产品接口和日志。
 4. 对 L2 使用非敏感、可复现材料，验证材料进入 durable log，工具读取绑定材料，追问保持同一 session，审批在未决定前等待，取消和重连符合日志事实。模型输出逐字可变，断言身份、顺序和结构而非固定文本。
-5. 对 L3 使用本地非敏感网页 fixture，在真实 Chrome/Edge 选择文本，打开真实 Tauri Lens，依次录制固定材料、提交、streaming、工具/审批、停止、历史和恢复。直接注入 `SelectionSnapshot` 只能补充 L1 不能替代 L3。
-6. 为前置缺失、启动失败、模型失败、超时、断言失败和清理残留编写运行器自测。每次运行输出候选 SHA、版本、命令、退出码、脱敏摘要和工件路径。
+ 5. 对 L3 使用本地非敏感网页 fixture，在真实 Chrome/Edge 选择文本，打开真实 Tauri Lens，依次录制固定材料、提交、streaming、工具/审批、停止、历史和恢复。驱动通过 `R07_LENS_DRIVER` 和 JSON `R07_LENS_DRIVER_ARGS` 配置，必须向 `DSH_LENS_REPORT_PATH` 写入 `schemaVersion: 1`、`application: "tauri"`、`realWindow: true`、`realSelection: true`、浏览器、必需状态、命名断言和 PNG 路径；运行器拒绝静态浏览器报告、目录外路径、空截图和缺失状态。直接注入 `SelectionSnapshot` 只能补充 L1 不能替代 L3。
+ 6. 为前置缺失、启动失败、模型失败、超时、断言失败和清理残留编写运行器自测。`pnpm test:r07:runner` 和 `pnpm test:lens:runner` 必须覆盖退出状态、路径隔离、脱敏和静态/不完整驱动报告。每次运行输出候选 SHA、版本、命令、退出码、脱敏摘要和工件路径。
 
 ### 8.3 R07 验收命令
 
 ```powershell
+pnpm test:r07:runner
+pnpm test:lens:runner
 pnpm test:bridge:integration
 pnpm test:session:e2e
 pnpm test:lens:e2e
 pnpm check:task5
 ```
 
-R07 报告必须分开列出 L1、L2、L3 的 PASS、FAIL 或 NOT RUN。缺少模型授权、可见桌面或浏览器的项目不是 PASS；它们也不阻止实现和测试运行器本身。
+R07 报告必须分开列出 L1、L2、L3 的 PASS、FAIL 或 NOT RUN。当前 L1 通过只代表本地确定性 provider 的隔离 profile smoke；它不代表真实模型。缺少模型授权、可见桌面或浏览器的项目不是 PASS；它们也不阻止实现和测试运行器本身。L3 只有驱动实际报告 Tauri 窗口和浏览器选区、并提供完整状态截图后才能通过。
 
 ## 9. R08：来源、交互品质、安装与发布
 

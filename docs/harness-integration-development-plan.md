@@ -416,7 +416,7 @@ pnpm test:bridge:integration
 
 ### 目标与边界
 
-将 `scripts/test-session-e2e.mjs` 的占位退出行为替换为可执行、可失败的真实测试。把前置条件检测、无密钥集成、真实模型调用和人工交互证据区分清楚。
+将 `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 的占位退出行为替换为可执行、可失败的真实测试。把前置条件检测、无密钥集成、真实模型调用和人工交互证据区分清楚。当前实现已经提供 L1 profile smoke 和 L3 驱动协议；真实模型及真实窗口仍需实际执行。
 
 ### 预计修改面与禁止范围
 
@@ -436,7 +436,7 @@ pnpm test:bridge:integration
 7. 每个阶段设置超时和清理；日志保留 SHA、工具版本、步骤、退出码、脱敏事件摘要及截图/录屏路径。部分完成明确列出 PASS/FAIL/NOT RUN，不生成笼统 PASS。
 8. 为运行器自身增加前置缺失、宿主启动失败、模型错误、超时清理及断言失败测试；配置齐全时仍退出 2 应被视为未实现缺陷。
 
-运行器分三层交付：L1 无密钥进程/协议集成，L2 真实 profile 与模型会话，L3 浏览器选区和可见 Tauri 窗口。L1 可以在缺少 API key 时通过；R07 总体完成仍要求 L2/L3 的实际证据。三层使用相同候选 SHA，但分别记录环境、步骤和退出结果。
+运行器分三层交付：L1 无密钥进程/协议集成，L2 真实 profile 与模型会话，L3 浏览器选区和可见 Tauri 窗口。L1 使用本地确定性 OpenAI-compatible SSE，只验证隔离 profile、bundle 装配、插件启动输出和 durable session 文件，不能写成真实模型 PASS。L3 驱动必须报告真实 Tauri 窗口、Chrome/Edge 真实选区、必需状态和 PNG 截图；静态页面或直接注入被运行器拒绝。L1 可以在缺少 API key 时通过；R07 总体完成仍要求 L2/L3 的实际证据。三层使用相同候选 SHA，但分别记录环境、步骤和退出结果。
 
 ### 测试与验收
 
@@ -445,7 +445,7 @@ pnpm test:bridge:integration
 | R07-I1 前置与清理 | 检测 Windows、dsh、profile、模型配置，分配隔离目录/pipe 并注册 finally 清理 | 运行器单测覆盖缺失、启动失败、超时和残留；缺实际前置退出 2 |
 | R07-I2 L1 无密钥集成 | 以受支持进程入口验证 bundle、IPC、日志、重连和回放 | runner tests、`pnpm test:bridge:integration`；断言失败退出 1 |
 | R07-I3 L2 真实会话 | 启动真实 profile/provider，验证回答、追问、工具、审批、停止和历史 | `pnpm test:session:e2e`；完整执行通过才退出 0，模型错误退出 1 |
-| R07-I4 L3 原生交互 | 浏览器真实选区，经 Native/Tauri Lens 完成主流程并截图 | `pnpm test:lens:e2e` 加人工观察；静态网页或直接注入不能替代 |
+| R07-I4 L3 原生交互 | 浏览器真实选区，经 Native/Tauri Lens 完成主流程并截图；驱动报告须包含 `application: tauri`、`realWindow: true`、`realSelection: true`、浏览器、状态、断言和 PNG 路径 | `pnpm test:lens:runner`、`pnpm test:lens:e2e` 加人工观察；静态网页或直接注入不能替代 |
 | R07-I5 候选报告 | 汇总相同 SHA 下的日志、截图、版本、PASS/FAIL/NOT RUN | `pnpm check:task5` 和证据完整性检查；任何缺项保持对应状态未完成 |
 
 ```powershell
@@ -457,7 +457,7 @@ pnpm test:lens:e2e
 pnpm check:task5
 ```
 
-`test:lens:e2e` 与 `test:bridge:integration` 必须先确认是否仍有占位逻辑；只有实际执行对应路径才计为证据。没有凭据不阻塞开发运行器和无密钥负例，但不能标记真实模型验收通过。
+`test:lens:e2e` 与 `test:bridge:integration` 必须先确认是否仍有占位逻辑；当前两个入口均为可执行运行器，但只有实际执行对应路径才计为证据。没有凭据不阻塞开发运行器和无密钥负例，但不能标记真实模型或可见窗口验收通过。
 
 完成标准：真实 Windows Node↔Rust 管道成功；真实模型会话成功；浏览器选区→回答→追问→工具/审批→停止→完整历史→重启回放各步骤有证据。任何跳过导致对应验收项保持未完成。
 
