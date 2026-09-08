@@ -2,7 +2,7 @@
 
 本指南把 [完整交互开发计划](harness-integration-development-plan.md) 和根目录的 [Harness-plugins 任务手册](../harness-plugins%20task.md) 转换为后续 Codex 可以直接执行和审查的工作包。它面向当前 `feat/t05-session-integration` 工作线，覆盖 R04 到可与 DeepSeek Harness 完整交互的 R08。执行者必须以当前工作树、已安装依赖和实际 Harness 版本为准；本文不把计划中的接口或测试结果当作已经实现的事实。
 
-审阅基线：2026-09-08，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；真实 profile、模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
+审阅基线：2026-09-08，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器提交为 `3168b23`，环境变量测试稳定性修复为 `eac4d23`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
 
 ## 目录
 
@@ -246,7 +246,7 @@ pnpm test:lens:e2e
 pnpm check:task5
 ```
 
-R07 报告必须分开列出 L1、L2、L3 的 PASS、FAIL 或 NOT RUN。当前 L1 通过只代表本地确定性 provider 的隔离 profile smoke；它不代表真实模型。缺少模型授权、可见桌面或浏览器的项目不是 PASS；它们也不阻止实现和测试运行器本身。L3 只有驱动实际报告 Tauri 窗口和浏览器选区、并提供完整状态截图后才能通过。
+R07 报告必须分开列出 L1、L2、L3 的 PASS、FAIL 或 NOT RUN。当前 L1 通过只代表本地确定性 provider 的隔离 profile smoke；它不代表真实模型。缺少模型授权、可见桌面或浏览器的项目不是 PASS；它们也不阻止实现和测试运行器本身。L3 只有驱动实际报告 Tauri 窗口和浏览器选区、并提供完整状态截图后才能通过。实现取舍记录在 [R07 runner decision](decisions/2026-09-08-r07-layered-runners.md)，实际结果在 [R07 evidence](evidence/r07-session-e2e.md)。
 
 ## 9. R08：来源、交互品质、安装与发布
 

@@ -416,7 +416,7 @@ pnpm test:bridge:integration
 
 ### 目标与边界
 
-将 `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 的占位退出行为替换为可执行、可失败的真实测试。把前置条件检测、无密钥集成、真实模型调用和人工交互证据区分清楚。当前实现已经提供 L1 profile smoke 和 L3 驱动协议；真实模型及真实窗口仍需实际执行。
+将 `scripts/test-session-e2e.mjs` 和 `scripts/test-lens-e2e.mjs` 的占位退出行为替换为可执行、可失败的真实测试。把前置条件检测、无密钥集成、真实模型调用和人工交互证据区分清楚。当前实现已经提供 L1 profile smoke 和 L3 驱动协议；真实模型及真实窗口仍需实际执行。运行器的固定取舍见 [R07 decision](decisions/2026-09-08-r07-layered-runners.md)，执行结果见 [R07 evidence](evidence/r07-session-e2e.md)。
 
 ### 预计修改面与禁止范围
 
