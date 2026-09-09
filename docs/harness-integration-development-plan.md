@@ -491,7 +491,7 @@ pnpm check:task5
 
 **完成标准。** 默认选择不会读取全文；任何扩展都能追溯到用户授权；来源变化不会混料；截断与缺失对用户可见；无法扩展时原选区仍可使用。不得用启发式采集 confidence 表示答案正确率。
 
-**2026-09-09 实现切片。** 已在插件侧完成第一段可验证能力：SelectionSnapshot 可携带已捕获的 pageText；Bridge V3 提供 `selection.expand`/`selection.expanded`，按 snapshot id、revision、scope、完整度和截断标记返回有界的 selection/local/section/page 预览；TS、Rust、共享 fixture、路由、Tauri command 和 Lens API 已同步。Lens 以折叠面板显示来源上下文，用户选择可用范围并按下 **Load context** 后才请求预览；提交仍只发送固定 selection。当前切片没有自动抓取全文、没有把扩展上下文写入模型请求，也没有完成页面变化/document 校验、上下文持久化或真实浏览器 page Provider；这些验收项继续保持未完成。
+**2026-09-09 实现切片。** 已在插件侧完成第一段可验证能力：SelectionSnapshot 可携带已捕获的 pageText；Bridge V3 提供 `selection.expand`/`selection.expanded`，按 snapshot id、revision、scope、完整度和截断标记返回有界的 selection/local/section/page 预览；TS、Rust、共享 fixture、路由、Tauri command 和 Lens API 已同步。Lens 以折叠面板显示来源上下文，用户选择可用范围并按下 **Load context** 后才请求预览；提交仍只发送固定 selection。当前切片没有自动抓取全文、没有把扩展上下文写入模型请求，也没有完成页面变化/document 校验、上下文持久化或真实浏览器 page Provider；这些验收项继续保持未完成。自动化和窗口证据见 [R08.1 context expansion evidence](evidence/r08-context-expansion.md) 与 [R08 UI evidence](evidence/r08-ui.md)。
 
 **给 Codex 的提示词。**
 
