@@ -46,6 +46,7 @@
     "test:perf": "pnpm build && node --test scripts/perf.test.mjs && node scripts/test-perf.mjs",
     "test:human-factors:fixtures": "node --test scripts/human-factors.test.mjs && node scripts/test-human-factors-fixtures.mjs",
     "report:human-factors": "node scripts/report-human-factors.mjs",
+    "test:installer": "node --test scripts/installer.test.mjs && node scripts/test-installer.mjs",
     "test:r07:runner": "node scripts/test-r07-runner.mjs",
     "test:session": "vitest run tests/session-service.spec.ts tests/bridge-server.spec.ts",
     "test:session:history": "vitest run tests/session-history.spec.ts tests/session-service.spec.ts tests/session-transport.spec.ts",
