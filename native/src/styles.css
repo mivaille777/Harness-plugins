@@ -254,6 +254,7 @@ footer,
   border-radius: 10px;
   background: var(--surface-raised);
   color: var(--ink);
+  text-overflow: ellipsis;
 }
 
 .session-controls button {
