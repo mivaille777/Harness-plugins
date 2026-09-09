@@ -37,6 +37,8 @@ pnpm test:session:e2e
 
 The runner tests passed 4/4. The session runner reported L1 `PASS`, L2 `NOT RUN`, exit 0. The report recorded the selected source CLI as `0.1.1-rc.2`, successful plugin installation and composition, the plugin startup line, `R07_SESSION_OK`, two loopback model requests, and one non-empty durable session file. This rerun proves the specified checkout rather than the globally installed `dsh`; it retains the same L1 limitations described below.
 
+The same candidate was then installed into an isolated `web` profile after `pnpm build:lib:client` and `pnpm build:web`. The profile manifest contained `@deepseek-ai/dsh-base,@deepseek-ai/dsh-web-app,dsh-selection-companion`; `--dump-config` printed the `dsh-selection-companion` layer; startup printed `[selection-companion] plugin loaded!` and `dsh web: http://127.0.0.1:54815`; `pnpm debug:selection` connected through the live Named Pipe and returned `[debug-selection] no current selection`. The Web process was stopped with Ctrl+C and the isolated home was removed. This proves Web/profile/pipe startup with an empty selection, not real browser capture or visible Lens behavior.
+
 ## Native visual fixture observation
 
 The Tauri development binary was launched with `pnpm native:dev`. A temporary local bridge supplied a non-sensitive fixed snapshot and deterministic history so the actual Tauri WebView could be inspected. The window was resized to 620×900 for readability; the fixture text is not a real browser selection and the bridge did not run a DeepSeek model. The screenshots therefore demonstrate the current Lens material/history/answer presentation only; they are W/U visual-fixture evidence and do not satisfy R07 L3.

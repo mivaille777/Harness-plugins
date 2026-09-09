@@ -14,6 +14,8 @@
 Set-Location 'D:\deepseek harness\deepseek-harness'
 pnpm install
 pnpm build:lib:host
+pnpm build:lib:client
+pnpm build:web
 
 Set-Location 'D:\deepseekHarness\Harness-plugins'
 $env:R07_DSH_REPOSITORY = 'D:\deepseek harness\deepseek-harness'
@@ -21,7 +23,25 @@ pnpm test:r07:runner
 pnpm test:session:e2e
 ```
 
-`R07_DSH_REPOSITORY` 使运行器通过 `pnpm --dir <checkout> dsh` 使用指定源码，而不是 PATH 中的全局 `dsh`。运行器仍创建唯一临时 `DSH_HOME`，关闭 Native bridge，使用回环确定性模型，并在退出后只清理自己创建的目录。任何带空格的 Windows checkout 路径必须由运行器按 `cmd.exe` 的 verbatim argv 规则转发；对应单元测试不得删除。
+`build:lib:host` 是 headless 挂载前置；`build:lib:client` 与 `build:web` 是源码 Web profile 的额外前置。`R07_DSH_REPOSITORY` 使运行器通过 `pnpm --dir <checkout> dsh` 使用指定源码，而不是 PATH 中的全局 `dsh`。运行器仍创建唯一临时 `DSH_HOME`，关闭 Native bridge，使用回环确定性模型，并在退出后只清理自己创建的目录。任何带空格的 Windows checkout 路径必须由运行器按 `cmd.exe` 的 verbatim argv 规则转发；对应单元测试不得删除。
+
+Web profile 的人工开发 smoke 使用独立 home，不能改写日常 profile。安装后先检查 manifest 与配置层，再启动 Web 和真实 Named Pipe；另一个终端运行 `pnpm debug:selection`，无选区时必须得到明确的 `no current selection`，而不是连接失败。
+
+```powershell
+$mountSmokeHome = Join-Path $env:TEMP ('dsh-selection-companion-web-smoke-' + [guid]::NewGuid().ToString('N'))
+$env:DSH_HOME = $mountSmokeHome
+Set-Location 'D:\deepseek harness\deepseek-harness'
+pnpm dsh plugin --profile web add 'file:D:/deepseekHarness/Harness-plugins'
+pnpm dsh --profile web --dump-config
+pnpm dsh --profile web --no-open --port 0
+
+# Terminal B
+Set-Location 'D:\deepseekHarness\Harness-plugins'
+pnpm debug:selection
+
+# Back in Terminal A, stop the Web process with Ctrl+C, then clean only this smoke profile.
+Remove-Item -LiteralPath $mountSmokeHome -Recurse
+```
 
 从该基线到可交付产品按以下顺序推进：
 
@@ -41,7 +61,7 @@ P3 的验证出口为设置 `R07_RUN_REAL=1` 后运行 `pnpm test:session:e2e`�
 ```text
 先建立 Harness-plugins 的可重复挂载基线。目标插件目录为 D:\deepseekHarness\Harness-plugins，目标 Harness 源码目录为 D:\deepseek harness\deepseek-harness。读取两边的 AGENTS.md、Harness docs/architecture.md、插件 docs/codex-next-development-guide.md、package.json、cordis.patch.yml 和 scripts/r07-runner.mjs；保留现有未提交改动。
 
-确认 Harness 版本、SHA、工作树和插件 peer 版本。若目标源码尚无 node_modules 或 Host lib，按锁文件执行 pnpm install 与 pnpm build:lib:host。设置 R07_DSH_REPOSITORY 后运行 test:r07:runner 和 test:session:e2e，必须确认 profile bundle 列表包含 dsh-selection-companion、插件加载日志出现、本地模型固定响应被观察且 durable session 文件非空。不得用全局 dsh 的成功代替指定 checkout，不得读取或打印真实密钥。
+确认 Harness 版本、SHA、工作树和插件 peer 版本。若目标源码尚无 node_modules 或 Host lib，按锁文件执行 pnpm install 与 pnpm build:lib:host；Web profile 还要执行 pnpm build:lib:client 与 pnpm build:web。设置 R07_DSH_REPOSITORY 后运行 test:r07:runner 和 test:session:e2e，必须确认 profile bundle 列表包含 dsh-selection-companion、插件加载日志出现、本地模型固定响应被观察且 durable session 文件非空。再用隔离 DSH_HOME 安装 web profile，检查 dump-config、Web 就绪 URL 和 debug:selection 的 Named Pipe 响应。不得用全局 dsh 的成功代替指定 checkout，不得读取或打印真实密钥。
 
 若要验证 GitHub master，使用独立 checkout 和独立分支；先固定上游 SHA，核对 package exports、Service inject、profile patch 和 Session/Agent API，再调整全部 peer/dev dependency。不要在同一 profile 混装 0.1.1-rc.2 与 0.1.5-alpha.1。输出实际命令、退出码、报告路径、版本与未验证项。
 ```
