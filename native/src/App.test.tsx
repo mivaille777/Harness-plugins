@@ -91,6 +91,12 @@ describe('selection lens', () => {
     expect(screen.getByRole('button', { name: 'Load context' })).toBeEnabled()
     expect(screen.getByText('No request active')).toHaveAttribute('aria-live', 'polite')
   })
+  it('keeps product actions focused on perception support without a translation action', async () => {
+    render(<App />)
+    await screen.findByTestId('selection-lens')
+    expect(screen.queryByRole('button', { name: /translate|翻译/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/translation|翻译/i)).not.toBeInTheDocument()
+  })
   it('restores the remembered session and renders paged durable history before subscribing', async () => {
     window.localStorage.setItem('dsh-selection-companion.session', 'session-2')
     api.listSessions.mockResolvedValueOnce([
