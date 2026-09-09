@@ -1,6 +1,7 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, readdir, stat } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
-import { join } from 'node:path'
+import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
+import { findInstallerArtifacts, sha256File } from './installer.mjs'
 
 export const RELEASE_SCHEMA_VERSION = 1
 export const REQUIRED_SCRIPTS = [
@@ -12,9 +13,11 @@ export const REQUIRED_SCRIPTS = [
   'test:human-factors:fixtures',
   'report:human-factors',
   'test:installer',
+  'test:installer:smoke',
   'test:session:e2e',
   'test:lens:e2e',
 ]
+export const REQUIRED_ARTIFACT_KINDS = ['npm-bundle', 'windows-installer']
 export const REQUIRED_EVIDENCE = [
   'docs/evidence/r04-session-bound-selection-tools.md',
   'docs/evidence/r06-session-history-implementation.md',
@@ -71,6 +74,18 @@ export async function validateReleaseManifest(manifest, { root, candidateSha } =
     }
   }
   if (!isRecord(manifest) || !Array.isArray(manifest.artifacts)) issues.push('manifest artifacts must be an array')
+  else issues.push(...(await validateArtifacts(manifest.artifacts, root)))
+  if (!isRecord(manifest) || !Array.isArray(manifest.supportMatrix) || manifest.supportMatrix.length === 0) issues.push('manifest supportMatrix must be a non-empty array')
+  else {
+    for (const item of manifest.supportMatrix) {
+      if (!isRecord(item) || typeof item.platform !== 'string' || item.platform.trim() === '' || typeof item.status !== 'string') {
+        issues.push('each supportMatrix item needs platform and status')
+        continue
+      }
+      if (item.status !== 'PASS') warnings.push(`support matrix is not a release PASS: ${item.platform} (${item.status})`)
+    }
+  }
+  if (!isRecord(manifest) || !Array.isArray(manifest.limitations) || manifest.limitations.length === 0 || manifest.limitations.some(item => typeof item !== 'string' || item.trim() === '')) issues.push('manifest limitations must be a non-empty string array')
   if (root !== undefined) {
     let packageJson
     try {
@@ -92,6 +107,7 @@ export async function validateReleaseManifest(manifest, { root, candidateSha } =
 /** Build a manifest skeleton from the current repository without claiming release readiness. */
 export async function createManifestSkeleton(root, candidateSha = currentCandidateSha(root)) {
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const artifacts = await discoverArtifacts(root)
   return {
     schemaVersion: RELEASE_SCHEMA_VERSION,
     candidateSha,
@@ -99,7 +115,7 @@ export async function createManifestSkeleton(root, candidateSha = currentCandida
     protocolVersion: 3,
     checks: REQUIRED_SCRIPTS.map(command => ({ command, status: 'PENDING', exitCode: null })),
     evidence: REQUIRED_EVIDENCE.map(path => ({ path, status: 'PENDING' })),
-    artifacts: [],
+    artifacts,
     supportMatrix: [
       { platform: 'Windows 10/11', browser: 'Chrome/Edge', status: 'DECLARED; real acceptance pending' },
     ],
@@ -129,6 +145,62 @@ function validateChecks(checks) {
   }
   for (const command of REQUIRED_SCRIPTS) if (!seen.has(command)) issues.push(`required check is missing: ${command}`)
   return { issues, warnings }
+}
+
+async function validateArtifacts(artifacts, root) {
+  const issues = []
+  const kinds = new Set()
+  const paths = new Set()
+  for (const artifact of artifacts) {
+    if (!isRecord(artifact) || typeof artifact.kind !== 'string' || typeof artifact.path !== 'string' || typeof artifact.sha256 !== 'string' || typeof artifact.bytes !== 'number') {
+      issues.push('each artifact needs kind, path, sha256, and bytes')
+      continue
+    }
+    if (!REQUIRED_ARTIFACT_KINDS.includes(artifact.kind)) issues.push(`unsupported artifact kind: ${artifact.kind}`)
+    kinds.add(artifact.kind)
+    if (paths.has(artifact.path)) issues.push(`duplicate artifact path: ${artifact.path}`)
+    paths.add(artifact.path)
+    const segments = normalize(artifact.path).split(/[\\/]/u)
+    const safeRelativePath = !isAbsolute(artifact.path) && !segments.includes('..')
+    if (!safeRelativePath) issues.push(`artifact path must stay inside the repository: ${artifact.path}`)
+    if (!/^[0-9a-f]{64}$/u.test(artifact.sha256)) issues.push(`artifact sha256 is invalid: ${artifact.path}`)
+    if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0) issues.push(`artifact bytes must be a positive safe integer: ${artifact.path}`)
+    if (root !== undefined && safeRelativePath) {
+      const artifactPath = resolve(root, artifact.path)
+      if (relative(resolve(root), artifactPath).startsWith(`..${sep}`)) {
+        issues.push(`artifact path escapes the repository: ${artifact.path}`)
+        continue
+      }
+      try {
+        const details = await stat(artifactPath)
+        if (!details.isFile()) issues.push(`artifact is not a file: ${artifact.path}`)
+        else {
+          if (details.size !== artifact.bytes) issues.push(`artifact size does not match: ${artifact.path}`)
+          if (await sha256File(artifactPath) !== artifact.sha256) issues.push(`artifact sha256 does not match: ${artifact.path}`)
+        }
+      } catch {
+        issues.push(`artifact file is missing: ${artifact.path}`)
+      }
+    }
+  }
+  for (const kind of REQUIRED_ARTIFACT_KINDS) if (!kinds.has(kind)) issues.push(`required artifact is missing: ${kind}`)
+  return issues
+}
+
+async function discoverArtifacts(root) {
+  const packageFiles = (await readdir(root, { withFileTypes: true })).filter(entry => entry.isFile() && entry.name.endsWith('.tgz')).map(entry => join(root, entry.name))
+  const installerDirectory = join(root, 'native', 'src-tauri', 'target', 'release', 'bundle')
+  const installerFiles = (await findInstallerArtifacts(installerDirectory)).filter(path => path.toLowerCase().endsWith('-setup.exe'))
+  const entries = [
+    ...packageFiles.map(path => ({ path, kind: 'npm-bundle' })),
+    ...installerFiles.map(path => ({ path, kind: 'windows-installer' })),
+  ]
+  return Promise.all(entries.map(async entry => ({
+    kind: entry.kind,
+    path: relative(root, entry.path).replaceAll('\\', '/'),
+    sha256: await sha256File(entry.path),
+    bytes: (await stat(entry.path)).size,
+  })))
 }
 
 function isRecord(value) { return typeof value === 'object' && value !== null && !Array.isArray(value) }
