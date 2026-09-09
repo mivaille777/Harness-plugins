@@ -31,6 +31,8 @@ export async function readInstallerMetadata(root) {
     tauriVersion: tauri.version,
     identifier: tauri.identifier,
     bundleActive: tauri.bundle?.active === true,
+    bundleTargets: tauri.bundle?.targets,
+    installMode: tauri.bundle?.windows?.nsis?.installMode,
     frontendDist: tauri.build?.frontendDist,
     beforeBuildCommand: tauri.build?.beforeBuildCommand,
     iconPath: join(root, 'native', 'src-tauri', 'icons', 'icon.ico'),
@@ -44,6 +46,9 @@ export async function validateInstallerMetadata(metadata) {
   if (typeof metadata.packageVersion !== 'string' || metadata.packageVersion.trim() === '') issues.push('package version is missing')
   if (metadata.packageVersion !== metadata.nativeVersion || metadata.packageVersion !== metadata.tauriVersion) issues.push('package, Cargo, and Tauri versions must match')
   if (typeof metadata.identifier !== 'string' || !/^io\.github\.[a-z0-9-]+\.[a-z0-9-]+$/.test(metadata.identifier)) issues.push('Tauri identifier must use the io.github owner.product form')
+  if (metadata.bundleActive !== true) issues.push('Tauri bundle must be active')
+  if (!Array.isArray(metadata.bundleTargets) || metadata.bundleTargets.length !== 1 || metadata.bundleTargets[0] !== 'nsis') issues.push('Tauri bundle must produce only the NSIS target')
+  if (metadata.installMode !== 'currentUser') issues.push('NSIS install mode must be currentUser')
   if (metadata.frontendDist !== '../dist') issues.push('Tauri frontendDist must point to ../dist')
   if (metadata.beforeBuildCommand !== 'pnpm build') issues.push('Tauri beforeBuildCommand must build the native frontend')
   try {

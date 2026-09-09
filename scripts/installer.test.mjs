@@ -8,12 +8,34 @@ test('installer metadata validator catches version drift and missing icon', asyn
     nativeVersion: '0.2.0',
     tauriVersion: '0.1.0',
     identifier: 'io.github.mivaille777.dsh-selection-companion',
+    bundleActive: false,
+    bundleTargets: ['msi'],
+    installMode: 'perMachine',
     frontendDist: '../dist',
     beforeBuildCommand: 'pnpm build',
     iconPath: 'C:/path/that/does/not/exist.ico',
   })
   assert.match(issues.join('; '), /versions must match/)
+  assert.match(issues.join('; '), /bundle must be active/)
+  assert.match(issues.join('; '), /only the NSIS target/)
+  assert.match(issues.join('; '), /install mode must be currentUser/)
   assert.match(issues.join('; '), /icon.ico is missing/)
+})
+
+test('installer metadata accepts the supported per-user NSIS candidate', async () => {
+  const issues = await validateInstallerMetadata({
+    packageVersion: '0.1.0',
+    nativeVersion: '0.1.0',
+    tauriVersion: '0.1.0',
+    identifier: 'io.github.mivaille777.dsh-selection-companion',
+    bundleActive: true,
+    bundleTargets: ['nsis'],
+    installMode: 'currentUser',
+    frontendDist: '../dist',
+    beforeBuildCommand: 'pnpm build',
+    iconPath: new URL('../native/src-tauri/icons/icon.ico', import.meta.url),
+  })
+  assert.deepEqual(issues, [])
 })
 
 test('diagnostic redaction removes selected material and credential-shaped fields', () => {
