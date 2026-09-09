@@ -63,7 +63,7 @@ R01 已处理正文/推理分离、step 完整消息校准、turn 终态、连�
 | R05 | P0 | T05-C/D | R01～R04；H05 发布 API 是插件实现前置 | 审批和 ask-user 交互 | 宿主前置任务 H05 已识别；见 `docs/host-tasks/r05-durable-session-interactions.md` |
 | R06 | P1 | T05 | R02、R03 | 会话选择、恢复与历史入口 | 自动实现与聚焦验证完成；见 `docs/evidence/r06-session-history-implementation.md` |
 | R07 | P0 | T05-E | 测试框架可提前；完整验收依赖 R01～R06 | 真实运行器与证据 | 运行器已交付；L1 PASS，L2/L3 待实际环境 |
-| R08 | P1 | T06～T11 | R01～R07；设计准备可提前 | 体验、来源、安装和发布验收 | R08.1/R08.2 自动检查通过待实测；R08.3～R08.5 待开发 |
+| R08 | P1 | T06～T11 | R01～R07；设计准备可提前 | 体验、来源、安装和发布验收 | R08.1/R08.2/R08.3 自动检查通过待实测；R08.4～R08.5 待开发 |
 
 R01～R04 已完成规定的自动验证；从当前基线默认按 R05→R06→R07→R08 推进。每项用独立、可审阅的提交表达完整行为及必要文档。开始时核对当前 HEAD，不能重置回本文基线覆盖新工作。共享协议、同一源文件和最终集成由一个负责人协调。
 
@@ -524,6 +524,8 @@ pnpm check:task5
 **测试方法。** 新增 `pnpm test:perf` 运行固定本地工作负载并输出机器可读原始结果；新增 `pnpm test:human-factors:fixtures` 校验任务、评分表和匿名数据 schema；`pnpm report:human-factors -- --input <path>` 只能读取显式传入的真实数据，输入缺失、空数据或无匹配候选 SHA 时失败。报告基线与增强条件的分布、差值、异常值处理、缺失数据和限制，不只给平均数。
 
 **完成标准。** 性能测试可在相同环境复现；每个数字有明确起止点和样本数；“感知增强”结论由实际对照任务支持；未测量的理解提升、长期效率或其他应用范围不得外推。发现严重误发、范围误解或不可恢复错误时，返回相应功能任务修复后重测。
+
+**2026-09-09 实现切片。** 已交付 `test:perf` 的本地有界上下文基准、`test:human-factors:fixtures` 的匿名研究材料校验和要求显式候选 SHA 的 `report:human-factors` 描述性报告。报告保留模型、窗口、CPU/RSS 和真人结果为未测量项；合成 fixture 只证明格式与脱敏规则，不关闭人因验收。证据见 [R08.3 performance and human-factors evidence](evidence/r08-performance-human-factors.md)。
 
 **给 Codex 的提示词。**
 

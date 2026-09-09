@@ -874,7 +874,7 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T06 | 自动检查通过待实测：R08.1 已实现已捕获上下文的显式、有界预览；真实 page Provider、document/revision 变化、持久化和模型输入一致性仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-context-expansion.md`、`pnpm test:context-expansion` |
 | T07 | 自动检查通过待实测：R08.2 已实现类型化界面文案、双主题、响应式、焦点和视觉基线；Narrator、DPI、多屏和真实窗口完整状态仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-ui.md`、`pnpm test:ui:a11y`、`pnpm test:ui:visual` |
 | T08-A/B/C/D | 待开始，逐项选择 | 待分配 | — | — |
-| T09 | 待开始 | 待分配 | — | — |
+| T09 | 自动检查通过待实测：R08.3 已交付本地性能基准、匿名研究 fixture 校验和候选 SHA 绑定的描述性报告；真人研究和产品效果仍未验证 | Codex | `4aef646507b740110fbb8e8055e6f2a44d97f9aa` | `docs/evidence/r08-performance-human-factors.md`、`pnpm test:perf`、`pnpm test:human-factors:fixtures` |
 | T10 | 待开始 | 待分配 | — | — |
 | T11 | 待开始 | 待分配 | — | — |
 
@@ -989,4 +989,4 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 
 新增命令在负责任务完成后可以从“拟新增”改为“已有”，同时记录定义位置和实际执行证据。接口或范围调整须说明影响的任务、fixture 和验收；不能只改提示词而留下相互冲突的验收要求。
 
-截至 2026-09-09，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.1 的有界上下文预览、R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1 的真实 Provider/document/持久化验收、R08.3/R08.4/R08.5 仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。
+截至 2026-09-09，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.1 的有界上下文预览、R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图，以及 R08.3 的本地性能/人因研究基础设施。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1 的真实 Provider/document/持久化验收、R08.3 真人效果、R08.4/R08.5 仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。
