@@ -2,7 +2,7 @@
 
 本指南把 [完整交互开发计划](harness-integration-development-plan.md) 和根目录的 [Harness-plugins 任务手册](../harness-plugins%20task.md) 转换为后续 Codex 可以直接执行和审查的工作包。它面向当前 `feat/t05-session-integration` 工作线，覆盖 R04 到可与 DeepSeek Harness 完整交互的 R08。执行者必须以当前工作树、已安装依赖和实际 Harness 版本为准；本文不把计划中的接口或测试结果当作已经实现的事实。
 
-审阅基线：2026-09-08，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器远端提交为 `9522081`，环境变量测试稳定性修复远端提交为 `716c07c`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
+审阅基线：2026-09-09，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器远端提交为 `9522081`，环境变量测试稳定性修复远端提交为 `716c07c`；R08.1/R08.2 实现与证据提交为 `72164511aaab3a3c2ad21fefb5bf595ef0d693cc`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
 
 ## 目录
 
@@ -55,7 +55,7 @@ flowchart LR
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
 | R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
 | R07 | 运行器框架已实现，真实层待执行 | `test:session:e2e` 已支持隔离 `dsh --profile headless` 的 L1 无密钥运行；`test:lens:e2e` 已支持真实 Tauri/浏览器驱动协议、截图校验和退出码 0/1/2；`test:r07:runner`、`test:lens:runner` 覆盖纯函数和报告负例 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
-| R08 | 待开发 | 任务手册给出人因、来源、安装和发布要求 | 产品级可访问性、视觉、人因或安装验收 |
+| R08 | R08.1/R08.2 自动检查通过待实测；R08.3～R08.5 待开发 | `docs/evidence/r08-context-expansion.md` 与 `docs/evidence/r08-ui.md` 记录有界上下文预览、类型化 UI、a11y/visual 检查和 Tauri 截图 | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、人因、安装和发布候选 |
 
 R04 将必需材料字段引入 `session.submit`，因此 IPC 已由 V2 升为 V3，默认 pipe 名保持版本隔离。当前 README、协议、会话集成和工具说明已经描述 V3；历史 R03 决策与证据保留其发生时的 V2 事实。R04 的持久绑定规则见[决策记录](decisions/2026-09-08-session-bound-selection-material.md)，实际命令和边界见[R04 证据](evidence/r04-session-bound-selection-tools.md)。
 

@@ -1,6 +1,6 @@
 # Harness Plugins 开发任务与 Codex 执行手册
 
-> 文档状态：持续维护的开发执行手册。初始编写日期：2026-09-05；执行核查更新：2026-09-08。目标仓库：[mivaille777/Harness-plugins](https://github.com/mivaille777/Harness-plugins)。本文的目标、接口扩展、指标和新增命令均为开发要求；当前能力和测试证据以本仓库的实现及 `docs/evidence/` 为准。
+> 文档状态：持续维护的开发执行手册。初始编写日期：2026-09-05；执行核查更新：2026-09-09。目标仓库：[mivaille777/Harness-plugins](https://github.com/mivaille777/Harness-plugins)。本文的目标、接口扩展、指标和新增命令均为开发要求；当前能力和测试证据以本仓库的实现及 `docs/evidence/` 为准。
 
 ## 摘要
 
@@ -870,9 +870,9 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T02 | 自动检查通过待实测 | Codex | 本提交 | `docs/capture-reliability.md`、`pnpm test:capture`、`pnpm test:native-ui` |
 | T03 | 自动检查通过待实测 | Codex | 本提交 | `docs/bridge-transport.md`、`pnpm test:bridge`、`pnpm test:rust` |
 | T04 | 自动检查通过待实测 | Codex | 本提交 | `docs/selection-lens.md`、`pnpm test:lens` |
-| T05 | 开发中：R01 自动检查通过待实测；R02～R04 自动检查与 Windows 管道通过待实测；R05～R08 待执行 | Codex | R04 `5ec3a8a` | `docs/evidence/r01-lens-session-projection.md`、`docs/evidence/r02-continuous-session-subscriptions.md`、`docs/evidence/r03-request-identity-and-recovery.md`、`docs/evidence/r04-session-bound-selection-tools.md` |
-| T06 | 待开始 | 待分配 | — | — |
-| T07 | 待开始 | 待分配 | — | — |
+| T05 | 开发中：R01 自动检查通过待实测；R02～R04 自动检查与 Windows 管道通过待实测；R05 宿主前置已识别；R06 自动实现完成；R07 L1 通过、L2/L3 未运行；R08.1/R08.2 自动检查通过待实测；R08.3～R08.5 待执行 | Codex | R08.1/R08.2 `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r01-lens-session-projection.md`、`docs/evidence/r02-continuous-session-subscriptions.md`、`docs/evidence/r03-request-identity-and-recovery.md`、`docs/evidence/r04-session-bound-selection-tools.md`、`docs/evidence/r06-session-history-implementation.md`、`docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md` |
+| T06 | 自动检查通过待实测：R08.1 已实现已捕获上下文的显式、有界预览；真实 page Provider、document/revision 变化、持久化和模型输入一致性仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-context-expansion.md`、`pnpm test:context-expansion` |
+| T07 | 自动检查通过待实测：R08.2 已实现类型化界面文案、双主题、响应式、焦点和视觉基线；Narrator、DPI、多屏和真实窗口完整状态仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-ui.md`、`pnpm test:ui:a11y`、`pnpm test:ui:visual` |
 | T08-A/B/C/D | 待开始，逐项选择 | 待分配 | — | — |
 | T09 | 待开始 | 待分配 | — | — |
 | T10 | 待开始 | 待分配 | — | — |
@@ -989,4 +989,4 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 
 新增命令在负责任务完成后可以从“拟新增”改为“已有”，同时记录定义位置和实际执行证据。接口或范围调整须说明影响的任务、fixture 和验收；不能只改提示词而留下相互冲突的验收要求。
 
-截至 2026-09-08，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1/R08.3/R08.4/R08.5 仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。
+截至 2026-09-09，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.1 的有界上下文预览、R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1 的真实 Provider/document/持久化验收、R08.3/R08.4/R08.5 仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。
