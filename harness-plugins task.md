@@ -697,7 +697,7 @@ pnpm check:release
 git diff --check
 ```
 
-`check:release` 为本任务拟新增命令，不存在时不能运行。它只证明被实际执行的自动检查；发布候选是否满足全部要求还取决于第 10 节人工和外部环境证据。
+`check:release` 已注册，但没有 manifest 时只生成待验收骨架并返回 NOT READY/退出码 2。它只证明被实际执行的自动检查；发布候选是否满足全部要求还取决于第 10 节人工和外部环境证据。
 
 **黄金路径。** 无扩展 Chrome/Edge 选区→入口不抢焦点→主动解释→显示绑定来源的真实回答→追问→打开同一 Harness 会话→关闭返回原文→暂停→确认不再采集→退出→恢复运行。
 
@@ -739,7 +739,7 @@ git diff --check
 | `pnpm native:build` | 原生构建入口；基线未启用安装打包 |
 | `pnpm pack` | 打包 npm bundle，并执行 prepack 中的检查 |
 
-### 7.2 拟新增命令责任表
+### 7.2 命令责任表
 
 | 命令 | 所有者 | 环境与测试对象 | 必须失败的情况 |
 |---|---|---|---|
@@ -870,13 +870,13 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 | T02 | 自动检查通过待实测 | Codex | 本提交 | `docs/capture-reliability.md`、`pnpm test:capture`、`pnpm test:native-ui` |
 | T03 | 自动检查通过待实测 | Codex | 本提交 | `docs/bridge-transport.md`、`pnpm test:bridge`、`pnpm test:rust` |
 | T04 | 自动检查通过待实测 | Codex | 本提交 | `docs/selection-lens.md`、`pnpm test:lens` |
-| T05 | 开发中：R01 自动检查通过待实测；R02～R04 自动检查与 Windows 管道通过待实测；R05 宿主前置已识别；R06 自动实现完成；R07 L1 通过、L2/L3 未运行；R08.1/R08.2 自动检查通过待实测；R08.3～R08.5 待执行 | Codex | R08.1/R08.2 `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r01-lens-session-projection.md`、`docs/evidence/r02-continuous-session-subscriptions.md`、`docs/evidence/r03-request-identity-and-recovery.md`、`docs/evidence/r04-session-bound-selection-tools.md`、`docs/evidence/r06-session-history-implementation.md`、`docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md` |
+| T05 | 开发中：R01 自动检查通过待实测；R02～R04 自动检查与 Windows 管道通过待实测；R05 宿主前置已识别；R06 自动实现完成；R07 L1 通过、L2/L3 未运行；R08.1～R08.4 自动检查通过待实测；R08.5 聚合器已实现但候选 NOT READY | Codex | R08.5 `c264c08ff41f4735553bb55da2015bc808bb7699` | `docs/evidence/r01-lens-session-projection.md`、`docs/evidence/r02-continuous-session-subscriptions.md`、`docs/evidence/r03-request-identity-and-recovery.md`、`docs/evidence/r04-session-bound-selection-tools.md`、`docs/evidence/r06-session-history-implementation.md`、`docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md`、`docs/evidence/r08-installer.md`、`docs/evidence/r08-release.md` |
 | T06 | 自动检查通过待实测：R08.1 已实现已捕获上下文的显式、有界预览；真实 page Provider、document/revision 变化、持久化和模型输入一致性仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-context-expansion.md`、`pnpm test:context-expansion` |
 | T07 | 自动检查通过待实测：R08.2 已实现类型化界面文案、双主题、响应式、焦点和视觉基线；Narrator、DPI、多屏和真实窗口完整状态仍待验收 | Codex | `72164511aaab3a3c2ad21fefb5bf595ef0d693cc` | `docs/evidence/r08-ui.md`、`pnpm test:ui:a11y`、`pnpm test:ui:visual` |
 | T08-A/B/C/D | 待开始，逐项选择 | 待分配 | — | — |
 | T09 | 自动检查通过待实测：R08.3 已交付本地性能基准、匿名研究 fixture 校验和候选 SHA 绑定的描述性报告；真人研究和产品效果仍未验证 | Codex | `4aef646507b740110fbb8e8055e6f2a44d97f9aa` | `docs/evidence/r08-performance-human-factors.md`、`pnpm test:perf`、`pnpm test:human-factors:fixtures` |
 | T10 | 自动检查通过待实测：R08.4 已交付版本/产物元数据校验和脱敏诊断探针；Tauri 安装包、干净环境安装升级卸载仍未运行 | Codex | 待生成安装候选 | `docs/evidence/r08-installer.md`、`node --test scripts/installer.test.mjs`、`pnpm test:installer` |
-| T11 | 待开始 | 待分配 | — | — |
+| T11 | 自动检查通过待实测：`check:release` 候选聚合器已实现；当前无 manifest 时返回 NOT READY/退出码 2，真实模型、宿主交互、安装、人因和发布证据仍待执行 | Codex | `c264c08ff41f4735553bb55da2015bc808bb7699` | `docs/evidence/r08-release.md`、`node --test scripts/release.test.mjs`、`pnpm check:release` |
 
 ### 9.2 PR 描述模板
 
@@ -989,4 +989,4 @@ git worktree add ..\Harness-plugins-session -b feat/session-integration origin/m
 
 新增命令在负责任务完成后可以从“拟新增”改为“已有”，同时记录定义位置和实际执行证据。接口或范围调整须说明影响的任务、fixture 和验收；不能只改提示词而留下相互冲突的验收要求。
 
-截至 2026-09-09，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.1 的有界上下文预览、R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图，以及 R08.3 的本地性能/人因研究基础设施。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1 的真实 Provider/document/持久化验收、R08.3 真人效果、R08.4/R08.5 仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。
+截至 2026-09-09，工作线已交付 R01～R07 的协议、会话、材料绑定、历史恢复和分层运行器基础，并完成 R08.1 的有界上下文预览、R08.2 的感知优先 UI、locale 字典、响应式主题、无障碍检查和真实 Tauri WebView 截图、R08.3 的本地性能/人因研究基础设施、R08.4 的安装元数据/脱敏诊断基础以及 R08.5 的候选 manifest 校验器。R05 宿主交互、R07 L2/L3 真实模型与浏览器验收、R08.1 的真实 Provider/document/持久化验收、R08.3 真人效果、R08.4 安装升级卸载和 R08.5 发布候选仍未完成；详见 `docs/evidence/` 中的逐项状态。后续任务必须在当前提交上继续，不能把本地 fixture 或构建成功写成完整产品验收。

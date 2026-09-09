@@ -55,7 +55,7 @@ flowchart LR
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
 | R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
 | R07 | 运行器框架已实现，真实层待执行 | `test:session:e2e` 已支持隔离 `dsh --profile headless` 的 L1 无密钥运行；`test:lens:e2e` 已支持真实 Tauri/浏览器驱动协议、截图校验和退出码 0/1/2；`test:r07:runner`、`test:lens:runner` 覆盖纯函数和报告负例 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
-| R08 | R08.1/R08.2/R08.3/R08.4 自动检查通过待实测；R08.5 待开发 | `docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md` 与 `docs/evidence/r08-installer.md` 记录上下文预览、类型化 UI、a11y/visual 检查、Tauri 截图、本地人因研究基础设施和安装诊断探针 | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、真人效果、安装/升级/卸载和发布候选 |
+| R08 | R08.1～R08.4 自动检查通过待实测；R08.5 候选聚合器已实现但当前 NOT READY | `docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md`、`docs/evidence/r08-installer.md` 与 `docs/evidence/r08-release.md` 记录上下文预览、类型化 UI、a11y/visual 检查、Tauri 截图、本地性能/人因研究基础设施、安装诊断探针和候选校验结果 | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、真人效果、安装/升级/卸载和发布候选 |
 
 R04 将必需材料字段引入 `session.submit`，因此 IPC 已由 V2 升为 V3，默认 pipe 名保持版本隔离。当前 README、协议、会话集成和工具说明已经描述 V3；历史 R03 决策与证据保留其发生时的 V2 事实。R04 的持久绑定规则见[决策记录](decisions/2026-09-08-session-bound-selection-material.md)，实际命令和边界见[R04 证据](evidence/r04-session-bound-selection-tools.md)。
 
@@ -282,6 +282,8 @@ R08 分为五个可独立提交的子项。它们依赖 R01 至 R07 的语义稳
 
 新增 `check:release`，验证候选 SHA、插件/依赖版本、协议版本、bundle 与安装包哈希、兼容矩阵、已知限制、必需证据链接和工件路径一致。P0 缺陷必须修复；P1/P2 要说明影响、规避方式和是否阻止候选。合并、发布和签名仍由用户当时的授权决定。
 
+当前实现提供 `scripts/release.mjs`、`scripts/check-release.mjs` 和 `scripts/release.test.mjs`。没有 manifest 时，`check:release` 生成候选骨架并以 NOT READY/退出码 2 结束；它不会把 NOT RUN、PENDING 或 DESCRIPTIVE_ONLY 证据提升为 PASS，也不会执行发布或修改远端状态。实现切片和限制见 [R08.5 release evidence](evidence/r08-release.md)。
+
 ## 10. 测试、证据和截图规范
 
 ### 10.1 已有与拟新增命令
@@ -293,7 +295,7 @@ R08 分为五个可独立提交的子项。它们依赖 R01 至 R07 的语义稳
 | R04 工具 | `pnpm test:session:tools` | R04 已在 `5ec3a8a` 通过 7 个真实 ToolRuntime/Agent scope 测试；后续改动必须重跑并记录新结果 |
 | Native | `pnpm --dir native test`、`pnpm test:lens:session`、`pnpm --dir native build`、`pnpm test:rust` | Rust bridge、Tauri API、Lens 和投影改动 |
 | 跨语言 Windows | `pnpm test:contract`、`pnpm test:bridge:integration` | 每次协议或 Rust/TS bridge 改动；后者仅以实际 Windows Named Pipe 结果计数 |
-| R05 以后拟新增 | `pnpm test:session:interaction`、`pnpm test:session:history`、`pnpm check:release` | 先实现测试与 package script，再允许写入验收记录；R08.1～R08.4 已注册命令的实际结果见各 evidence |
+| R05 以后拟新增 | `pnpm test:session:interaction`、`pnpm test:session:history` | 先实现测试与 package script，再允许写入验收记录；R08.1～R08.5 已注册命令的实际结果见各 evidence |
 | 真实 e2e | `pnpm test:session:e2e`、`pnpm test:lens:e2e` | 运行器已可执行；退出 2 表示真实前置缺失或未验证，只有 L2/L3 实际路径通过才计作对应证据 |
 
 每份 `docs/evidence/r0x-*.md` 至少写明：候选 SHA、Harness 和 npm 包版本、Windows/Node/pnpm/Rust/浏览器/DPI 环境、修改范围、实际命令、退出码、关键断言、PASS/FAIL/NOT RUN、日志/截图路径、脱敏方式、已知限制和下一步。不得把未运行、退出 2 或只运行 mock 的结果概括为 PASS。
