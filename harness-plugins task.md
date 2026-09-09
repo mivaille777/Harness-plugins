@@ -456,7 +456,7 @@ pnpm test:session:e2e
 
 **当前执行入口（2026-09-08）。** 后续 Codex 先读 [后续 Codex 开发任务指南](docs/codex-next-development-guide.md)，再读 [DeepSeek Harness 完整交互开发计划](docs/harness-integration-development-plan.md)。前者把当前状态、R05～R08 的目标、边界、实现方式、验收命令、截图规范、并行分工与可复制提示词整理为直接可执行的工作包；后者保留完整技术设计和证据门槛。两份文档均以当前工作树和已安装 Harness 版本为准，不能覆盖后续已合入的工作。
 
-当前工作树已完成 Harness 服务依赖声明、会话创建/恢复、`queue` 与 `steer` 提交、请求幂等、取消消息、协议层订阅、Lens 固定材料提交，以及 R06 的 durable history 分页、Native list/create/history/unsubscribe、Lens 会话选择和恢复投影。R07 运行器现在提供隔离 `dsh --profile headless` 的 L1 无密钥 profile smoke，以及只接受真实 Tauri/浏览器驱动报告的 L3 验证入口；真实模型、宿主审批和可见窗口仍需后续任务验证。每项独立提交，不能把“请求已入队”写成“已得到回答”。
+当前工作树已完成 Harness 服务依赖声明、会话创建/恢复、`queue` 与 `steer` 提交、请求幂等、取消消息、协议层订阅、Lens 固定材料提交，以及 R06 的 durable history 分页、Native list/create/history/unsubscribe、Lens 会话选择和恢复投影。R07 运行器现在提供隔离 `dsh --profile headless` 的 L1 无密钥 profile smoke，可通过 `R07_DSH_REPOSITORY` 固定用户指定的 Harness 源码 checkout，并提供只接受真实 Tauri/浏览器驱动报告的 L3 验证入口。2026-09-09 已在 `D:\deepseek harness\deepseek-harness` 的 `0.1.1-rc.2`、`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` 上验证安装、bundle 合成、插件加载、本地确定性回答和 durable session 文件；真实模型、宿主审批和可见窗口仍需后续任务验证。源码 checkout 首次验证先运行 `pnpm install` 和 `pnpm build:lib:host`，再设置环境变量执行 `pnpm test:session:e2e`。每项独立提交，不能把“请求已入队”写成“已得到回答”。
 
 | 子任务 | 目的与完成定义 | 实现边界 | 自动验证 | 实机验证 |
 |---|---|---|---|---|

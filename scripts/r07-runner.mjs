@@ -43,6 +43,7 @@ export async function runProcess(command, args, options = {}) {
     env,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     shell = false,
+    windowsVerbatimArguments = false,
   } = options
   return await new Promise(resolveResult => {
     let child
@@ -51,6 +52,7 @@ export async function runProcess(command, args, options = {}) {
         cwd,
         env,
         shell,
+        windowsVerbatimArguments,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -160,8 +162,8 @@ export async function createRunDirectories(prefix = 'dsh-selection-companion-r07
 /** Locate the supported dsh launcher without printing a credential-bearing environment. */
 export function dshCommand() {
   return process.platform === 'win32'
-    ? { command: process.env.ComSpec ?? 'cmd.exe', shell: false }
-    : { command: 'dsh', shell: false }
+    ? { command: process.env.ComSpec ?? 'cmd.exe', shell: false, windowsVerbatimArguments: true }
+    : { command: 'dsh', shell: false, windowsVerbatimArguments: false }
 }
 
 /** Build a bounded command line for the Windows launcher without shell interpolation. */
@@ -183,7 +185,19 @@ export function packageManagerInvocation(args) {
     command: process.env.ComSpec ?? 'cmd.exe',
     args: ['/d', '/s', '/c', ['pnpm.cmd', ...args].map(quote).join(' ')],
     shell: false,
+    windowsVerbatimArguments: true,
   }
+}
+
+/** Resolve a dsh invocation from either an installed CLI or a selected source checkout. */
+export function dshInvocation(args, env = process.env) {
+  const repository = env.R07_DSH_REPOSITORY
+  if (repository !== undefined) {
+    if (repository.trim() === '') throw new Error('R07_DSH_REPOSITORY must not be empty')
+    return packageManagerInvocation(['--dir', resolve(repository), 'dsh', ...args])
+  }
+  const launcher = dshCommand()
+  return { ...launcher, args: dshArgs(args) }
 }
 
 /** Find durable session files below one isolated DSH_HOME. */
@@ -218,7 +232,6 @@ export async function writeReport(artifactDirectory, report, fileName = 'r07-ses
 
 /** Run one dsh profile task in an isolated profile and record only safe facts. */
 export async function runProfileTask({ home, workspace, repoRoot, modelServer, real = false }) {
-  const launcher = dshCommand()
   const env = {
     ...process.env,
     DSH_HOME: home,
@@ -231,10 +244,17 @@ export async function runProfileTask({ home, workspace, repoRoot, modelServer, r
     env.DEEPSEEK_BASE_URL = modelServer.url
   }
   const installArgs = ['plugin', '--profile', 'headless', 'add', `file:${repoRoot.replaceAll('\\', '/')}`]
+  const installInvocation = dshInvocation(installArgs, env)
   const install = await runProcess(
-    launcher.command,
-    dshArgs(installArgs),
-    { cwd: workspace, env, timeoutMs: 180_000, shell: launcher.shell },
+    installInvocation.command,
+    installInvocation.args,
+    {
+      cwd: workspace,
+      env,
+      timeoutMs: 180_000,
+      shell: installInvocation.shell,
+      windowsVerbatimArguments: installInvocation.windowsVerbatimArguments,
+    },
   )
   if (install.code !== 0) {
     return { status: 'FAIL', reason: 'plugin install failed', install, run: null, sessionFiles: [] }
@@ -246,10 +266,17 @@ export async function runProfileTask({ home, workspace, repoRoot, modelServer, r
   const bundles = profilePackage?.dsh?.profile?.bundles
   const pluginComposed = Array.isArray(bundles) && bundles.includes('dsh-selection-companion')
   const runArgs = ['--profile', 'headless', real ? 'R07 real profile smoke: respond with a concise answer.' : 'R07 keyless profile smoke: respond with the fixed local token.']
+  const runInvocation = dshInvocation(runArgs, env)
   const run = await runProcess(
-    launcher.command,
-    dshArgs(runArgs),
-    { cwd: workspace, env, timeoutMs: 180_000, shell: launcher.shell },
+    runInvocation.command,
+    runInvocation.args,
+    {
+      cwd: workspace,
+      env,
+      timeoutMs: 180_000,
+      shell: runInvocation.shell,
+      windowsVerbatimArguments: runInvocation.windowsVerbatimArguments,
+    },
   )
   const combined = `${run.stdout}\n${run.stderr}`
   const sessionFiles = await findSessionFiles(home)
@@ -279,13 +306,23 @@ export async function runProfileTask({ home, workspace, repoRoot, modelServer, r
 
 /** Confirm the basic tools needed by the selected R07 layer. */
 export async function preflight(env = process.env) {
-  const launcher = dshCommand()
   const commandEnv = { ...env }
   const packageManager = packageManagerInvocation(['--version'])
+  const dshLauncher = dshInvocation(['--version'], commandEnv)
   const [node, pnpm, dsh] = await Promise.all([
     runProcess(process.execPath, ['--version'], { env: commandEnv, timeoutMs: 10_000 }),
-    runProcess(packageManager.command, packageManager.args, { env: commandEnv, timeoutMs: 10_000, shell: packageManager.shell }),
-    runProcess(launcher.command, dshArgs(['--version']), { env: commandEnv, timeoutMs: 20_000, shell: launcher.shell }),
+    runProcess(packageManager.command, packageManager.args, {
+      env: commandEnv,
+      timeoutMs: 10_000,
+      shell: packageManager.shell,
+      windowsVerbatimArguments: packageManager.windowsVerbatimArguments,
+    }),
+    runProcess(dshLauncher.command, dshLauncher.args, {
+      env: commandEnv,
+      timeoutMs: 20_000,
+      shell: dshLauncher.shell,
+      windowsVerbatimArguments: dshLauncher.windowsVerbatimArguments,
+    }),
   ])
   return {
     platform: process.platform,

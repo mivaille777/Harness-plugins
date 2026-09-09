@@ -599,7 +599,7 @@ pnpm test:lens:e2e
 
 ## 12. 命令可用性与检查策略
 
-以下分类以执行基线 `00ccb6a` 和当前 package scripts 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins-dev-t05`；不要误在 Harness monorepo 中运行插件脚本。
+以下分类以执行基线 `00ccb6a` 和当前 package scripts 为准，后续新增命令必须更新此表。运行目录是插件仓库根目录，例如 `D:/deepseekHarness/Harness-plugins`；不要误在 Harness monorepo 中运行插件脚本。
 
 | 类别 | 命令 | 注意事项 |
 |---|---|---|

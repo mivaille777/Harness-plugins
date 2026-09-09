@@ -25,6 +25,18 @@ Environment: Windows (`win32`), Node `v24.11.1`, pnpm `11.7.0`, Rust `1.97.1`, i
 
 The L1 report observed `dsh` profile installation, `dsh-selection-companion` in the headless profile bundle list, the plugin startup line, the fixed `R07_SESSION_OK` response from the loopback endpoint, two local model requests, and one non-empty durable `session.jsonl.zstd` file. No credential or selection body was written to the report.
 
+## Specified source-checkout rerun
+
+On 2026-09-09, L1 was rerun against the user-selected Harness source checkout at `D:\deepseek harness\deepseek-harness`, version `0.1.1-rc.2`, commit `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`. The checkout first required `pnpm install` and `pnpm build:lib:host`; source-profile peer fallback otherwise resolved package manifests whose `lib/index.js` files did not yet exist.
+
+```powershell
+$env:R07_DSH_REPOSITORY = 'D:\deepseek harness\deepseek-harness'
+pnpm test:r07:runner
+pnpm test:session:e2e
+```
+
+The runner tests passed 4/4. The session runner reported L1 `PASS`, L2 `NOT RUN`, exit 0. The report recorded the selected source CLI as `0.1.1-rc.2`, successful plugin installation and composition, the plugin startup line, `R07_SESSION_OK`, two loopback model requests, and one non-empty durable session file. This rerun proves the specified checkout rather than the globally installed `dsh`; it retains the same L1 limitations described below.
+
 ## Native visual fixture observation
 
 The Tauri development binary was launched with `pnpm native:dev`. A temporary local bridge supplied a non-sensitive fixed snapshot and deterministic history so the actual Tauri WebView could be inspected. The window was resized to 620×900 for readability; the fixture text is not a real browser selection and the bridge did not run a DeepSeek model. The screenshots therefore demonstrate the current Lens material/history/answer presentation only; they are W/U visual-fixture evidence and do not satisfy R07 L3.

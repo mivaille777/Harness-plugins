@@ -493,7 +493,7 @@ The optional Browser DOM extension has its own separate checks and is not a Task
 - lazy full-page context expansion
 - a real supported `dsh` profile/model run that invokes and records `selection_current` / `selection_read_context`
 - Lens approval / ask-user interaction
-- persisted Lens session selection and complete Harness history navigation
+- complete-Harness navigation from the Lens into the same session
 - real-model session e2e runner and visible Tauri interaction evidence
 - prebuilt Windows installer / binary packaging
 

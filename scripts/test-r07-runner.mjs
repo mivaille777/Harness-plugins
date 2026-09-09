@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { EXIT_CODES, exitCodeForStatus, isOwnedPath, redactOutput } from './r07-runner.mjs'
+import { resolve } from 'node:path'
+import { dshInvocation, EXIT_CODES, exitCodeForStatus, isOwnedPath, redactOutput } from './r07-runner.mjs'
 
 test('R07 runner keeps the three exit states explicit', () => {
   assert.equal(exitCodeForStatus('PASS'), EXIT_CODES.PASS)
@@ -19,4 +20,19 @@ test('R07 runner redacts credential-shaped diagnostics', () => {
   assert.equal(safe.includes('sk-secret-value'), false)
   assert.equal(safe.includes('sk-other-value'), false)
   assert.match(safe, /\[redacted\]/)
+})
+
+test('R07 runner can launch dsh from an explicit source checkout', () => {
+  const repository = resolve('fixtures', 'deepseek harness')
+  const invocation = dshInvocation(['--version'], { R07_DSH_REPOSITORY: repository })
+  const renderedArgs = invocation.args.join(' ')
+  assert.match(renderedArgs, /--dir/)
+  assert.ok(renderedArgs.includes(repository))
+  assert.match(renderedArgs, /dsh/)
+  assert.match(renderedArgs, /--version/)
+  assert.equal(invocation.windowsVerbatimArguments, process.platform === 'win32')
+  assert.throws(
+    () => dshInvocation(['--version'], { R07_DSH_REPOSITORY: ' ' }),
+    /must not be empty/,
+  )
 })

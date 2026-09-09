@@ -2,7 +2,49 @@
 
 本指南把 [完整交互开发计划](harness-integration-development-plan.md) 和根目录的 [Harness-plugins 任务手册](../harness-plugins%20task.md) 转换为后续 Codex 可以直接执行和审查的工作包。它面向当前 `feat/t05-session-integration` 工作线，覆盖 R04 到可与 DeepSeek Harness 完整交互的 R08。执行者必须以当前工作树、已安装依赖和实际 Harness 版本为准；本文不把计划中的接口或测试结果当作已经实现的事实。
 
-审阅基线：2026-09-09，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器远端提交为 `9522081`，环境变量测试稳定性修复远端提交为 `716c07c`；R08.1/R08.2 实现与证据提交为 `72164511aaab3a3c2ad21fefb5bf595ef0d693cc`。L1 已有隔离 profile smoke 证据，真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
+审阅基线：2026-09-09，分支 `feat/t05-session-integration`。R04 自动化实现提交为 `5ec3a8a`；R07 运行器远端提交为 `9522081`，环境变量测试稳定性修复远端提交为 `716c07c`；R08.1/R08.2 实现与证据提交为 `72164511aaab3a3c2ad21fefb5bf595ef0d693cc`。L1 已在用户指定的 `D:\deepseek harness\deepseek-harness` 源码 checkout（`0.1.1-rc.2`，`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`）通过隔离 profile smoke；真实模型和可见窗口的产品证据尚未执行。执行者必须从当前 HEAD 开始，不允许重置到任何早期基线而覆盖后续工作。
+
+## 0. 当前执行顺序：先建立可重复挂载基线
+
+当前第一优先级是保证插件能由用户指定的 DeepSeek Harness 源码 checkout 安装、组合和启动。2026-09-09 的实际运行已证明：`dsh plugin --profile headless add file:<plugin>` 把 `dsh-selection-companion` 加入隔离 profile 的 bundle 列表；Cordis 输出插件加载日志；本地确定性模型返回 `R07_SESSION_OK`；Harness 写入非空 durable session 文件。该结果证明 bundle、peer 依赖、插件生命周期、Agent/Session 主路径和持久化能够在目标 `0.1.1-rc.2` 源码上共同运行，不代表真实 DeepSeek 模型、浏览器 UIA、可见 Tauri 或宿主审批已经通过。
+
+源码 checkout 首次运行前需要恢复锁定依赖并生成 Host `lib/`。profile 的树外插件通过 `$DSH_HOME/profiles/node_modules` 回落到 Harness 安装的包；若源码包尚无 `lib/index.js`，外部插件会在导入 `@deepseek-ai/cordis` 时明确失败。准备和复验命令如下：
+
+```powershell
+Set-Location 'D:\deepseek harness\deepseek-harness'
+pnpm install
+pnpm build:lib:host
+
+Set-Location 'D:\deepseekHarness\Harness-plugins'
+$env:R07_DSH_REPOSITORY = 'D:\deepseek harness\deepseek-harness'
+pnpm test:r07:runner
+pnpm test:session:e2e
+```
+
+`R07_DSH_REPOSITORY` 使运行器通过 `pnpm --dir <checkout> dsh` 使用指定源码，而不是 PATH 中的全局 `dsh`。运行器仍创建唯一临时 `DSH_HOME`，关闭 Native bridge，使用回环确定性模型，并在退出后只清理自己创建的目录。任何带空格的 Windows checkout 路径必须由运行器按 `cmd.exe` 的 verbatim argv 规则转发；对应单元测试不得删除。
+
+从该基线到可交付产品按以下顺序推进：
+
+| 顺序 | 工作包 | 目的和实现边界 | 验证出口 |
+|---|---|---|---|
+| P0 | 源码挂载与无密钥会话 | 保持 `0.1.1-rc.2` peer 版本、bundle 声明、隔离 profile 和显式源码 launcher 可重复通过 | `test:r07:runner` 与带 `R07_DSH_REPOSITORY` 的 `test:session:e2e` 均为 PASS |
+| P1 | Harness 版本决策 | 对 GitHub `master` 当前 `0.1.5-alpha.1` 建独立兼容分支，先做 API/类型/profile 探针，再决定整体升级；不得把 rc.2 与 alpha 包混装 | 新 checkout 的 install、typecheck、dump-config 和 L1 报告绑定同一 Harness SHA |
+| P2 | H05 与插件 R05 | 先由 Harness 提供 durable interaction API，再实现 Lens 审批/追问投影；不得在插件中创建第二套审批状态 | H05 focused tests、`test:session:interaction`、协议/管道/Lens 回归 |
+| P3 | 真实 DeepSeek 会话 | 在明确授权的凭据环境运行 L2，验证材料、工具、追问、停止、历史和进程恢复 | `R07_RUN_REAL=1` 时 L1、L2 均为 PASS |
+| P4 | 浏览器与 Tauri 闭环 | 使用真实 Chrome/Edge UIA 和可见 Tauri 完成选择、提交、回答、历史及恢复 | `test:lens:e2e` L3 PASS，截图与候选 SHA 对齐 |
+| P5 | 产品质量与交付 | 完成 Narrator、DPI、多屏、性能、人因、安装升级卸载和候选清单 | R08 各命令与 `check:release` READY |
+
+P3 的验证出口为设置 `R07_RUN_REAL=1` 后运行 `pnpm test:session:e2e`，报告中 L1、L2 均为 PASS，并记录模型配置、Harness SHA、插件 SHA 和脱敏 session 证据。缺少授权凭据时保持 L2 `NOT RUN`，不阻止 P0/P1/P2/P4 的离线实现。
+
+可直接交给后续 Codex 的 P0/P1 提示词：
+
+```text
+先建立 Harness-plugins 的可重复挂载基线。目标插件目录为 D:\deepseekHarness\Harness-plugins，目标 Harness 源码目录为 D:\deepseek harness\deepseek-harness。读取两边的 AGENTS.md、Harness docs/architecture.md、插件 docs/codex-next-development-guide.md、package.json、cordis.patch.yml 和 scripts/r07-runner.mjs；保留现有未提交改动。
+
+确认 Harness 版本、SHA、工作树和插件 peer 版本。若目标源码尚无 node_modules 或 Host lib，按锁文件执行 pnpm install 与 pnpm build:lib:host。设置 R07_DSH_REPOSITORY 后运行 test:r07:runner 和 test:session:e2e，必须确认 profile bundle 列表包含 dsh-selection-companion、插件加载日志出现、本地模型固定响应被观察且 durable session 文件非空。不得用全局 dsh 的成功代替指定 checkout，不得读取或打印真实密钥。
+
+若要验证 GitHub master，使用独立 checkout 和独立分支；先固定上游 SHA，核对 package exports、Service inject、profile patch 和 Session/Agent API，再调整全部 peer/dev dependency。不要在同一 profile 混装 0.1.1-rc.2 与 0.1.5-alpha.1。输出实际命令、退出码、报告路径、版本与未验证项。
+```
 
 ## 目录
 
@@ -54,7 +96,7 @@ flowchart LR
 | R04 | 自动检查与 Windows 管道通过待实测 | `5ec3a8a`、[R04 证据](evidence/r04-session-bound-selection-tools.md)记录 V3 材料、Agent scoped 工具、TS/Rust/Native 同步和真实 Node/Rust Named Pipe | 受支持 profile 中的工具可见性、真实模型、可见 Tauri 窗口、截图和真实进程重启 |
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
 | R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
-| R07 | 运行器框架已实现，真实层待执行 | `test:session:e2e` 已支持隔离 `dsh --profile headless` 的 L1 无密钥运行；`test:lens:e2e` 已支持真实 Tauri/浏览器驱动协议、截图校验和退出码 0/1/2；`test:r07:runner`、`test:lens:runner` 覆盖纯函数和报告负例 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
+| R07 | 指定源码 Harness 的 L1 已通过，真实层待执行 | `R07_DSH_REPOSITORY` 可固定本地 Harness checkout；`test:session:e2e` 已在 `b150a551` 完成隔离 profile、插件加载、确定性回答和 durable 文件验证；`test:lens:e2e` 支持真实 Tauri/浏览器驱动报告 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
 | R08 | R08.1～R08.4 自动检查通过待实测；R08.5 候选聚合器已实现但当前 NOT READY | `docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md`、`docs/evidence/r08-installer.md` 与 `docs/evidence/r08-release.md` 记录上下文预览、类型化 UI、a11y/visual 检查、Tauri 截图、本地性能/人因研究基础设施、安装诊断探针和候选校验结果 | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、真人效果、安装/升级/卸载和发布候选 |
 
 R04 将必需材料字段引入 `session.submit`，因此 IPC 已由 V2 升为 V3，默认 pipe 名保持版本隔离。当前 README、协议、会话集成和工具说明已经描述 V3；历史 R03 决策与证据保留其发生时的 V2 事实。R04 的持久绑定规则见[决策记录](decisions/2026-09-08-session-bound-selection-material.md)，实际命令和边界见[R04 证据](evidence/r04-session-bound-selection-tools.md)。
@@ -342,7 +384,7 @@ R07 L3 和 R08.2 必须截图实际 Tauri 产品窗口，不接受静态 HTML mo
 ### 13.1 通用开场提示词
 
 ```text
-继续 D:\\deepseekHarness\\Harness-plugins-dev-t05 的 Harness-plugins 开发。先读取 docs/codex-next-development-guide.md、docs/harness-integration-development-plan.md、根目录 harness-plugins task.md、package.json、相关源码/测试和 git status --short；以当前 HEAD 与未提交工作为准，不执行 reset、clean 或覆盖他人改动。
+继续 D:\\deepseekHarness\\Harness-plugins 的 Harness-plugins 开发。先读取 docs/codex-next-development-guide.md、docs/harness-integration-development-plan.md、根目录 harness-plugins task.md、package.json、相关源码/测试和 git status --short；以当前 HEAD 与未提交工作为准，不执行 reset、clean 或覆盖他人改动。
 
 遵守数据所有权：Native 不调用模型也不保存第二份对话；Harness durable session log 是材料、请求、工具、审批和历史的权威。跨进程必需字段变化同步 TypeScript、Rust、Native、fixture、协议版本和 pipe 名。先写失败行为测试，再做最小实现；运行与改动面匹配的 focused checks。报告实际命令、退出码、环境、证据路径和 PASS/FAIL/NOT RUN；模拟、无密钥集成、Windows Named Pipe、真实模型和可见窗口证据必须分开。
 
