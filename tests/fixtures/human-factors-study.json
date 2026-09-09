@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "studyId": "r08-perception-formative-v1",
+  "candidateSha": null,
+  "conditions": ["baseline", "companion"],
+  "tasks": [
+    {
+      "id": "term-explanation",
+      "category": "understanding",
+      "successCriteria": ["identify the requested term", "state the key fact without changing the source"],
+      "timingStart": "first-action",
+      "timingEnd": "answer-accepted"
+    },
+    {
+      "id": "source-follow-up",
+      "category": "source-checking",
+      "successCriteria": ["identify the fixed material", "choose the intended context scope"],
+      "timingStart": "task-start",
+      "timingEnd": "scope-confirmed"
+    },
+    {
+      "id": "recovery-reading",
+      "category": "recovery",
+      "successCriteria": ["resume the same session", "return to the original reading task"],
+      "timingStart": "failure-visible",
+      "timingEnd": "reading-resumed"
+    }
+  ],
+  "metrics": [
+    "completionRate",
+    "durationMs",
+    "criticalFactOmissions",
+    "sourceAttributionErrors",
+    "misoperations",
+    "scopeJudgmentCorrect",
+    "recoverySuccess",
+    "rawTlx"
+  ],
+  "retention": {
+    "allowedFields": ["observationId", "condition", "taskId", "outcomes", "durationMs", "rawTlx"],
+    "forbiddenFields": ["selectionText", "url", "answer", "prompt", "email", "token"]
+  },
+  "status": "research-plan-only"
+}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "studyId": "r08-perception-formative-v1",
+  "candidateSha": "0000000000000000000000000000000000000000",
+  "observations": [
+    {
+      "observationId": "fixture-baseline-01",
+      "condition": "baseline",
+      "taskId": "term-explanation",
+      "completed": true,
+      "durationMs": 1000,
+      "criticalFactOmissions": 0,
+      "sourceAttributionErrors": 0,
+      "misoperations": 0,
+      "scopeJudgmentCorrect": true,
+      "recoverySuccess": true,
+      "rawTlx": 30
+    },
+    {
+      "observationId": "fixture-companion-01",
+      "condition": "companion",
+      "taskId": "term-explanation",
+      "completed": true,
+      "durationMs": 700,
+      "criticalFactOmissions": 0,
+      "sourceAttributionErrors": 0,
+      "misoperations": 0,
+      "scopeJudgmentCorrect": true,
+      "recoverySuccess": true,
+      "rawTlx": 30
+    }
+  ]
+}
