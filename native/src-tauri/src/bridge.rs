@@ -16,8 +16,8 @@ use tokio::sync::Mutex;
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
 
 use crate::protocol::{
-    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionMaterial,
-    SelectionSnapshot, SessionCreatedPayload, SessionHistoryResultPayload,
+    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionExpandedPayload,
+    SelectionMaterial, SelectionSnapshot, SessionCreatedPayload, SessionHistoryResultPayload,
     SessionListResultPayload, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
@@ -724,6 +724,69 @@ impl BridgeRuntime {
     }
 
     #[cfg(windows)]
+    async fn expand_selection(
+        &self,
+        snapshot_id: String,
+        scope: String,
+    ) -> Result<SelectionExpandedPayload, String> {
+        if snapshot_id.trim().is_empty() {
+            return Err("snapshot id must not be empty".to_owned());
+        }
+        if !matches!(scope.as_str(), "selection" | "local" | "section" | "page") {
+            return Err("scope must be selection, local, section, or page".to_owned());
+        }
+        self.connect().await?;
+        let request_id = request_id("selection-expand");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "selection.expand".to_owned(),
+            payload: serde_json::json!({ "snapshotId": snapshot_id, "scope": scope }),
+        };
+        let mut attempts = 0;
+        let response = loop {
+            let mut inner = self.inner.lock().await;
+            let client = inner
+                .client
+                .as_mut()
+                .ok_or_else(|| "bridge is not connected".to_owned())?;
+            match exchange(client, &message, self.request_timeout).await {
+                Ok(response) => break response,
+                Err(error) => {
+                    let detail = format!("selection expansion failed: {error}");
+                    inner.connected = false;
+                    inner.client = None;
+                    inner.last_error = Some(detail.clone());
+                    drop(inner);
+                    attempts += 1;
+                    if attempts < 2 {
+                        self.connect().await?;
+                        continue;
+                    }
+                    return Err(detail);
+                }
+            }
+        };
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected selection expansion: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "selection.expanded" {
+            return Err(format!(
+                "unexpected selection.expand response: {}",
+                response.type_name
+            ));
+        }
+        let payload: SelectionExpandedPayload = serde_json::from_value(response.payload)
+            .map_err(|error| format!("invalid selection.expanded payload: {error}"))?;
+        self.inner.lock().await.last_error = None;
+        Ok(payload)
+    }
+
+    #[cfg(windows)]
     async fn submit_prompt(
         &self,
         session_id: Option<String>,
@@ -920,6 +983,16 @@ impl BridgeRuntime {
     async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
         self.connect().await?;
         Ok(None)
+    }
+
+    #[cfg(not(windows))]
+    async fn expand_selection(
+        &self,
+        _snapshot_id: String,
+        _scope: String,
+    ) -> Result<SelectionExpandedPayload, String> {
+        self.connect().await?;
+        Err("selection expansion is only available on the Windows bridge".to_owned())
     }
 
     #[cfg(windows)]
@@ -1195,6 +1268,15 @@ pub async fn bridge_current_selection(
     state: State<'_, BridgeRuntime>,
 ) -> Result<Option<SelectionSnapshot>, String> {
     state.current_selection().await
+}
+
+#[tauri::command]
+pub async fn bridge_expand_selection(
+    state: State<'_, BridgeRuntime>,
+    snapshot_id: String,
+    scope: String,
+) -> Result<SelectionExpandedPayload, String> {
+    state.expand_selection(snapshot_id, scope).await
 }
 
 #[tauri::command]

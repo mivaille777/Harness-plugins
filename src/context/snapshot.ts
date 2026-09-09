@@ -31,6 +31,8 @@ export interface SelectionSnapshot {
     readonly before?: string
     readonly after?: string
     readonly sectionText?: string
+    /** Optional page text captured by a provider that explicitly supports page scope. */
+    readonly pageText?: string
     readonly pageAvailable: boolean
   }
 
@@ -108,6 +110,7 @@ export function normalizeSelectionSnapshot(input: unknown): SelectionSnapshot {
       ...optionalStringProperty(context.before, 'context.before', 'before'),
       ...optionalStringProperty(context.after, 'context.after', 'after'),
       ...optionalStringProperty(context.sectionText, 'context.sectionText', 'sectionText'),
+      ...optionalStringProperty(context.pageText, 'context.pageText', 'pageText'),
       pageAvailable: requireBoolean(context.pageAvailable, 'context.pageAvailable'),
     },
     capabilities: {

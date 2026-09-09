@@ -225,6 +225,7 @@ mod windows_impl {
                 before,
                 after,
                 section_text: paragraph,
+                page_text: None,
                 page_available: false,
             },
             capabilities: SelectionCapabilities {

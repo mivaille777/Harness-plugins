@@ -150,7 +150,20 @@ pub enum ContextScope {
 pub struct SelectionExpandedPayload {
     pub snapshot_id: String,
     pub scope: ContextScope,
+    #[serde(default)]
+    pub revision: Option<u64>,
+    #[serde(default)]
+    pub completeness: Option<SelectionContextCompleteness>,
+    #[serde(default)]
+    pub truncated: Option<bool>,
     pub context: ExpandedSelectionContext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionContextCompleteness {
+    Complete,
+    Partial,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -237,6 +250,8 @@ pub struct SelectionContext {
     pub after: Option<String>,
     #[serde(default)]
     pub section_text: Option<String>,
+    #[serde(default)]
+    pub page_text: Option<String>,
     pub page_available: bool,
 }
 
@@ -623,6 +638,9 @@ impl IpcMessage {
             "selection.expanded" => {
                 let payload: SelectionExpandedPayload = typed_payload(&self.payload)?;
                 require_text(&payload.snapshot_id, "snapshotId")?;
+                if let Some(revision) = payload.revision {
+                    require_safe_integer(revision, "revision")?;
+                }
             }
             "session.list.result" => {
                 let payload: SessionListResultPayload = typed_payload(&self.payload)?;
@@ -1039,6 +1057,7 @@ mod tests {
         include_str!("../../../tests/protocol/session.history.request.json"),
         include_str!("../../../tests/protocol/session.history.response.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
+        include_str!("../../../tests/protocol/selection.expanded.response.json"),
         include_str!("../../../tests/protocol/error.response.json"),
     ];
     const INVALID_FIXTURES: &[&str] = &[

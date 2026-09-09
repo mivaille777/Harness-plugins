@@ -604,6 +604,7 @@ mod tests {
                 before: None,
                 after: None,
                 section_text: None,
+                page_text: None,
                 page_available: false,
             },
             capabilities: SelectionCapabilities {

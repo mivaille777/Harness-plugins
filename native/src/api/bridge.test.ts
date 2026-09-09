@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: tauri.invoke }))
 import {
   SubmissionUnknownError,
   createSession,
+  expandSelection,
   listSessions,
   readSessionHistory,
   submitSessionPrompt,
@@ -88,5 +89,23 @@ describe('session bridge commands', () => {
     expect(tauri.invoke).toHaveBeenNthCalledWith(1, 'bridge_read_session_history', { sessionId: 'session-1', afterCursor: 4, limit: 5 })
     await expect(unsubscribeSession('session-1', 'sub-1')).resolves.toEqual({ sessionId: 'session-1', subscriptionId: 'sub-1', released: true })
     expect(tauri.invoke).toHaveBeenNthCalledWith(2, 'bridge_unsubscribe_session', { sessionId: 'session-1', subscriptionId: 'sub-1' })
+  })
+})
+
+describe('selection context bridge commands', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('requests an explicit bounded expansion for the fixed snapshot', async () => {
+    const expansion = {
+      snapshotId: 'snapshot-1',
+      scope: 'local' as const,
+      revision: 7,
+      completeness: 'complete' as const,
+      truncated: false,
+      context: { before: 'Before', after: 'After' },
+    }
+    tauri.invoke.mockResolvedValue(expansion)
+    await expect(expandSelection('snapshot-1', 'local')).resolves.toEqual(expansion)
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_expand_selection', { snapshotId: 'snapshot-1', scope: 'local' })
   })
 })

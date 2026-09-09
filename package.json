@@ -28,6 +28,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:selection": "vitest run tests/selection-context.spec.ts",
+    "test:context-expansion": "vitest run tests/selection-context.spec.ts",
     "test:protocol": "vitest run tests/protocol.spec.ts",
     "test:contract": "pnpm test:protocol && pnpm --dir native build && pnpm test:rust",
     "test:bridge": "vitest run tests/bridge-server.spec.ts",

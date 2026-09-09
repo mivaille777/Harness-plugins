@@ -86,6 +86,12 @@ export interface SelectionExpandPayload {
 export interface SelectionExpandedPayload {
   readonly snapshotId: string
   readonly scope: ContextScope
+  /** Revision of the immutable snapshot used for this response. */
+  readonly revision?: number
+  /** Whether all requested fields were present within the response bounds. */
+  readonly completeness?: 'complete' | 'partial'
+  /** Whether one or more context fields were shortened. */
+  readonly truncated?: boolean
   readonly context: {
     readonly before?: string
     readonly after?: string
@@ -272,6 +278,7 @@ const selectionSnapshotWireSchema = z.object({
     before: z.string().optional(),
     after: z.string().optional(),
     sectionText: z.string().optional(),
+    pageText: z.string().optional(),
     pageAvailable: z.boolean(),
   }).strict(),
   capabilities: z.object({
@@ -419,6 +426,9 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
       return z.object({
         snapshotId: nonEmptyString,
         scope: scopeSchema,
+        revision: nonNegativeSafeInteger.optional(),
+        completeness: z.enum(['complete', 'partial']).optional(),
+        truncated: z.boolean().optional(),
         context: z.object({
           before: z.string().optional(),
           after: z.string().optional(),

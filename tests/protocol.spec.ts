@@ -148,6 +148,34 @@ describe('IPC message validation', () => {
       completeness: 'complete',
     })
   })
+
+  it('accepts a bounded selection expansion response with its snapshot revision', () => {
+    const parsed = parseIpcMessage({
+      protocol: 3,
+      id: 'selection-expand-response-1',
+      type: 'selection.expanded',
+      payload: {
+        snapshotId: 'selection-1',
+        scope: 'page',
+        revision: 9,
+        completeness: 'partial',
+        truncated: true,
+        context: { pageText: 'Captured page context.' },
+      },
+    })
+
+    expect(parsed).toMatchObject({
+      type: 'selection.expanded',
+      payload: {
+        snapshotId: 'selection-1',
+        scope: 'page',
+        revision: 9,
+        completeness: 'partial',
+        truncated: true,
+        context: { pageText: 'Captured page context.' },
+      },
+    })
+  })
 })
 
 describe('IPC length-prefixed framing', () => {

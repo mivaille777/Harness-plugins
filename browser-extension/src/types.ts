@@ -4,6 +4,8 @@ export interface BrowserSelectionCapture {
   readonly before?: string
   readonly after?: string
   readonly sectionText?: string
+  /** Optional page text supplied by a provider with explicit page-scope support. */
+  readonly pageText?: string
   readonly heading?: string
   readonly frameUrl: string
   readonly title: string
@@ -45,6 +47,7 @@ export interface BrowserSelectionSnapshot {
     readonly before?: string
     readonly after?: string
     readonly sectionText?: string
+    readonly pageText?: string
     readonly pageAvailable: boolean
   }
   readonly capabilities: {

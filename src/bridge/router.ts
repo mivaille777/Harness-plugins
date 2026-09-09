@@ -9,6 +9,7 @@ export const BRIDGE_CAPABILITIES = [
   'bridge.ping',
   'selection.current',
   'selection.update',
+  'selection.expand',
   'session.list',
   'session.history',
   'session.create',
@@ -109,6 +110,27 @@ export class BridgeMessageRouter {
           type: 'selection.current.result',
           payload: { snapshot: this.selectionContext.current() ?? null },
         }
+      case 'selection.expand': {
+        try {
+          const expanded = this.selectionContext.expand(message.payload.snapshotId, message.payload.scope)
+          return {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: message.id,
+            type: 'selection.expanded',
+            payload: {
+              snapshotId: expanded.snapshotId,
+              scope: expanded.scope,
+              revision: expanded.revision,
+              completeness: expanded.completeness,
+              truncated: expanded.truncated,
+              context: expanded.context,
+            },
+          }
+        } catch (error) {
+          if (error instanceof Error) return this.error(message.id, 'BRIDGE_UNAVAILABLE', error.message)
+          throw error
+        }
+      }
       case 'session.list': {
         const sessions = await this.sessions.list()
         return {

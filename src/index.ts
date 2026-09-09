@@ -20,6 +20,7 @@ export async function apply(ctx: Context): Promise<void> {
 
 export * from './bridge/index.js'
 export * from './context/cache.js'
+export * from './context/expansion.js'
 export * from './context/service.js'
 export * from './context/snapshot.js'
 export * from './session/service.js'

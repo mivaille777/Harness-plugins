@@ -20,6 +20,7 @@ pub fn run() {
             bridge::bridge_ping,
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
+            bridge::bridge_expand_selection,
             bridge::bridge_submit_prompt,
             bridge::bridge_list_sessions,
             bridge::bridge_create_session,

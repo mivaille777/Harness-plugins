@@ -12,7 +12,7 @@ The envelope ID associates one transport request with its response. For `session
 
 A selection.update message carries one immutable snapshot. The snapshot ID and revision identify the selected material; a higher revision for the same ID replaces that cache record, while a different ID can become current without changing an older record. The capture timestamp, provider, source, context, capability flags, and optional geometry travel with the selected text.
 
-The current protocol supports selection, local, section, and page expansion scopes. A future expansion implementation must bind the requested scope to the original snapshot and source before returning content. It must report an unavailable or changed source instead of joining material from a different document.
+The current protocol supports selection, local, section, and page expansion scopes. The Harness bridge implements `selection.expand` as an explicit projection over text already captured in the immutable snapshot; it never fetches a page or joins content from another document. The response carries the snapshot revision, completeness and truncation flags, and the bridge applies bounded Unicode and UTF-8 limits before returning context. A missing capability, missing captured text or evicted snapshot becomes `BRIDGE_UNAVAILABLE`; a changed revision must be rejected by the caller before it is shown or submitted.
 
 ## Submitted material
 
@@ -20,7 +20,7 @@ V3 requires `session.submit.payload.material`. Its strict object contains requir
 
 The native bridge projects the Lens snapshot to this smaller object before it submits a request. It does not include browser context before or after the selection, section or page text, capabilities, geometry, provider, or confidence. The Harness session service stores the validated material with the durable `selection-companion` message source. The submission fingerprint includes the material, so reuse of a logical request id with changed material fails instead of silently returning an unrelated receipt.
 
-`selection.expand` remains a snapshot-context operation. It does not enlarge the material available to session tools. V3 selection tools can only read the material whose authorized and actual scope are both `selection`.
+`selection.expand` remains a snapshot-context operation. It does not enlarge the material available to session tools. The Lens exposes it only after a user chooses a context scope and uses the result for a reference preview; the fixed selection remains the only submitted material until a separate authorization contract exists. V3 selection tools can only read the material whose authorized and actual scope are both `selection`.
 
 ## Session and event messages
 

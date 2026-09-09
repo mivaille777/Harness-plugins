@@ -13,6 +13,7 @@ export function buildBrowserSnapshot(
   const title = sender.tabTitle?.trim() || capture.title
   const localContext = Boolean(capture.before || capture.after)
   const sectionContext = Boolean(capture.sectionText)
+  const pageContext = Boolean(capture.pageText)
 
   return {
     id: `browser-${idFactory()}`,
@@ -37,12 +38,13 @@ export function buildBrowserSnapshot(
       ...(capture.before ? { before: capture.before } : {}),
       ...(capture.after ? { after: capture.after } : {}),
       ...(capture.sectionText ? { sectionText: capture.sectionText } : {}),
-      pageAvailable: false,
+      ...(capture.pageText ? { pageText: capture.pageText } : {}),
+      pageAvailable: pageContext,
     },
     capabilities: {
       localContext,
       sectionContext,
-      pageContext: false,
+      pageContext,
       screenshot: false,
     },
     ...(capture.geometry ? { geometry: capture.geometry } : {}),

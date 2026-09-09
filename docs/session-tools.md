@@ -14,7 +14,7 @@ This is intentionally smaller than a capture snapshot. It does not include local
 
 `selection_current` has no parameters. It returns the request and snapshot identities, capture time, source and document metadata, selected-character count, language when present, and the authorization/completeness fields. It does not return the selected text.
 
-`selection_read_context` requires `scope: "selection"`. It returns the same metadata and the exact persisted selected text. Its rendered result labels that text as untrusted reference data, not instructions. The parameter cannot request `local`, `section`, or `page`, and the implementation does not expand, refetch, or infer surrounding page content.
+`selection_read_context` requires `scope: "selection"`. It returns the same metadata and the exact persisted selected text. Its rendered result labels that text as untrusted reference data, not instructions. The parameter cannot request `local`, `section`, or `page`, and the implementation does not expand, refetch, or infer surrounding page content. The separate bridge `selection.expand` operation serves the Lens reference preview only; it is explicitly user-triggered, bounded, revision-bound, and excluded from durable session material and model input.
 
 Both tools use generic read call/result presentation with source, scope, and completeness metadata. They check the host cancellation signal before resolving material. They add no companion-owned approval decision, permission store, or Lens approval UI; those interactions remain R05 work and must use a verified Harness host flow.
 

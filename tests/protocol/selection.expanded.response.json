@@ -1,0 +1,16 @@
+{
+  "protocol": 3,
+  "id": "selection-expand-1",
+  "type": "selection.expanded",
+  "payload": {
+    "snapshotId": "selection-1",
+    "scope": "local",
+    "revision": 7,
+    "completeness": "complete",
+    "truncated": false,
+    "context": {
+      "before": "The acquisition function uses the posterior.",
+      "after": "The next paragraph discusses exploitation."
+    }
+  }
+}

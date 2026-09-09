@@ -11,6 +11,7 @@ const api = vi.hoisted(() => {
     getCurrentSelection: vi.fn(),
     listSessions: vi.fn(),
     createSession: vi.fn(),
+    expandSelection: vi.fn(),
     readSessionHistory: vi.fn(),
     pauseCapture: vi.fn(),
     resumeCapture: vi.fn(),
@@ -37,7 +38,7 @@ function deepFreeze<T>(value: T): T {
   return value
 }
 const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
-const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { pageAvailable: false }, capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
+const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { before: 'Before context', after: 'After context', sectionText: 'Section context', pageAvailable: false }, capabilities: { localContext: true, sectionContext: true, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {
   beforeEach(() => {
@@ -49,6 +50,7 @@ describe('selection lens', () => {
     api.getCurrentSelection.mockResolvedValue(selection)
     api.listSessions.mockResolvedValue([])
     api.createSession.mockResolvedValue('session-new')
+    api.expandSelection.mockResolvedValue({ snapshotId: 's1', scope: 'local', revision: 2, completeness: 'complete', truncated: false, context: { before: 'Loaded before', after: 'Loaded after' } })
     api.readSessionHistory.mockResolvedValue({ sessionId: 'session-1', capturedThroughCursor: 0, entries: [] })
     api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' })
     api.resumeCapture.mockResolvedValue(capture)
@@ -58,6 +60,25 @@ describe('selection lens', () => {
     api.cancelSession.mockResolvedValue(true)
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
+  it('keeps captured context behind an explicit disclosure', async () => {
+    render(<App />)
+    const panel = await screen.findByTestId('captured-context')
+    expect(panel).not.toHaveAttribute('open')
+    expect(screen.getByText('Only context already captured with this selection is shown. The current request sends the fixed selection; this preview is not added automatically.')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Captured context'))
+    expect(panel).toHaveAttribute('open')
+    expect(screen.getByText('Before context')).toBeInTheDocument()
+    expect(screen.getByText('After context')).toBeInTheDocument()
+    expect(screen.getAllByText('Section context')).toHaveLength(2)
+  })
+  it('loads a selected context scope only after the user requests it', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByText('Captured context'))
+    fireEvent.click(screen.getByRole('button', { name: 'Load context' }))
+    await waitFor(() => expect(api.expandSelection).toHaveBeenCalledWith('s1', 'local'))
+    expect(await screen.findByText('Context loaded completely')).toBeInTheDocument()
+    expect(screen.getByText('Loaded before')).toBeInTheDocument()
+  })
   it('keeps the primary Lens controls labelled and keyboard discoverable', async () => {
     render(<App />)
     const main = await screen.findByTestId('selection-lens')
@@ -66,6 +87,8 @@ describe('selection lens', () => {
     expect(screen.getByRole('button', { name: 'Close selection companion' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Explain' })).toBeEnabled()
     expect(screen.getByLabelText('Ask about this selection')).toHaveAttribute('placeholder', 'Ask a follow-up question')
+    expect(screen.getByRole('combobox', { name: 'Scope to show' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load context' })).toBeEnabled()
     expect(screen.getByText('No request active')).toHaveAttribute('aria-live', 'polite')
   })
   it('restores the remembered session and renders paged durable history before subscribing', async () => {

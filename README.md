@@ -87,6 +87,7 @@ bridge.hello
 bridge.ping
 selection.update
 selection.current
+selection.expand
 session.list
 session.history
 session.create
@@ -101,6 +102,8 @@ agent.event
 `BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
 
 `BridgeRuntime::submit_prompt(...)` projects the exact Lens snapshot into the V3 `session.submit.payload.material` object. The native retry path preserves that same snapshot instead of reading the newest global capture. Harness persists the material with the normal `selection-companion` user-message source, so a later browser selection cannot replace the material associated with an earlier request.
+
+`selection.expand` is an explicit, bounded reference-preview request. It can expose only local, section or page text already captured in the immutable snapshot, returns the snapshot revision and completeness/truncation metadata, and never changes the fixed material submitted to Harness. The Lens makes this request only after the user chooses a scope and presses **Load context**; it does not fetch a page or silently add context to a model request.
 
 ## Task 5 — Extensionless Browser Accessibility Provider
 

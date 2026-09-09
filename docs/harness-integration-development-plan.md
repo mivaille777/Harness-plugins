@@ -491,6 +491,8 @@ pnpm check:task5
 
 **完成标准。** 默认选择不会读取全文；任何扩展都能追溯到用户授权；来源变化不会混料；截断与缺失对用户可见；无法扩展时原选区仍可使用。不得用启发式采集 confidence 表示答案正确率。
 
+**2026-09-09 实现切片。** 已在插件侧完成第一段可验证能力：SelectionSnapshot 可携带已捕获的 pageText；Bridge V3 提供 `selection.expand`/`selection.expanded`，按 snapshot id、revision、scope、完整度和截断标记返回有界的 selection/local/section/page 预览；TS、Rust、共享 fixture、路由、Tauri command 和 Lens API 已同步。Lens 以折叠面板显示来源上下文，用户选择可用范围并按下 **Load context** 后才请求预览；提交仍只发送固定 selection。当前切片没有自动抓取全文、没有把扩展上下文写入模型请求，也没有完成页面变化/document 校验、上下文持久化或真实浏览器 page Provider；这些验收项继续保持未完成。
+
 **给 Codex 的提示词。**
 
 ```text
@@ -602,7 +604,7 @@ pnpm test:lens:e2e
 | R07 运行器 | test:session:e2e | L1 可执行并已通过；L2 需要真实模型授权，缺少前置时退出 2 |
 | 已有 Windows 管道集成 | test:bridge:integration | R02 已验证实际 Node/Rust Named Pipe；提交/回执或 Rust bridge 变化后必须重跑 |
 | R07 运行器 | test:lens:e2e | 接受真实 Tauri/浏览器驱动报告；缺少驱动或窗口前置时退出 2 |
-| 拟新增 | test:session:tools、test:session:interaction、test:session:history、test:context-expansion、test:ui:a11y、test:ui:visual、test:perf、test:human-factors:fixtures、report:human-factors、test:installer、check:release | 实现测试和 script 后才能执行并声称通过 |
+| 已注册/拟新增 | `test:context-expansion`、`test:ui:a11y`、`test:ui:visual` 已注册；`test:session:tools`、`test:session:interaction`、`test:session:history`、`test:perf`、`test:human-factors:fixtures`、`report:human-factors`、`test:installer`、`check:release` 待实现 | 已注册命令需记录当前实现切片的 focused 结果；其余命令实现并注册后才能执行和声称通过 |
 
 对新增能力分别证明成功和失败路径。测试 fixture 使用真实宿主数据结构，涉及 durable event 时覆盖实际投影/存储路径，避免只比较手写常量与同一常量。Windows 管道、真实 Provider 和人工可访问性各自保留专门证据。
 

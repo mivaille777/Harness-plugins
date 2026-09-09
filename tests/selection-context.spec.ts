@@ -2,8 +2,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   SelectionContextService,
+  SelectionContextExpansionError,
   SelectionSnapshotCache,
   SelectionSnapshotValidationError,
+  expandSelectionSnapshot,
   normalizeSelectionSnapshot,
   type SelectionSnapshot,
 } from '../src/index.js'
@@ -29,6 +31,7 @@ function makeSnapshot(overrides: Partial<SelectionSnapshot> = {}): SelectionSnap
       before: 'Previous paragraph.',
       after: 'Next paragraph.',
       sectionText: 'Section context.',
+      pageText: 'Page context.',
       pageAvailable: true,
     },
     capabilities: {
@@ -180,5 +183,91 @@ describe('SelectionContextService', () => {
     ctx.selectionContext.clear('selection-1')
     expect(ctx.selectionContext.current()).toBeUndefined()
     expect(service.current()).toBeUndefined()
+  })
+
+  it('expands explicitly requested local context from the immutable revision', () => {
+    const ctx = new Context()
+    const service = new SelectionContextService(ctx)
+    const snapshot = makeSnapshot({ revision: 7 })
+    service.update(snapshot)
+
+    expect(service.expand(snapshot.id, 'local')).toEqual({
+      snapshotId: snapshot.id,
+      revision: 7,
+      scope: 'local',
+      context: { before: 'Previous paragraph.', after: 'Next paragraph.' },
+      completeness: 'complete',
+      truncated: false,
+    })
+  })
+
+  it('reports capability and captured-data failures separately', () => {
+    const ctx = new Context()
+    const service = new SelectionContextService(ctx)
+    const unavailable = makeSnapshot({
+      capabilities: { localContext: false, sectionContext: false, pageContext: false, screenshot: false },
+      context: { pageAvailable: false },
+    })
+    service.update(unavailable)
+
+    expect(() => service.expand(unavailable.id, 'local')).toThrowError(
+      expect.objectContaining({ code: 'CAPABILITY_UNAVAILABLE' }),
+    )
+    expect(() => service.expand(unavailable.id, 'section')).toThrowError(
+      expect.objectContaining({ code: 'CAPABILITY_UNAVAILABLE' }),
+    )
+    expect(() => service.expand(unavailable.id, 'page')).toThrowError(
+      expect.objectContaining({ code: 'CAPABILITY_UNAVAILABLE' }),
+    )
+
+    const missingText = makeSnapshot({
+      revision: 2,
+      capabilities: { localContext: true, sectionContext: true, pageContext: true, screenshot: false },
+      context: { pageAvailable: true },
+    })
+    service.update(missingText)
+    expect(() => service.expand(missingText.id, 'section')).toThrowError(
+      expect.objectContaining({ code: 'CONTEXT_UNAVAILABLE' }),
+    )
+    expect(() => service.expand('missing-snapshot', 'local')).toThrowError(
+      expect.objectContaining({ code: 'SNAPSHOT_NOT_FOUND' }),
+    )
+    expect(() => service.expand(missingText.id, 'page')).toThrow(SelectionContextExpansionError)
+  })
+
+  it('returns page text only when the provider captured page scope', () => {
+    const snapshot = normalizeSelectionSnapshot(makeSnapshot())
+    expect(expandSelectionSnapshot(snapshot, 'page')).toMatchObject({
+      snapshotId: snapshot.id,
+      revision: snapshot.revision,
+      scope: 'page',
+      context: { pageText: 'Page context.' },
+      completeness: 'complete',
+      truncated: false,
+    })
+  })
+
+  it('bounds code points and aggregate UTF-8 bytes without splitting emoji', () => {
+    const snapshot = normalizeSelectionSnapshot(makeSnapshot({
+      context: {
+        before: 'A🚀B',
+        after: 'C😀D',
+        pageAvailable: false,
+      },
+      capabilities: { localContext: true, sectionContext: false, pageContext: false, screenshot: false },
+    }))
+
+    const expansion = expandSelectionSnapshot(snapshot, 'local', { maxCodePoints: 2, maxBytes: 5 })
+    expect(expansion.context.before).toBe('A🚀')
+    expect(expansion.context.after).toBeUndefined()
+    expect(expansion.completeness).toBe('partial')
+    expect(expansion.truncated).toBe(true)
+    expect(expansion.context.before?.endsWith('\ud83d')).toBe(false)
+  })
+
+  it('rejects invalid expansion limits before reading snapshot data', () => {
+    const snapshot = normalizeSelectionSnapshot(makeSnapshot())
+    expect(() => expandSelectionSnapshot(snapshot, 'local', { maxCodePoints: 0 })).toThrow('positive safe integer')
+    expect(() => expandSelectionSnapshot(snapshot, 'local', { maxBytes: Number.MAX_SAFE_INTEGER + 1 })).toThrow('positive safe integer')
   })
 })

@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   cancelSession,
   createSession,
+  expandSelection,
   getCaptureStatus,
   getCurrentSelection,
   listSessions,
@@ -17,6 +18,7 @@ import {
   type CaptureStatus,
   type SessionAgentEvent,
   type SessionHistoryEntry,
+  type SelectionExpansion,
   type SessionSubmission,
   type SessionSummary,
 } from './api/bridge'
@@ -28,6 +30,7 @@ import {
   type RequestProjection,
 } from './sessionProjection'
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
+import type { ContextScope } from '../../src/bridge/protocol.js'
 import { getAppCopy, type AppCopy } from './copy'
 
 const emptyCapture: CaptureStatus = {
@@ -51,6 +54,7 @@ const emptyCapture: CaptureStatus = {
 }
 
 type Action = 'explain' | 'ask' | null
+type ExpandableContextScope = Exclude<ContextScope, 'selection'>
 
 interface ActiveSession {
   readonly sessionId: string | null
@@ -114,6 +118,10 @@ export default function App() {
   const copy = getAppCopy()
   const [capture, setCapture] = useState<CaptureStatus>(emptyCapture)
   const [snapshot, setSnapshot] = useState<SelectionSnapshot | null>(null)
+  const [contextScope, setContextScope] = useState<ExpandableContextScope>('local')
+  const [expandedContext, setExpandedContext] = useState<SelectionExpansion | null>(null)
+  const [contextLoading, setContextLoading] = useState(false)
+  const [contextError, setContextError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [action, setAction] = useState<Action>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -139,6 +147,7 @@ export default function App() {
   } | null>(null)
   const listenerReady = useRef<Promise<void>>(Promise.resolve())
   const viewActive = useRef(true)
+  const snapshotIdentityRef = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     const [nextCapture, nextSnapshot] = await Promise.all([getCaptureStatus(), getCurrentSelection()])
@@ -156,6 +165,16 @@ export default function App() {
   }, [])
 
   useEffect(() => { void refresh().catch(error => setNotice(String(error))) }, [refresh])
+  useEffect(() => {
+    const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
+    snapshotIdentityRef.current = identity
+    setExpandedContext(null)
+    setContextError(null)
+    if (snapshot?.capabilities.localContext) setContextScope('local')
+    else if (snapshot?.capabilities.sectionContext) setContextScope('section')
+    else if (snapshot?.capabilities.pageContext && snapshot.context.pageAvailable) setContextScope('page')
+    else setContextScope('local')
+  }, [snapshot?.id, snapshot?.revision])
   useEffect(() => { draftValue.current = draft }, [draft])
   useEffect(() => {
     void refreshSessions().catch(error => setNotice(`Unable to load Harness sessions: ${String(error)}`))
@@ -411,7 +430,37 @@ export default function App() {
       .catch(() => setNotice(copy.copyFailed))
   }
 
-  const source = snapshot?.document?.title ?? snapshot?.source.windowTitle ?? snapshot?.source.app ?? 'Current selection'
+  const loadContext = useCallback(() => {
+    if (snapshot === null || contextLoading) return
+    const identity = `${snapshot.id}:${snapshot.revision}`
+    setContextLoading(true)
+    setContextError(null)
+    void expandSelection(snapshot.id, contextScope)
+      .then(result => {
+        if (result.snapshotId !== snapshot.id || typeof result.revision === 'number' && result.revision !== snapshot.revision) {
+          throw new Error(copy.contextChanged)
+        }
+        if (snapshotIdentityRef.current === identity) setExpandedContext(result)
+      })
+      .catch(error => {
+        if (snapshotIdentityRef.current === identity) setContextError(String(error))
+      })
+      .finally(() => setContextLoading(false))
+  }, [contextLoading, contextScope, copy, snapshot])
+
+  const source = snapshot?.document?.title ?? snapshot?.source.windowTitle ?? snapshot?.source.app ?? copy.currentSelection
+  const displayedContext = expandedContext?.context ?? snapshot?.context
+  const contextItems: readonly { readonly label: string; readonly text: string }[] = displayedContext === undefined ? [] : [
+    { label: copy.contextBefore, text: displayedContext.before },
+    { label: copy.contextAfter, text: displayedContext.after },
+    { label: copy.contextSection, text: displayedContext.sectionText },
+    { label: copy.contextPage, text: displayedContext.pageText },
+  ].filter((item): item is { readonly label: string; readonly text: string } => typeof item.text === 'string' && item.text.length > 0)
+  const contextScopes: readonly { readonly value: ExpandableContextScope; readonly label: string }[] = snapshot === null ? [] : [
+    ...(snapshot.capabilities.localContext ? [{ value: 'local' as const, label: copy.contextScopeLocal }] : []),
+    ...(snapshot.capabilities.sectionContext ? [{ value: 'section' as const, label: copy.contextScopeSection }] : []),
+    ...(snapshot.capabilities.pageContext && snapshot.context.pageAvailable ? [{ value: 'page' as const, label: copy.contextScopePage }] : []),
+  ]
   const showAnswer = projection.answer !== ''
   const phaseLabel = copy.phaseLabels[projection.phase] ?? projection.phase
 
@@ -421,7 +470,7 @@ export default function App() {
     <section className="session-bar" aria-label={copy.sessionAriaLabel}>
       <div className="session-heading"><span className="session-title">{copy.sessionTitle}</span><span className="session-caption">{copy.sessionCaption}</span></div>
       <div className="session-controls">
-        <select aria-label="Harness session" value={sessionId ?? ''} disabled={sessionsLoading || historyLoading} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
+        <select aria-label={copy.sessionSelectAriaLabel} value={sessionId ?? ''} disabled={sessionsLoading || historyLoading} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
           {sessionId === null ? <option value="">{copy.noSession}</option> : null}
         {sessions.map((session, index) => <option value={session.id} key={session.id}>{sessionLabel(session, index, copy)} · {sessionStatusLabel(session, copy)}</option>)}
         </select>
@@ -432,7 +481,7 @@ export default function App() {
 
     {historyLoading ? <p className="notice" role="status">{copy.restoringHistory}</p> : null}
     {historyError ? <p className="notice error" role="alert">{historyError}</p> : null}
-    {history.length > 0 ? <section className="history" aria-label="Durable session history">
+    {history.length > 0 ? <section className="history" aria-label={copy.historyAriaLabel}>
       <div className="history-heading"><span>{copy.historyLabel}</span><span>{copy.messages(history.length)}</span></div>
       <div className="history-list">
         {history.map(entry => <article className={`history-entry ${entry.role}`} key={entry.seq} data-testid={`history-entry-${entry.seq}`}>
@@ -443,7 +492,7 @@ export default function App() {
     </section> : null}
 
     {snapshot === null ? <section className="empty-state" aria-live="polite"><div className="empty-mark" aria-hidden="true">✦</div><h1>{copy.emptyTitle}</h1><p>{copy.emptyDescription}</p><button type="button" onClick={() => void refresh()}>{copy.refreshSelection}</button></section> : <>
-      <section className="material" aria-label="Fixed source material"><p className="source">{source}</p><blockquote>{snapshot.selection.text}</blockquote><p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p></section>
+      <section className="material" aria-label={copy.materialAriaLabel}><p className="source">{source}</p><blockquote>{snapshot.selection.text}</blockquote><p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p><details className="context-panel" data-testid="captured-context"><summary>{copy.contextLabel}</summary><p className="context-description">{copy.contextDescription}</p>{contextScopes.length > 0 ? <div className="context-controls"><label htmlFor="context-scope">{copy.contextScopeLabel}</label><select id="context-scope" value={contextScope} disabled={contextLoading} onChange={event => setContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select><button type="button" className="secondary" onClick={loadContext} disabled={contextLoading}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button></div> : null}{expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}{contextError ? <p className="context-error" role="alert">{contextError}</p> : null}{contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}</details></section>
       <div className="quick-actions quick-actions-single"><button type="button" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button></div>
       <label className="question-label" htmlFor="question">{copy.askLabel}</label><textarea id="question" value={draft} onChange={event => { const value = event.target.value; setDraft(value); if (sessionId !== null) drafts.current.set(sessionId, value) }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit('ask') } }} placeholder={copy.askPlaceholder} rows={3} />
       <div className="composer-actions"><button type="button" onClick={() => submit('ask')} disabled={busy || draft.trim().length === 0}>{copy.ask}</button><button type="button" className="secondary" onClick={() => void refresh()} disabled={busy}>{copy.useLatest}</button></div>

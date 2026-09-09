@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AgentEventKind } from '../../../src/bridge/protocol.js'
+import type { AgentEventKind, ContextScope, SelectionExpandedPayload } from '../../../src/bridge/protocol.js'
 import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
 
 export interface BridgeStatus {
@@ -66,6 +66,9 @@ export interface SessionHistoryPage {
   readonly entries: readonly SessionHistoryEntry[]
 }
 
+/** Result of an explicitly requested context projection for one fixed snapshot. */
+export type SelectionExpansion = SelectionExpandedPayload
+
 export interface SessionUnsubscription {
   readonly sessionId: string
   readonly subscriptionId: string
@@ -131,6 +134,11 @@ export function resumeCapture(): Promise<CaptureStatus> {
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invoke<SelectionSnapshot | null>('bridge_current_selection')
+}
+
+/** Requests bounded context already captured for the selected snapshot. */
+export function expandSelection(snapshotId: string, scope: ContextScope): Promise<SelectionExpansion> {
+  return invoke<SelectionExpansion>('bridge_expand_selection', { snapshotId, scope })
 }
 
 /** Lists live and persisted Harness sessions exposed by the bridge. */

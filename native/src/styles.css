@@ -108,7 +108,8 @@ button:disabled {
 
 button:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+.context-panel summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -345,6 +346,121 @@ footer,
   margin: 0;
 }
 
+.context-panel {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.context-panel summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.context-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.context-panel summary::after {
+  color: var(--ink-soft);
+  content: '＋';
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.context-panel[open] summary::after {
+  content: '−';
+}
+
+.context-description,
+.context-none,
+.context-result,
+.context-error {
+  margin: 0 0 9px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.context-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.context-controls label {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.context-controls select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.context-controls button {
+  min-height: 38px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.context-result {
+  color: var(--accent-strong);
+}
+
+.context-error {
+  color: var(--danger-ink);
+}
+
+.context-list {
+  display: grid;
+  gap: 8px;
+}
+
+.context-item {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+
+.context-item-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.context-item pre {
+  max-height: 18vh;
+  margin: 0;
+  overflow: auto;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 blockquote {
   margin: 9px 0;
   overflow-wrap: anywhere;
@@ -510,6 +626,16 @@ footer > span {
     max-width: 44ch;
   }
 
+  .context-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .context-controls select,
+  .context-controls button {
+    width: 100%;
+  }
+
   footer {
     align-items: flex-start;
     flex-direction: column-reverse;
@@ -545,6 +671,7 @@ footer > span {
   select,
   textarea,
   .material,
+  .context-item,
   .history-entry,
   .answer {
     border: 1px solid ButtonText;

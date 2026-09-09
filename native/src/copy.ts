@@ -6,6 +6,7 @@ export interface AppCopy {
   readonly close: string
   readonly brandTagline: string
   readonly sessionAriaLabel: string
+  readonly sessionSelectAriaLabel: string
   readonly sessionTitle: string
   readonly sessionCaption: string
   readonly newSession: string
@@ -20,13 +21,33 @@ export interface AppCopy {
   readonly restoringHistory: string
   readonly historyLoadFailed: string
   readonly historyLabel: string
+  readonly historyAriaLabel: string
   readonly messages: (count: number) => string
   readonly you: string
   readonly harness: string
   readonly emptyTitle: string
   readonly emptyDescription: string
   readonly refreshSelection: string
+  readonly currentSelection: string
+  readonly materialAriaLabel: string
   readonly fixedMaterial: (revision: number) => string
+  readonly contextLabel: string
+  readonly contextDescription: string
+  readonly contextNone: string
+  readonly contextBefore: string
+  readonly contextAfter: string
+  readonly contextSection: string
+  readonly contextPage: string
+  readonly contextScopeLabel: string
+  readonly contextScopeLocal: string
+  readonly contextScopeSection: string
+  readonly contextScopePage: string
+  readonly contextLoad: string
+  readonly contextLoading: string
+  readonly contextComplete: string
+  readonly contextPartial: string
+  readonly contextTruncated: string
+  readonly contextChanged: string
   readonly askLabel: string
   readonly askPlaceholder: string
   readonly explain: string
@@ -49,6 +70,7 @@ const english: AppCopy = {
   close: 'Close selection companion',
   brandTagline: 'Context, kept in view',
   sessionAriaLabel: 'Harness sessions',
+  sessionSelectAriaLabel: 'Harness session',
   sessionTitle: 'Session',
   sessionCaption: 'Durable Harness history',
   newSession: 'New session',
@@ -63,13 +85,33 @@ const english: AppCopy = {
   restoringHistory: 'Restoring durable session history…',
   historyLoadFailed: 'The session could not be restored. Choose another session or retry.',
   historyLabel: 'Conversation history',
+  historyAriaLabel: 'Durable session history',
   messages: count => `${count} message${count === 1 ? '' : 's'}`,
   you: 'You',
   harness: 'Harness',
   emptyTitle: 'Select text to begin',
   emptyDescription: 'Select non-sensitive browser text, then refresh it here.',
   refreshSelection: 'Refresh selection',
+  currentSelection: 'Current selection',
+  materialAriaLabel: 'Fixed source material',
   fixedMaterial: revision => `Fixed material · revision ${revision}`,
+  contextLabel: 'Captured context',
+  contextDescription: 'Only context already captured with this selection is shown. The current request sends the fixed selection; this preview is not added automatically.',
+  contextNone: 'No surrounding context was captured for this selection.',
+  contextBefore: 'Before selection',
+  contextAfter: 'After selection',
+  contextSection: 'Section context',
+  contextPage: 'Page context',
+  contextScopeLabel: 'Scope to show',
+  contextScopeLocal: 'Nearby text',
+  contextScopeSection: 'Current section',
+  contextScopePage: 'Captured page',
+  contextLoad: 'Load context',
+  contextLoading: 'Loading context…',
+  contextComplete: 'Context loaded completely',
+  contextPartial: 'Context loaded partially',
+  contextTruncated: 'bounded for this response',
+  contextChanged: 'The selection changed before context finished loading. Refresh and try again.',
   askLabel: 'Ask about this selection',
   askPlaceholder: 'Ask a follow-up question',
   explain: 'Explain',
@@ -104,6 +146,7 @@ const simplifiedChinese: AppCopy = {
   close: '关闭选区助手',
   brandTagline: '让上下文始终可见',
   sessionAriaLabel: 'Harness 会话',
+  sessionSelectAriaLabel: 'Harness 会话选择',
   sessionTitle: '会话',
   sessionCaption: 'Harness 持久历史',
   newSession: '新建会话',
@@ -118,13 +161,33 @@ const simplifiedChinese: AppCopy = {
   restoringHistory: '正在恢复持久会话历史…',
   historyLoadFailed: '无法恢复该会话。请选择其他会话或重试。',
   historyLabel: '对话历史',
+  historyAriaLabel: '持久会话历史',
   messages: count => `${count} 条消息`,
   you: '你',
   harness: 'Harness',
   emptyTitle: '选择文本开始',
   emptyDescription: '请在浏览器中选择非敏感文本，然后在此刷新。',
   refreshSelection: '刷新选区',
+  currentSelection: '当前选区',
+  materialAriaLabel: '固定来源材料',
   fixedMaterial: revision => `已固定材料 · 修订 ${revision}`,
+  contextLabel: '已捕获上下文',
+  contextDescription: '这里只展示随选区一起捕获的上下文。当前请求只发送固定选区；这些预览内容不会自动加入请求。',
+  contextNone: '该选区没有捕获到周边上下文。',
+  contextBefore: '选区之前',
+  contextAfter: '选区之后',
+  contextSection: '段落上下文',
+  contextPage: '页面上下文',
+  contextScopeLabel: '显示范围',
+  contextScopeLocal: '邻近文本',
+  contextScopeSection: '当前段落',
+  contextScopePage: '已捕获页面',
+  contextLoad: '加载上下文',
+  contextLoading: '正在加载上下文…',
+  contextComplete: '上下文已完整加载',
+  contextPartial: '上下文已部分加载',
+  contextTruncated: '已按响应上限截断',
+  contextChanged: '加载上下文前选区已变化。请刷新后重试。',
   askLabel: '针对当前选区提问',
   askPlaceholder: '输入追问',
   explain: '解释',

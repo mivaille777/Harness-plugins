@@ -140,6 +140,68 @@ async fn main() -> Result<(), String> {
         Ok::<(), String>(())
     };
     let request_work = async {
+        let selection_update = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "probe-selection-update".to_owned(),
+            type_name: "selection.update".to_owned(),
+            payload: serde_json::json!({
+                "snapshot": {
+                    "id": "selection-integration",
+                    "revision": 1,
+                    "capturedAt": 1000,
+                    "selection": { "text": "Deterministic integration selection." },
+                    "source": { "kind": "browser", "app": "Bridge probe" },
+                    "context": {
+                        "before": "Before integration selection.",
+                        "after": "After integration selection.",
+                        "pageText": "Page integration context.",
+                        "pageAvailable": true
+                    },
+                    "capabilities": {
+                        "localContext": true,
+                        "sectionContext": false,
+                        "pageContext": true,
+                        "screenshot": false
+                    },
+                    "provider": "bridge-probe",
+                    "confidence": 1.0
+                }
+            }),
+        };
+        if exchange(&mut requests, &selection_update).await?.type_name != "selection.updated" {
+            return Err("selection update did not return selection.updated".to_owned());
+        }
+        let selection_expand = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "probe-selection-expand".to_owned(),
+            type_name: "selection.expand".to_owned(),
+            payload: serde_json::json!({
+                "snapshotId": "selection-integration",
+                "scope": "local"
+            }),
+        };
+        let expanded = exchange(&mut requests, &selection_expand).await?;
+        if expanded.type_name != "selection.expanded"
+            || expanded
+                .payload
+                .get("revision")
+                .and_then(serde_json::Value::as_u64)
+                != Some(1)
+            || expanded
+                .payload
+                .get("completeness")
+                .and_then(serde_json::Value::as_str)
+                != Some("complete")
+            || expanded
+                .payload
+                .pointer("/context/before")
+                .and_then(serde_json::Value::as_str)
+                != Some("Before integration selection.")
+        {
+            return Err(format!(
+                "selection.expand did not return the bounded fixture: {expanded:?}"
+            ));
+        }
         let ping = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
             id: "probe-ping".to_owned(),
@@ -235,7 +297,7 @@ async fn main() -> Result<(), String> {
         Ok::<(), String>(())
     };
     tokio::try_join!(event_work, request_work)?;
-    println!("PASS: 100 ordered events plus ping, list, create, history, and submit");
+    println!("PASS: 100 ordered events plus selection expansion, ping, list, create, history, and submit");
     Ok(())
 }
 

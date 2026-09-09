@@ -52,6 +52,7 @@ function selectionUpdate() {
         context: {
           before: 'Before.',
           after: 'After.',
+          pageText: 'Page.',
           pageAvailable: true,
         },
         capabilities: {
@@ -240,11 +241,43 @@ describe('BridgeMessageRouter', () => {
     })
   })
 
-  it('fails closed for Protocol V3 operations that remain unavailable', async () => {
+  it('expands explicitly requested context without changing the fixed material', async () => {
+    const { router } = setup()
+    await router.handle(selectionUpdate())
+    const response = await router.handle(parseIpcMessage({
+      protocol: 3,
+      id: 'selection-expand-1',
+      type: 'selection.expand',
+      payload: { snapshotId: 'selection-1', scope: 'local' },
+    }))
+
+    expect(response).toEqual({
+      protocol: 3,
+      id: 'selection-expand-1',
+      type: 'selection.expanded',
+      payload: {
+        snapshotId: 'selection-1',
+        scope: 'local',
+        revision: 1,
+        completeness: 'complete',
+        truncated: false,
+        context: { before: 'Before.', after: 'After.' },
+      },
+    })
+    const current = await router.handle(parseIpcMessage({
+      protocol: 3,
+      id: 'current-after-expand',
+      type: 'selection.current',
+      payload: {},
+    }))
+    expect(current).toMatchObject({ type: 'selection.current.result', payload: { snapshot: { selection: { text: 'DeepSeek Harness selection context' } } } })
+  })
+
+  it('fails closed when an expansion snapshot is no longer available', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
       protocol: 3,
-      id: 'session-list-1',
+      id: 'selection-expand-missing-1',
       type: 'selection.expand',
       payload: { snapshotId: 'snapshot-1', scope: 'page' },
     }))

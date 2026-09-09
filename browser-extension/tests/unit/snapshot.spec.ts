@@ -50,4 +50,16 @@ describe('buildBrowserSnapshot', () => {
     expect(snapshot.geometry).toBeUndefined()
     expect(snapshot.confidence).toBe(0.94)
   })
+
+  it('advertises page context only when the provider captured page text', () => {
+    const snapshot = buildBrowserSnapshot(
+      { ...capture, pageText: 'Full captured page text.' },
+      { tabUrl: 'https://example.test/paper', tabTitle: 'Safe Bayesian Optimization' },
+      () => 'page-id',
+    )
+
+    expect(snapshot.context.pageText).toBe('Full captured page text.')
+    expect(snapshot.context.pageAvailable).toBe(true)
+    expect(snapshot.capabilities.pageContext).toBe(true)
+  })
 })

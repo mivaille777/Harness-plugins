@@ -1,6 +1,6 @@
 # Selection Lens
 
-The Lens reads `selection.current` through the native bridge and fixes the returned snapshot in its local view. Selecting new browser text does not replace that displayed material until the user chooses **Use latest selection**. The preview names its source and revision so a user can tell which material a session request will use.
+The Lens reads `selection.current` through the native bridge and fixes the returned snapshot in its local view. Selecting new browser text does not replace that displayed material until the user chooses **Use latest selection**. The preview names its source and revision so a user can tell which material a session request will use. Captured local, section and page text is behind a disclosure panel; a user chooses a supported scope and presses **Load context** to request a bounded preview tied to the same snapshot revision. The preview is reference-only and is never added to a request automatically.
 
 Explain and Ask send an explicit, fixed-material prompt to one Harness session. Translation is outside the product scope; the Lens is a perception-enhancing reading aid rather than a translation tool. The Lens creates the session on its first action and reuses its returned id for later prompts. Selected webpage text is labelled as untrusted reference data. The Lens does not create another LLM client or conversation store.
 
