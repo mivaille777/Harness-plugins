@@ -117,11 +117,13 @@ textarea:focus-visible,
 .lens {
   display: flex;
   width: 100%;
+  min-width: 0;
   min-height: 100vh;
   max-height: 100vh;
   flex-direction: column;
   gap: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: clamp(14px, 3vw, 22px);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -139,6 +141,21 @@ footer,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.lens > *,
+.lens-header > *,
+.session-bar > *,
+.session-heading > *,
+.history > *,
+.history-heading > *,
+.history-meta > *,
+.material > *,
+.answer > *,
+.answer-heading > *,
+.context-controls > *,
+footer > * {
+  min-width: 0;
 }
 
 .lens-header {
@@ -226,9 +243,12 @@ footer,
 }
 
 .session-controls select {
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   min-height: 38px;
   flex: 1 1 auto;
+  overflow: hidden;
   padding: 0 11px;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -247,6 +267,7 @@ footer,
 }
 
 .notice {
+  max-width: 100%;
   margin: 12px 0 0;
   padding: 10px 11px;
   border: 1px solid transparent;
@@ -255,6 +276,7 @@ footer,
   color: var(--accent-strong);
   font-size: 12px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .notice.error {
@@ -610,6 +632,12 @@ footer > span {
     align-items: flex-start;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .session-caption {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .session-controls {
