@@ -1,0 +1,41 @@
+{
+  "protocol": 4,
+  "id": "submit-page-1",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-expanded",
+    "requestId": "request-page-1",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain using the explicitly authorized page context."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-expanded",
+      "revision": 12,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Fixed selected material",
+        "language": "en"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome",
+        "windowTitle": "Expanded context fixture"
+      },
+      "document": {
+        "title": "Expanded context fixture",
+        "url": "https://example.test/ec02"
+      },
+      "authorizedScope": "page",
+      "actualScope": "page",
+      "completeness": "partial",
+      "truncated": true,
+      "context": {
+        "pageText": "Bounded authorized page context."
+      }
+    }
+  }
+}
