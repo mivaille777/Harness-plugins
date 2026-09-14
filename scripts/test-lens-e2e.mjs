@@ -14,7 +14,16 @@ import {
 } from './r07-runner.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const DEFAULT_REQUIRED_STATES = Object.freeze(['idle', 'material', 'streaming', 'history'])
+export const EC09_DRIVER_SCHEMA_VERSION = 2
+const DEFAULT_REQUIRED_STATES = Object.freeze(['idle', 'authorized', 'material', 'streaming', 'history'])
+const REQUIRED_EC09_ASSERTIONS = Object.freeze([
+  'browser-selection-captured',
+  'expanded-context-loaded',
+  'expanded-scope-authorized',
+  'request-material-matches-authorization',
+  'session-transcript-observed',
+])
+const EXPANDED_SCOPES = new Set(['local', 'section', 'page'])
 const DEFAULT_TIMEOUT_MS = 180_000
 
 /** Return the process exit code for an L3 status. */
@@ -39,7 +48,7 @@ export function parseDriverArgs(value) {
   return parsed
 }
 
-/** Normalize the required visual states while retaining the fixed minimum. */
+/** Normalize the required visual states while retaining the fixed EC-09 minimum. */
 export function requiredStates(value) {
   const requested = value === undefined || value.trim() === ''
     ? [...DEFAULT_REQUIRED_STATES]
@@ -54,13 +63,97 @@ export function resolveScreenshotPath(screenshotDirectory, value) {
   return isOwnedPath(screenshotDirectory, path) ? path : null
 }
 
+function validateAuthorizationEvidence(report) {
+  const evidence = report?.contextAuthorization
+  if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    return { ok: false, reason: 'driver report needs contextAuthorization evidence' }
+  }
+  if (!EXPANDED_SCOPES.has(evidence.requestedScope)) {
+    return { ok: false, reason: 'contextAuthorization.requestedScope must be local, section, or page' }
+  }
+  if (evidence.authorizedScope !== evidence.requestedScope) {
+    return { ok: false, reason: 'authorized scope must match the explicitly requested expanded scope' }
+  }
+  if (evidence.actualScope !== evidence.requestedScope) {
+    return { ok: false, reason: 'actual scope must match the explicitly authorized expanded scope' }
+  }
+  if (evidence.materialScope !== evidence.requestedScope) {
+    return { ok: false, reason: 'submitted material scope must match the explicitly authorized scope' }
+  }
+  if (typeof evidence.snapshotId !== 'string' || evidence.snapshotId.trim() === '') {
+    return { ok: false, reason: 'contextAuthorization needs a non-empty snapshotId' }
+  }
+  if (!Number.isInteger(evidence.revision) || evidence.revision < 0) {
+    return { ok: false, reason: 'contextAuthorization needs a non-negative integer revision' }
+  }
+  if (evidence.previewMatchesMaterial !== true) {
+    return { ok: false, reason: 'driver must prove request-material preview matches the submitted material' }
+  }
+  if (evidence.requestMaterialFrozen !== true) {
+    return { ok: false, reason: 'driver must prove the request material was frozen before submission' }
+  }
+  return {
+    ok: true,
+    evidence: {
+      requestedScope: evidence.requestedScope,
+      authorizedScope: evidence.authorizedScope,
+      actualScope: evidence.actualScope,
+      materialScope: evidence.materialScope,
+      snapshotId: evidence.snapshotId,
+      revision: evidence.revision,
+      previewMatchesMaterial: true,
+      requestMaterialFrozen: true,
+    },
+  }
+}
+
+function validateSessionEvidence(report, authorization) {
+  const evidence = report?.sessionEvidence
+  if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    return { ok: false, reason: 'driver report needs sessionEvidence' }
+  }
+  if (typeof evidence.requestId !== 'string' || evidence.requestId.trim() === '') {
+    return { ok: false, reason: 'sessionEvidence needs a non-empty requestId' }
+  }
+  if (evidence.transcriptSource !== 'dsh-session') {
+    return { ok: false, reason: 'session transcript evidence must come from dsh-session' }
+  }
+  if (evidence.transcriptObserved !== true) {
+    return { ok: false, reason: 'driver must prove the submitted request appears in Session history' }
+  }
+  if (evidence.requestMaterialObserved !== true) {
+    return { ok: false, reason: 'driver must prove Session evidence is tied to the submitted request material' }
+  }
+  if (evidence.transcriptContainsAuthorizedContext !== true) {
+    return { ok: false, reason: 'driver must prove the Session transcript contains the authorized context' }
+  }
+  if (evidence.materialSnapshotId !== authorization.snapshotId) {
+    return { ok: false, reason: 'Session material snapshotId must match the authorized request snapshot' }
+  }
+  if (evidence.materialRevision !== authorization.revision) {
+    return { ok: false, reason: 'Session material revision must match the authorized request revision' }
+  }
+  return {
+    ok: true,
+    evidence: {
+      requestId: evidence.requestId,
+      transcriptSource: 'dsh-session',
+      transcriptObserved: true,
+      requestMaterialObserved: true,
+      transcriptContainsAuthorizedContext: true,
+      materialSnapshotId: evidence.materialSnapshotId,
+      materialRevision: evidence.materialRevision,
+    },
+  }
+}
+
 /** Check the strict report written by a real Tauri/browser driver. */
 export async function validateDriverReport(report, screenshotDirectory, required) {
   if (report === null || typeof report !== 'object' || Array.isArray(report)) {
     return { ok: false, reason: 'driver report is not an object', screenshots: [], states: [] }
   }
-  if (report.schemaVersion !== 1) {
-    return { ok: false, reason: 'driver report schemaVersion must be 1', screenshots: [], states: [] }
+  if (report.schemaVersion !== EC09_DRIVER_SCHEMA_VERSION) {
+    return { ok: false, reason: `driver report schemaVersion must be ${EC09_DRIVER_SCHEMA_VERSION}`, screenshots: [], states: [] }
   }
   if (report.status !== 'PASS') {
     return { ok: false, reason: 'driver report did not assert PASS', screenshots: [], states: [] }
@@ -71,8 +164,12 @@ export async function validateDriverReport(report, screenshotDirectory, required
   if (!['chrome', 'edge'].includes(report.browser)) {
     return { ok: false, reason: 'driver report browser must be chrome or edge', screenshots: [], states: [] }
   }
-  if (!Array.isArray(report.assertions) || report.assertions.length === 0 || report.assertions.some(item => typeof item !== 'string')) {
+  if (!Array.isArray(report.assertions) || report.assertions.some(item => typeof item !== 'string')) {
     return { ok: false, reason: 'driver report needs named assertions', screenshots: [], states: [] }
+  }
+  const missingAssertions = REQUIRED_EC09_ASSERTIONS.filter(assertion => !report.assertions.includes(assertion))
+  if (missingAssertions.length > 0) {
+    return { ok: false, reason: `driver report is missing required assertions: ${missingAssertions.join(', ')}`, screenshots: [], states: [] }
   }
   if (!Array.isArray(report.states) || report.states.some(item => typeof item !== 'string')) {
     return { ok: false, reason: 'driver report needs a states array', screenshots: [], states: [] }
@@ -82,12 +179,30 @@ export async function validateDriverReport(report, screenshotDirectory, required
   if (missing.length > 0) {
     return { ok: false, reason: `driver report is missing required states: ${missing.join(', ')}`, screenshots: [], states }
   }
+
+  const authorization = validateAuthorizationEvidence(report)
+  if (!authorization.ok) {
+    return { ok: false, reason: authorization.reason, screenshots: [], states }
+  }
+  const session = validateSessionEvidence(report, authorization.evidence)
+  if (!session.ok) {
+    return { ok: false, reason: session.reason, screenshots: [], states }
+  }
+
   if (!Array.isArray(report.screenshots) || report.screenshots.length === 0) {
-    return { ok: false, reason: 'driver report needs screenshot paths', screenshots: [], states }
+    return { ok: false, reason: 'driver report needs state-labelled screenshot evidence', screenshots: [], states }
   }
   const screenshots = []
+  const screenshotStates = new Set()
   for (const item of report.screenshots) {
-    const relativePath = typeof item === 'string' ? item : item?.path
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      return { ok: false, reason: 'EC-09 screenshots must be objects with state and path', screenshots: [], states }
+    }
+    const relativePath = item.path
+    const state = item.state
+    if (typeof state !== 'string' || state.trim() === '') {
+      return { ok: false, reason: 'each EC-09 screenshot needs a non-empty state', screenshots: [], states }
+    }
     const path = resolveScreenshotPath(screenshotDirectory, relativePath)
     if (path === null || extname(path).toLowerCase() !== '.png') {
       return { ok: false, reason: 'driver screenshot paths must be owned PNG files', screenshots: [], states }
@@ -97,9 +212,22 @@ export async function validateDriverReport(report, screenshotDirectory, required
     if (info === null || !info.isFile() || info.size === 0) {
       return { ok: false, reason: `driver screenshot is missing or empty: ${relativePath}`, screenshots: [], states }
     }
-    screenshots.push({ path, bytes: info.size, modifiedAt: info.mtime.toISOString() })
+    screenshotStates.add(state)
+    screenshots.push({ state, path, bytes: info.size, modifiedAt: info.mtime.toISOString() })
   }
-  return { ok: true, reason: 'driver report, Tauri/browser identity, required states, and screenshots verified', screenshots, states }
+  const missingScreenshotStates = required.filter(state => !screenshotStates.has(state))
+  if (missingScreenshotStates.length > 0) {
+    return { ok: false, reason: `driver report is missing screenshots for states: ${missingScreenshotStates.join(', ')}`, screenshots, states }
+  }
+
+  return {
+    ok: true,
+    reason: 'real browser/Tauri identity, expanded authorization, frozen request material, Session evidence, states, and screenshots verified',
+    screenshots,
+    states,
+    contextAuthorization: authorization.evidence,
+    sessionEvidence: session.evidence,
+  }
 }
 
 /** Find PNG files below a screenshot directory for diagnostics. */
@@ -166,6 +294,7 @@ export async function runLensE2E(env = process.env) {
     driverConfigured: driverCommand !== null,
     screenshotDirectory,
     requiredStates: required,
+    driverSchemaVersion: EC09_DRIVER_SCHEMA_VERSION,
   }
   const report = {
     schemaVersion: 1,
@@ -201,6 +330,7 @@ export async function runLensE2E(env = process.env) {
         DSH_LENS_SCREENSHOT_DIR: screenshotDirectory,
         DSH_LENS_REPORT_PATH: driverReportPath,
         DSH_LENS_REQUIRED_STATES: required.join(','),
+        DSH_LENS_DRIVER_SCHEMA_VERSION: String(EC09_DRIVER_SCHEMA_VERSION),
       }
       const result = await runProcess(driverCommand, driverArgs, {
         cwd: repoRoot,
@@ -224,11 +354,14 @@ export async function runLensE2E(env = process.env) {
         const validation = await validateDriverReport(driverReport, screenshotDirectory, required)
         report.screenshots = validation.ok ? validation.screenshots : await listScreenshots(screenshotDirectory)
         report.driver.report = driverReport === null ? null : {
+          schemaVersion: driverReport.schemaVersion ?? null,
           status: driverReport.status ?? null,
           application: driverReport.application ?? null,
           browser: driverReport.browser ?? null,
           states: Array.isArray(driverReport.states) ? driverReport.states : [],
           assertions: Array.isArray(driverReport.assertions) ? driverReport.assertions : [],
+          contextAuthorization: validation.ok ? validation.contextAuthorization : null,
+          sessionEvidence: validation.ok ? validation.sessionEvidence : null,
         }
         report.status = validation.ok ? 'PASS' : 'FAIL'
         report.reason = validation.reason
