@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-pub const IPC_PROTOCOL_VERSION: u32 = 3;
+pub const IPC_PROTOCOL_VERSION: u32 = 4;
 pub const IPC_MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const IPC_FRAME_HEADER_BYTES: usize = 4;
 pub const DEFAULT_IPC_REQUEST_TIMEOUT_MS: u64 = 30_000;
@@ -390,18 +390,26 @@ pub struct SelectionMaterial {
     pub authorized_scope: SelectionMaterialScope,
     pub actual_scope: SelectionMaterialScope,
     pub completeness: SelectionMaterialCompleteness,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ExpandedSelectionContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SelectionMaterialScope {
     Selection,
+    Local,
+    Section,
+    Page,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SelectionMaterialCompleteness {
     Complete,
+    Partial,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -852,10 +860,18 @@ impl SelectionMaterial {
             captured_at: snapshot.captured_at,
             selection: snapshot.selection.clone(),
             source: snapshot.source.clone(),
-            document: snapshot.document.clone(),
+            document: snapshot.document.as_ref().map(|document| SelectionDocument {
+                title: document.title.clone(),
+                url: document.url.clone(),
+                file_path: None,
+                section: document.section.clone(),
+                frame_url: document.frame_url.clone(),
+            }),
             authorized_scope: SelectionMaterialScope::Selection,
             actual_scope: SelectionMaterialScope::Selection,
             completeness: SelectionMaterialCompleteness::Complete,
+            truncated: None,
+            context: None,
         }
     }
 
@@ -873,8 +889,92 @@ impl SelectionMaterial {
                 "material.selection.text must not be blank".into(),
             ));
         }
+        if material_scope_rank(&self.actual_scope) > material_scope_rank(&self.authorized_scope) {
+            return Err(ProtocolError::InvalidMessage(
+                "material.actualScope must not exceed material.authorizedScope".into(),
+            ));
+        }
+
+        let context = self.context.as_ref();
+        let before = context.and_then(|value| value.before.as_deref());
+        let after = context.and_then(|value| value.after.as_deref());
+        let section = context.and_then(|value| value.section_text.as_deref());
+        let page = context.and_then(|value| value.page_text.as_deref());
+        let has_before = has_material_text(before);
+        let has_after = has_material_text(after);
+        let has_section = has_material_text(section);
+        let has_page = has_material_text(page);
+
+        match self.actual_scope {
+            SelectionMaterialScope::Selection => {
+                if has_before || has_after || has_section || has_page {
+                    return Err(ProtocolError::InvalidMessage(
+                        "selection material must not carry expanded context".into(),
+                    ));
+                }
+                if self.completeness != SelectionMaterialCompleteness::Complete {
+                    return Err(ProtocolError::InvalidMessage(
+                        "selection material must be complete".into(),
+                    ));
+                }
+                if self.truncated == Some(true) {
+                    return Err(ProtocolError::InvalidMessage(
+                        "selection material cannot be truncated".into(),
+                    ));
+                }
+            }
+            SelectionMaterialScope::Local => {
+                if !has_before && !has_after {
+                    return Err(ProtocolError::InvalidMessage(
+                        "local material requires before and/or after context".into(),
+                    ));
+                }
+                if has_section || has_page {
+                    return Err(ProtocolError::InvalidMessage(
+                        "local material cannot carry section or page context".into(),
+                    ));
+                }
+            }
+            SelectionMaterialScope::Section => {
+                if !has_section {
+                    return Err(ProtocolError::InvalidMessage(
+                        "section material requires sectionText".into(),
+                    ));
+                }
+                if has_before || has_after || has_page {
+                    return Err(ProtocolError::InvalidMessage(
+                        "section material can carry only sectionText".into(),
+                    ));
+                }
+            }
+            SelectionMaterialScope::Page => {
+                if !has_page {
+                    return Err(ProtocolError::InvalidMessage(
+                        "page material requires pageText".into(),
+                    ));
+                }
+                if has_before || has_after || has_section {
+                    return Err(ProtocolError::InvalidMessage(
+                        "page material can carry only pageText".into(),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
+}
+
+fn material_scope_rank(scope: &SelectionMaterialScope) -> u8 {
+    match scope {
+        SelectionMaterialScope::Selection => 0,
+        SelectionMaterialScope::Local => 1,
+        SelectionMaterialScope::Section => 2,
+        SelectionMaterialScope::Page => 3,
+    }
+}
+
+fn has_material_text(value: Option<&str>) -> bool {
+    matches!(value, Some(text) if !text.is_empty())
 }
 
 fn typed_payload<T>(payload: &Value) -> Result<T, ProtocolError>
@@ -1103,7 +1203,7 @@ mod tests {
             Err(ProtocolError::ProtocolMismatch(1))
         ));
 
-        let unknown = r#"{"protocol":3,"id":"x","type":"unknown.method","payload":{}}"#;
+        let unknown = r#"{"protocol":4,"id":"x","type":"unknown.method","payload":{}}"#;
         assert!(matches!(
             IpcMessage::from_json(unknown),
             Err(ProtocolError::UnknownMessageType(_))
@@ -1111,9 +1211,9 @@ mod tests {
     }
 
     #[test]
-    fn session_submit_v3_requires_and_preserves_fixed_material() {
+    fn session_submit_v4_requires_and_preserves_fixed_material() {
         let submit = IpcMessage::from_json(FIXTURES[3]).unwrap();
-        assert_eq!(IPC_PROTOCOL_VERSION, 3);
+        assert_eq!(IPC_PROTOCOL_VERSION, 4);
         assert_eq!(submit.protocol, IPC_PROTOCOL_VERSION);
 
         let payload: SessionSubmitPayload = serde_json::from_value(submit.payload.clone()).unwrap();
@@ -1135,6 +1235,7 @@ mod tests {
             payload.material.completeness,
             SelectionMaterialCompleteness::Complete
         );
+        assert_eq!(payload.material.context, None);
 
         let missing_material = serde_json::json!({
             "protocol": IPC_PROTOCOL_VERSION,
@@ -1148,6 +1249,100 @@ mod tests {
             }
         });
         assert!(IpcMessage::from_json(&missing_material.to_string()).is_err());
+    }
+
+    #[test]
+    fn session_submit_v4_accepts_authorized_local_material_and_rejects_scope_escalation() {
+        let local = serde_json::json!({
+            "protocol": IPC_PROTOCOL_VERSION,
+            "id": "submit-local",
+            "type": "session.submit",
+            "payload": {
+                "sessionId": "session-demo",
+                "requestId": "request-local",
+                "mode": "queue",
+                "content": [{ "type": "text", "text": "Use the local context." }],
+                "material": {
+                    "snapshotId": "selection-local",
+                    "revision": 8,
+                    "capturedAt": 1725753600000u64,
+                    "selection": { "text": "Fixed selection" },
+                    "source": { "kind": "browser", "app": "Chrome" },
+                    "authorizedScope": "local",
+                    "actualScope": "local",
+                    "completeness": "partial",
+                    "truncated": true,
+                    "context": { "before": "before", "after": "after" }
+                }
+            }
+        });
+        IpcMessage::from_json(&local.to_string()).expect("authorized local material must be valid");
+
+        let escalation = serde_json::json!({
+            "protocol": IPC_PROTOCOL_VERSION,
+            "id": "submit-escalation",
+            "type": "session.submit",
+            "payload": {
+                "sessionId": "session-demo",
+                "requestId": "request-escalation",
+                "mode": "queue",
+                "content": [{ "type": "text", "text": "Do not allow escalation." }],
+                "material": {
+                    "snapshotId": "selection-escalation",
+                    "revision": 8,
+                    "capturedAt": 1725753600000u64,
+                    "selection": { "text": "Fixed selection" },
+                    "source": { "kind": "browser", "app": "Chrome" },
+                    "authorizedScope": "local",
+                    "actualScope": "page",
+                    "completeness": "complete",
+                    "truncated": false,
+                    "context": { "pageText": "must not pass" }
+                }
+            }
+        });
+        assert!(IpcMessage::from_json(&escalation.to_string()).is_err());
+    }
+
+    #[test]
+    fn selection_material_projection_drops_local_file_path() {
+        let snapshot = SelectionSnapshot {
+            id: "snapshot-file".into(),
+            revision: 1,
+            captured_at: 1,
+            selection: SelectionValue { text: "selected".into(), language: None },
+            source: SelectionSource {
+                kind: SelectionSourceKind::Browser,
+                app: Some("Chrome".into()),
+                process: None,
+                window_title: None,
+            },
+            document: Some(SelectionDocument {
+                title: Some("Fixture".into()),
+                url: Some("https://example.test".into()),
+                file_path: Some("C:/private/fixture.html".into()),
+                section: None,
+                frame_url: None,
+            }),
+            context: SelectionContext {
+                before: None,
+                after: None,
+                section_text: None,
+                page_text: None,
+                page_available: false,
+            },
+            capabilities: SelectionCapabilities {
+                local_context: false,
+                section_context: false,
+                page_context: false,
+                screenshot: false,
+            },
+            geometry: None,
+            provider: "fixture".into(),
+            confidence: 1.0,
+        };
+        let material = SelectionMaterial::from_snapshot(&snapshot);
+        assert_eq!(material.document.and_then(|document| document.file_path), None);
     }
 
     #[test]
