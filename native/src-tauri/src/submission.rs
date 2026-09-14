@@ -17,8 +17,8 @@ const DEFAULT_SUBMIT_TIMEOUT_MS: u64 = 5_000;
 /// `normalize_submission_material` retains a temporary legacy SelectionSnapshot
 /// fallback, but the Lens path sends canonical material and this module forwards
 /// that exact validated value in Protocol V4 `session.submit`.
-#[tauri::command]
-pub async fn bridge_submit_prompt(
+#[tauri::command(rename = "bridge_submit_prompt")]
+pub async fn bridge_submit_authorized_prompt(
     session_id: Option<String>,
     content: String,
     request_id: String,
