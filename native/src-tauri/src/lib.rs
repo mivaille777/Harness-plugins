@@ -3,6 +3,7 @@ pub mod capture;
 pub mod native_messaging;
 pub mod protocol;
 pub mod providers;
+pub mod submission;
 pub mod submission_material;
 
 use tauri::Manager;
@@ -22,7 +23,7 @@ pub fn run() {
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
             bridge::bridge_expand_selection,
-            bridge::bridge_submit_prompt,
+            submission::bridge_submit_prompt,
             bridge::bridge_list_sessions,
             bridge::bridge_create_session,
             bridge::bridge_read_session_history,
