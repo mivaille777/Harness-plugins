@@ -391,15 +391,23 @@ mod tests {
             "snapshotId": "snapshot-ec05",
             "revision": 5,
             "capturedAt": 5_000,
-            "selection": { "text": "fixed selection" },
-            "source": { "kind": "browser", "app": "Chrome" },
+            "selection": { "text": "fixed selection", "language": null },
+            "source": {
+                "kind": "browser",
+                "app": "Chrome",
+                "process": null,
+                "windowTitle": null
+            },
+            "document": null,
             "authorizedScope": "local",
             "actualScope": "local",
             "completeness": "partial",
             "truncated": true,
             "context": {
                 "before": "EC05_AUTHORIZED_BEFORE",
-                "after": "EC05_AUTHORIZED_AFTER"
+                "after": "EC05_AUTHORIZED_AFTER",
+                "sectionText": null,
+                "pageText": null
             }
         });
         let material = normalize_submission_material(material_value.clone()).unwrap();
