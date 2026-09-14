@@ -39,7 +39,7 @@ pub struct SessionUnsubscription {
     pub released: bool,
 }
 
-pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v3";
+pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v4";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1543,7 +1543,7 @@ mod tests {
 
     #[test]
     fn default_pipe_matches_harness_transport() {
-        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v3");
+        assert_eq!(DEFAULT_PIPE_NAME, r"\\.\pipe\dsh-selection-companion-v4");
     }
 
     #[test]
@@ -1629,7 +1629,7 @@ mod tests {
 
         assert_eq!(submitted.type_name, "session.submit");
         assert_eq!(submitted.protocol, IPC_PROTOCOL_VERSION);
-        assert_eq!(IPC_PROTOCOL_VERSION, 3);
+        assert_eq!(IPC_PROTOCOL_VERSION, 4);
         assert_eq!(
             submitted.payload["material"],
             serde_json::json!({
