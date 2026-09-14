@@ -71,9 +71,20 @@ test('EC-08 request matcher requires authorized sentinels and rejects global con
   }), false)
 })
 
-test('EC-08 local model gate records only sentinel facts and hashes, not full messages', async () => {
+test('EC-08 model gate holds bootstrap while recording only safe target-request facts', async () => {
   const gate = await startEc08ModelGate()
   try {
+    const bootstrapFetch = fetch(`${gate.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'ec08-unit',
+        messages: [{ role: 'user', content: 'EC08 bootstrap without target sentinels' }],
+      }),
+    })
+    const bootstrapObservation = await gate.bootstrapStarted
+    assert.equal(ec08RequestMatches(bootstrapObservation), false)
+
     const response = await fetch(`${gate.url}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -85,11 +96,18 @@ test('EC-08 local model gate records only sentinel facts and hashes, not full me
     assert.equal(response.ok, true)
     const body = await response.text()
     assert.equal(body.includes('EC08_SESSION_MODEL_OK'), true)
-    assert.equal(gate.requests.length, 1)
-    assert.equal(ec08RequestMatches(gate.requests[0]), true)
-    assert.equal(typeof gate.requests[0].messagesSha256, 'string')
-    assert.equal(Object.hasOwn(gate.requests[0], 'messages'), false)
-    assert.equal(JSON.stringify(gate.requests[0]).includes(canonicalEc08Prompt()), false)
+    await gate.matched
+
+    assert.equal(gate.requests.length, 2)
+    assert.equal(ec08RequestMatches(gate.requests[1]), true)
+    assert.equal(typeof gate.requests[1].messagesSha256, 'string')
+    assert.equal(Object.hasOwn(gate.requests[1], 'messages'), false)
+    assert.equal(JSON.stringify(gate.requests[1]).includes(canonicalEc08Prompt()), false)
+
+    gate.releaseBootstrap()
+    const bootstrapResponse = await bootstrapFetch
+    assert.equal(bootstrapResponse.ok, true)
+    assert.equal((await bootstrapResponse.text()).includes('EC08_BOOTSTRAP_RELEASED'), true)
   } finally {
     await gate.close()
   }
