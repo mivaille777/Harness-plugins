@@ -1,5 +1,5 @@
 {
-  "protocol": 3,
+  "protocol": 4,
   "id": "hello-1",
   "type": "bridge.hello.result",
   "payload": {
@@ -7,7 +7,7 @@
       "name": "dsh-selection-companion",
       "version": "0.1.0"
     },
-    "protocol": 3,
+    "protocol": 4,
     "capabilities": ["selection", "session", "follow"]
   }
 }
