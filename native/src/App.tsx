@@ -67,6 +67,12 @@ interface CompleteHistory {
   readonly capturedThroughCursor: number
 }
 
+/** Native signal after Harness has accepted a new selection snapshot. */
+interface SelectionCapturedEvent {
+  readonly snapshotId: string
+  readonly revision: number
+}
+
 const SESSION_PREFERENCE_KEY = 'dsh-selection-companion.session'
 
 function rememberedSessionId(): string | null {
@@ -134,6 +140,8 @@ export default function App() {
   const [requestId, setRequestId] = useState<string | null>(null)
   const [projection, setProjection] = useState<RequestProjection>(initialRequestProjection)
   const busy = ['submitting', 'queued', 'streaming', 'cancelling', 'submission-unknown'].includes(projection.phase)
+  const busyRef = useRef(busy)
+  const pendingSelectionRefresh = useRef(false)
   const active = useRef<ActiveSession>({ sessionId: null, requestId: null, subscriptionId: null })
   const cursors = useRef(new Map<string, number>())
   const drafts = useRef(new Map<string, string>())
@@ -165,6 +173,12 @@ export default function App() {
   }, [])
 
   useEffect(() => { void refresh().catch(error => setNotice(String(error))) }, [refresh])
+  useEffect(() => { busyRef.current = busy }, [busy])
+  useEffect(() => {
+    if (busy || !pendingSelectionRefresh.current) return
+    pendingSelectionRefresh.current = false
+    void refresh().catch(error => setNotice(String(error)))
+  }, [busy, refresh])
   useEffect(() => {
     const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
     snapshotIdentityRef.current = identity
@@ -360,6 +374,34 @@ export default function App() {
     }
   }, [releaseSubscription])
 
+  useEffect(() => {
+    let disposed = false
+    let unlisten: () => void = () => undefined
+    void listen<SelectionCapturedEvent>('selection-captured', event => {
+      if (disposed) return
+      if (busyRef.current) {
+        pendingSelectionRefresh.current = true
+        return
+      }
+      void refresh()
+        .then(() => {
+          if (!disposed) setNotice(copy.selectionUpdated)
+        })
+        .catch(error => {
+          if (!disposed) setNotice(String(error))
+        })
+    }).then(dispose => {
+      if (disposed) dispose()
+      else unlisten = dispose
+    }).catch(error => {
+      if (!disposed) setNotice(String(error))
+    })
+    return () => {
+      disposed = true
+      unlisten()
+    }
+  }, [copy.selectionUpdated, refresh])
+
   const createAndOpenSession = () => {
     if (sessionsLoading || historyLoading) return
     setNotice('Creating a new Harness session…')
@@ -492,7 +534,13 @@ export default function App() {
     </section> : null}
 
     {snapshot === null ? <section className="empty-state" aria-live="polite"><div className="empty-mark" aria-hidden="true">✦</div><h1>{copy.emptyTitle}</h1><p>{copy.emptyDescription}</p><button type="button" onClick={() => void refresh()}>{copy.refreshSelection}</button></section> : <>
-      <section className="material" aria-label={copy.materialAriaLabel}><p className="source">{source}</p><blockquote>{snapshot.selection.text}</blockquote><p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p><details className="context-panel" data-testid="captured-context"><summary>{copy.contextLabel}</summary><p className="context-description">{copy.contextDescription}</p>{contextScopes.length > 0 ? <div className="context-controls"><label htmlFor="context-scope">{copy.contextScopeLabel}</label><select id="context-scope" value={contextScope} disabled={contextLoading} onChange={event => setContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select><button type="button" className="secondary" onClick={loadContext} disabled={contextLoading}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button></div> : null}{expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}{contextError ? <p className="context-error" role="alert">{contextError}</p> : null}{contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}</details></section>
+      <section className="material" aria-label={copy.materialAriaLabel}>
+        <div className="selection-source"><span className="selection-source-dot" aria-hidden="true" /><span>{snapshot.source.app ?? snapshot.source.process ?? snapshot.provider}</span><span className="selection-source-divider" aria-hidden="true">·</span><span title={source}>{source}</span></div>
+        <p className="selection-caption">{copy.currentSelection}</p>
+        <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
+        <p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p>
+        <details className="context-panel" data-testid="captured-context"><summary>{copy.contextLabel}</summary><p className="context-description">{copy.contextDescription}</p>{contextScopes.length > 0 ? <div className="context-controls"><label htmlFor="context-scope">{copy.contextScopeLabel}</label><select id="context-scope" value={contextScope} disabled={contextLoading} onChange={event => setContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select><button type="button" className="secondary" onClick={loadContext} disabled={contextLoading}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button></div> : null}{expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}{contextError ? <p className="context-error" role="alert">{contextError}</p> : null}{contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}</details>
+      </section>
       <div className="quick-actions quick-actions-single"><button type="button" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button></div>
       <label className="question-label" htmlFor="question">{copy.askLabel}</label><textarea id="question" value={draft} onChange={event => { const value = event.target.value; setDraft(value); if (sessionId !== null) drafts.current.set(sessionId, value) }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit('ask') } }} placeholder={copy.askPlaceholder} rows={3} />
       <div className="composer-actions"><button type="button" onClick={() => submit('ask')} disabled={busy || draft.trim().length === 0}>{copy.ask}</button><button type="button" className="secondary" onClick={() => void refresh()} disabled={busy}>{copy.useLatest}</button></div>

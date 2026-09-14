@@ -25,6 +25,7 @@ const api = vi.hoisted(() => {
 const hide = vi.hoisted(() => vi.fn())
 const eventApi = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: unknown }) => void),
+  selectionHandler: null as null | ((event: { payload: unknown }) => void),
   listen: vi.fn(),
   unlisten: vi.fn(),
 }))
@@ -45,7 +46,12 @@ describe('selection lens', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     eventApi.handler = null
-    eventApi.listen.mockImplementation(async (_name: string, handler: (event: { payload: unknown }) => void) => { eventApi.handler = handler; return eventApi.unlisten })
+    eventApi.selectionHandler = null
+    eventApi.listen.mockImplementation(async (name: string, handler: (event: { payload: unknown }) => void) => {
+      if (name === 'selection-captured') eventApi.selectionHandler = handler
+      else eventApi.handler = handler
+      return eventApi.unlisten
+    })
     api.getCaptureStatus.mockResolvedValue(capture)
     api.getCurrentSelection.mockResolvedValue(selection)
     api.listSessions.mockResolvedValue([])
@@ -58,6 +64,23 @@ describe('selection lens', () => {
     api.subscribeSession.mockResolvedValue(undefined)
     api.unsubscribeSession.mockResolvedValue({ sessionId: 'session-1', subscriptionId: 'subscription', released: true })
     api.cancelSession.mockResolvedValue(true)
+  })
+  it('refreshes the visible selection after Native publishes a new snapshot', async () => {
+    const latest = deepFreeze({
+      ...selection,
+      id: 's2',
+      revision: 3,
+      selection: { text: 'A newer visible selection' },
+      document: { title: 'Updated source' },
+    })
+    api.getCurrentSelection.mockResolvedValueOnce(selection).mockResolvedValueOnce(latest)
+    render(<App />)
+    await screen.findByTestId('selected-text')
+    await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
+    eventApi.selectionHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
+    expect(await screen.findByText('A newer visible selection')).toBeInTheDocument()
+    expect(screen.getByText('Latest browser selection is now shown.')).toBeInTheDocument()
+    expect(screen.getByText('Updated source')).toBeInTheDocument()
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
   it('keeps captured context behind an explicit disclosure', async () => {

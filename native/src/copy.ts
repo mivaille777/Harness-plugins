@@ -29,6 +29,7 @@ export interface AppCopy {
   readonly emptyDescription: string
   readonly refreshSelection: string
   readonly currentSelection: string
+  readonly selectionUpdated: string
   readonly materialAriaLabel: string
   readonly fixedMaterial: (revision: number) => string
   readonly contextLabel: string
@@ -93,6 +94,7 @@ const english: AppCopy = {
   emptyDescription: 'Select non-sensitive browser text, then refresh it here.',
   refreshSelection: 'Refresh selection',
   currentSelection: 'Current selection',
+  selectionUpdated: 'Latest browser selection is now shown.',
   materialAriaLabel: 'Fixed source material',
   fixedMaterial: revision => `Fixed material · revision ${revision}`,
   contextLabel: 'Captured context',
@@ -169,6 +171,7 @@ const simplifiedChinese: AppCopy = {
   emptyDescription: '请在浏览器中选择非敏感文本，然后在此刷新。',
   refreshSelection: '刷新选区',
   currentSelection: '当前选区',
+  selectionUpdated: '已显示最新浏览器选区。',
   materialAriaLabel: '固定来源材料',
   fixedMaterial: revision => `已固定材料 · 修订 ${revision}`,
   contextLabel: '已捕获上下文',

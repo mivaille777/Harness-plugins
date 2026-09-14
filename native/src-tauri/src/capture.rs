@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::bridge::BridgeRuntime;
@@ -428,10 +428,21 @@ impl CaptureRuntime {
                     continue;
                 };
                 let bridge = app.state::<BridgeRuntime>();
+                let published_snapshot_id = snapshot.id.clone();
+                let published_revision = snapshot.revision;
                 match bridge.submit_selection(snapshot).await {
                     Ok(()) => {
                         transition(&publisher_state, CapturePhase::Running, None);
                         increment(&publisher_state, |metrics| metrics.published += 1);
+                        // The UI receives identity only and reads the canonical snapshot back from
+                        // Harness. Selection text never travels in this local notification.
+                        let _ = app.emit(
+                            "selection-captured",
+                            serde_json::json!({
+                                "snapshotId": published_snapshot_id,
+                                "revision": published_revision,
+                            }),
+                        );
                     }
                     Err(error) => record_error(
                         &publisher_state,
