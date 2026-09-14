@@ -5,6 +5,7 @@ import {
   encodeIpcFrame,
   IpcFrameDecoder,
   BridgeMessageRouter,
+  IPC_PROTOCOL_VERSION,
   SelectionCompanionBridgeService,
   SelectionContextService,
   type IpcMessage,
@@ -48,7 +49,7 @@ function createSessions(): TestSessions {
 
 function subscribeMessage(id: string, cursor?: number): IpcMessage {
   return {
-    protocol: 3,
+    protocol: IPC_PROTOCOL_VERSION,
     id,
     type: 'session.subscribe',
     payload: { sessionId: 'session-transport', ...(cursor === undefined ? {} : { cursor }) },
