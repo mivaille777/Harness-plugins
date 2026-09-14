@@ -83,9 +83,10 @@ test('Lens runner parses only JSON string argument arrays', () => {
 })
 
 test('Lens runner keeps EC-09 states and screenshot paths inside the fixture directory', () => {
+  const screenshotRoot = join(tmpdir(), 'ec09-owned-screenshots')
   assert.deepEqual(requiredStates('material,custom'), ['idle', 'authorized', 'material', 'streaming', 'history', 'custom'])
-  assert.equal(resolveScreenshotPath('C:/tmp/lens', 'idle.png'), 'C:\\tmp\\lens\\idle.png')
-  assert.equal(resolveScreenshotPath('C:/tmp/lens', '../outside.png'), null)
+  assert.equal(resolveScreenshotPath(screenshotRoot, 'idle.png'), join(screenshotRoot, 'idle.png'))
+  assert.equal(resolveScreenshotPath(screenshotRoot, '../outside.png'), null)
 })
 
 test('Lens runner rejects a static or incomplete driver report', async () => {
