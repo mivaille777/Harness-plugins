@@ -28,6 +28,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check:ec01": "pnpm typecheck && pnpm test && pnpm test:native-ui && pnpm test:lens:session",
+    "check:ec02": "pnpm typecheck && pnpm test:protocol && pnpm exec vitest run tests/ec01-expanded-context.spec.ts tests/ec01-session-material.spec.ts tests/ec02-material-schema.spec.ts && pnpm --dir native build && pnpm test:rust",
     "test:selection": "vitest run tests/selection-context.spec.ts",
     "test:context-expansion": "vitest run tests/selection-context.spec.ts",
     "test:protocol": "vitest run tests/protocol.spec.ts",
