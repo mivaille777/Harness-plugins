@@ -1,0 +1,36 @@
+{
+  "protocol": 4,
+  "id": "submit-local-smuggling-invalid",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-expanded",
+    "requestId": "request-local-smuggling-invalid",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "This request must fail closed."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-expanded",
+      "revision": 12,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Fixed selected material"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome"
+      },
+      "authorizedScope": "local",
+      "actualScope": "local",
+      "completeness": "complete",
+      "truncated": false,
+      "context": {
+        "before": "Allowed local context.",
+        "pageText": "This broader context must not be accepted."
+      }
+    }
+  }
+}
