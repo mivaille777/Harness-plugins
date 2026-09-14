@@ -15,7 +15,9 @@ fn json_files(dir: &Path) -> Vec<PathBuf> {
         .unwrap_or_else(|error| panic!("cannot read fixture directory {}: {error}", dir.display()))
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "json"))
+        .filter(|path| {
+            path.is_file() && path.extension().and_then(|extension| extension.to_str()) == Some("json")
+        })
         .collect::<Vec<_>>();
     files.sort();
     files
