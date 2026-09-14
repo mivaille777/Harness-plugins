@@ -12,8 +12,9 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::bridge::BridgeRuntime;
 use crate::protocol::SelectionSnapshot;
-use crate::providers::browser_accessibility::BrowserAccessibilityProvider;
-use crate::providers::{ProviderCapture, SelectionProvider};
+use crate::providers::registry::ProviderRegistry;
+use crate::providers::types::CaptureTrigger;
+use crate::providers::ProviderCapture;
 
 const DEFAULT_CAPTURE_SETTLE_DELAY_MS: u64 = 35;
 const DEFAULT_DEDUPE_WINDOW_MS: u64 = 120;
@@ -332,12 +333,12 @@ impl CaptureRuntime {
         let worker_thread = thread::Builder::new()
             .name("dsh-selection-capture-worker".to_owned())
             .spawn(move || {
-                let provider = match BrowserAccessibilityProvider::new(config.context_chars) {
-                    Ok(provider) => provider,
+                let registry = match ProviderRegistry::browser_default(config.context_chars) {
+                    Ok(registry) => registry,
                     Err(error) => {
                         record_error(
                             &worker_state,
-                            format!("could not initialize browser accessibility provider: {error}"),
+                            format!("could not initialize provider registry: {error}"),
                         );
                         return;
                     }
@@ -360,7 +361,7 @@ impl CaptureRuntime {
                             }
 
                             let started = Instant::now();
-                            match provider.capture() {
+                            match registry.capture(CaptureTrigger::UiaEvent) {
                                 Ok(ProviderCapture::Captured(snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
@@ -409,7 +410,7 @@ impl CaptureRuntime {
                                 }
                                 Err(error) => record_error(
                                     &worker_state,
-                                    format!("browser accessibility capture failed: {error}"),
+                                    format!("provider arbitration capture failed: {error}"),
                                 ),
                             }
                         }
@@ -419,7 +420,7 @@ impl CaptureRuntime {
                             }
                             next_fallback_poll = Instant::now() + FALLBACK_SELECTION_POLL;
                             let started = Instant::now();
-                            match provider.capture() {
+                            match registry.capture(CaptureTrigger::FallbackPoll) {
                                 Ok(ProviderCapture::Captured(snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
@@ -486,9 +487,7 @@ impl CaptureRuntime {
                                 }
                                 Err(error) => record_error(
                                     &worker_state,
-                                    format!(
-                                        "browser accessibility fallback capture failed: {error}"
-                                    ),
+                                    format!("provider arbitration fallback capture failed: {error}"),
                                 ),
                             }
                         }
