@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { AgentEventKind, ContextScope, SelectionExpandedPayload } from '../../../src/bridge/protocol.js'
 import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
+import type { SelectionMaterial } from '../../../src/session/material.js'
 
 export interface BridgeStatus {
   readonly connected: boolean
@@ -166,12 +167,19 @@ export function readSessionHistory(
   })
 }
 
+/**
+ * Submit a fixed request. Existing callers may omit authorizedMaterial and keep
+ * the legacy SelectionSnapshot fallback; Lens passes canonical material so
+ * Protocol V4 can persist exactly what the user authorized.
+ */
 export async function submitSessionPrompt(
   sessionId: string | null,
   content: string,
   requestId: string,
-  material: SelectionSnapshot,
+  materialSnapshot: SelectionSnapshot,
+  authorizedMaterial?: SelectionMaterial,
 ): Promise<SessionSubmission> {
+  const material = authorizedMaterial ?? materialSnapshot
   try {
     return await invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId, material })
   } catch (error) {
