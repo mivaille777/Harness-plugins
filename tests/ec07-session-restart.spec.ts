@@ -73,7 +73,8 @@ describe('EC-07 durable restart and replay', () => {
     const accepted = await first.service.submit(sessionId, 'request-ec07', 'queue', content, material)
     const message = first.followup.mock.calls[0]?.[0]
 
-    expect(message?.source.material).toBe(material)
+    // Harness may snapshot/clone message source data; durable equality is structural.
+    expect(message?.source.material).toStrictEqual(material)
     expect(message?.source.material.context.pageText).toBe('EC07_PAGE_CONTEXT_SENTINEL_83917')
 
     const persisted = [{
