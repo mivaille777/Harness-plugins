@@ -119,6 +119,10 @@ jobs:
         run: pnpm build
       - name: Build browser extension
         run: pnpm browser:build
+      # tauri::generate_context! validates frontendDist even for the standalone
+      # native-host binary, so create native/dist before Cargo compiles the host.
+      - name: Build Tauri frontend assets
+        run: pnpm --dir native build
       - name: Build Windows native messaging host
         run: pnpm native:host:build
       - name: Install Playwright Chromium
