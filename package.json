@@ -50,7 +50,7 @@
     "test:perf": "pnpm build && node --test scripts/perf.test.mjs && node scripts/test-perf.mjs",
     "test:human-factors:fixtures": "node --test scripts/human-factors.test.mjs && node scripts/test-human-factors-fixtures.mjs",
     "report:human-factors": "node scripts/report-human-factors.mjs",
-    "test:installer": "node --test scripts/installer.test.mjs",
+    "test:installer": "node --test scripts/installer.test.mjs && node scripts/test-installer.mjs",
     "test:installer:smoke": "node scripts/test-installer-smoke.mjs",
     "check:release": "node scripts/check-release.mjs",
     "test:r07:runner": "node scripts/test-r07-runner.mjs",
