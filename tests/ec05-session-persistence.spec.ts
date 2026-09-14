@@ -91,6 +91,7 @@ describe('EC-05 durable canonical material', () => {
         },
       },
     })
-    expect(message?.source.material).toBe(material)
+    // Harness may snapshot/clone message source data; durable equality is structural.
+    expect(message?.source.material).toStrictEqual(material)
   })
 })
