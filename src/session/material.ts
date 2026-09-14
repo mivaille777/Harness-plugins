@@ -11,10 +11,21 @@ export const SELECTION_READ_CONTEXT_TOOL_NAME = 'selection_read_context'
 /** Rust serializes absent optional fields as null; normalize that wire spelling to omission. */
 const optionalText = z.preprocess(value => value === null ? undefined : value, z.string().optional())
 
-const optionalDocument = z.preprocess(value => value === null ? undefined : value, z.object({
+/**
+ * Material keeps only model-safe document identity. Local filesystem paths may
+ * exist on a provider snapshot for Native/Lens use, but they are deliberately
+ * stripped at the durable Session boundary and never exposed to Agent tools.
+ * The preprocess also sanitizes older/wire material that still carries a
+ * filePath field before strict validation.
+ */
+const optionalDocument = z.preprocess(value => {
+  if (value === null || value === undefined) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) return value
+  const { filePath: _localFilePath, ...safeDocument } = value as Record<string, unknown>
+  return safeDocument
+}, z.object({
   title: optionalText,
   url: optionalText,
-  filePath: optionalText,
   section: optionalText,
   frameUrl: optionalText,
 }).strict().optional())
@@ -67,7 +78,6 @@ export function selectionMaterialFromSnapshot(snapshot: SelectionSnapshot): Sele
       document: {
         ...(snapshot.document.title === undefined ? {} : { title: snapshot.document.title }),
         ...(snapshot.document.url === undefined ? {} : { url: snapshot.document.url }),
-        ...(snapshot.document.filePath === undefined ? {} : { filePath: snapshot.document.filePath }),
         ...(snapshot.document.section === undefined ? {} : { section: snapshot.document.section }),
         ...(snapshot.document.frameUrl === undefined ? {} : { frameUrl: snapshot.document.frameUrl }),
       },
@@ -230,7 +240,6 @@ const documentOutputSchema = {
   properties: {
     title: { type: 'string' },
     url: { type: 'string' },
-    filePath: { type: 'string' },
     section: { type: 'string' },
     frameUrl: { type: 'string' },
   },
