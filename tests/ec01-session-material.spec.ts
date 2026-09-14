@@ -64,11 +64,18 @@ function durableEvents(material: unknown): SessionEvent[] {
 }
 
 describe('EC-01 durable expanded-material baseline', () => {
-  it('keeps the current durable material schema selection-only', () => {
-    expect(() => normalizeSelectionMaterial(expandedMaterial())).toThrow()
+  it('accepts a canonical local material after the EC-02 schema migration', () => {
+    expect(normalizeSelectionMaterial(expandedMaterial())).toMatchObject({
+      authorizedScope: 'local',
+      actualScope: 'local',
+      context: {
+        before: 'EC01_LOCAL_BEFORE_SENTINEL',
+        after: 'EC01_LOCAL_AFTER_SENTINEL',
+      },
+    })
   })
 
-  it.fails('reconstructs explicitly authorized local context from the durable turn', () => {
+  it('reconstructs explicitly authorized local context from the durable turn', () => {
     const bound = resolveSelectionMaterialForCall(durableEvents(expandedMaterial()), 'call-ec01')
     expect(bound).toMatchObject({
       requestId: 'request-ec01',
