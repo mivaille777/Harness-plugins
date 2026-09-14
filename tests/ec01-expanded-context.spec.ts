@@ -5,9 +5,9 @@ import {
   parseIpcMessage,
 } from '../src/index.js'
 
-function expandedSubmitMessage() {
+function expandedSubmitMessage(protocol = IPC_PROTOCOL_VERSION) {
   return {
-    protocol: IPC_PROTOCOL_VERSION,
+    protocol,
     id: 'ec01-expanded-submit',
     type: 'session.submit',
     payload: {
@@ -36,12 +36,12 @@ function expandedSubmitMessage() {
 }
 
 describe('EC-01 expanded-context protocol baseline', () => {
-  it('pins Protocol V3 as selection-only before the V4 material migration', () => {
-    expect(IPC_PROTOCOL_VERSION).toBe(3)
-    expect(() => parseIpcMessage(expandedSubmitMessage())).toThrow(IpcProtocolError)
+  it('pins Protocol V4 and rejects the same expanded request when labeled as V3', () => {
+    expect(IPC_PROTOCOL_VERSION).toBe(4)
+    expect(() => parseIpcMessage(expandedSubmitMessage(3))).toThrow(IpcProtocolError)
   })
 
-  it.fails('accepts an explicitly authorized expanded material at the session boundary', () => {
+  it('accepts an explicitly authorized expanded material at the V4 session boundary', () => {
     const parsed = parseIpcMessage(expandedSubmitMessage())
     expect(parsed).toMatchObject({
       type: 'session.submit',
