@@ -1,4 +1,7 @@
 pub mod browser_accessibility;
+pub mod canonicalizer;
+pub mod registry;
+pub mod types;
 
 use crate::protocol::SelectionSnapshot;
 
