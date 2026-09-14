@@ -6,9 +6,13 @@ use crate::protocol::{SelectionMaterial, SelectionSnapshot};
 ///
 /// New Lens requests send SelectionMaterial directly. A legacy SelectionSnapshot
 /// is accepted only as a compatibility fallback and is projected to the exact
-/// selection-only material that older callers already produced.
+/// selection-only material that older callers already produced. Local filesystem
+/// paths are stripped before any material can cross the named-pipe boundary.
 pub fn normalize_submission_material(value: Value) -> Result<SelectionMaterial, String> {
-    if let Ok(material) = serde_json::from_value::<SelectionMaterial>(value.clone()) {
+    if let Ok(mut material) = serde_json::from_value::<SelectionMaterial>(value.clone()) {
+        if let Some(document) = material.document.as_mut() {
+            document.file_path = None;
+        }
         material.validate().map_err(|error| error.to_string())?;
         return Ok(material);
     }
@@ -26,14 +30,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preserves_explicitly_authorized_canonical_material() {
+    fn preserves_explicitly_authorized_canonical_material_and_strips_local_paths() {
         let source = serde_json::json!({
             "snapshotId": "snapshot-canonical",
             "revision": 5,
             "capturedAt": 1_000,
             "selection": { "text": "fixed selection" },
             "source": { "kind": "browser", "app": "Chrome" },
-            "document": { "title": "Fixture", "url": "https://example.test" },
+            "document": {
+                "title": "Fixture",
+                "url": "https://example.test",
+                "filePath": "C:/private/canonical.html"
+            },
             "authorizedScope": "local",
             "actualScope": "local",
             "completeness": "partial",
@@ -53,6 +61,7 @@ mod tests {
             "AUTHORIZED_BEFORE_SENTINEL"
         );
         assert_eq!(serialized["truncated"], true);
+        assert!(serialized["document"]["filePath"].is_null());
     }
 
     #[test]
@@ -90,7 +99,7 @@ mod tests {
         assert_eq!(serialized["authorizedScope"], "selection");
         assert_eq!(serialized["actualScope"], "selection");
         assert!(serialized.get("context").is_none());
-        assert!(serialized["document"].get("filePath").is_none() || serialized["document"]["filePath"].is_null());
+        assert!(serialized["document"]["filePath"].is_null());
     }
 
     #[test]
