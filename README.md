@@ -293,6 +293,18 @@ Default extensionless path:
 - Tauri 2 Windows prerequisites / WebView2
 - working `dsh` CLI
 
+## Windows installer candidate
+
+The Native Companion builds as an unsigned, current-user NSIS installer. Building does not register the optional browser extension or remove Harness session data.
+
+```powershell
+pnpm native:build
+pnpm test:installer
+pnpm test:installer:smoke
+```
+
+`test:installer:smoke` uses a unique directory below the Windows temporary folder, launches the installed executable, repeats installation, uninstalls it, and fails when executable files remain. It is an actual current-user installation test; code signing, another clean user or VM, cross-version migration, and public distribution require separate release evidence.
+
 A browser extension is **not** a default requirement.
 
 ## Automated checks
@@ -495,7 +507,6 @@ The optional Browser DOM extension has its own separate checks and is not a Task
 - Lens approval / ask-user interaction
 - complete-Harness navigation from the Lens into the same session
 - real-model session e2e runner and visible Tauri interaction evidence
-- prebuilt Windows installer / binary packaging
 
 ## DeepSeek Harness ecosystem contract
 

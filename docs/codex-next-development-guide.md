@@ -117,7 +117,7 @@ flowchart LR
 | R05 | 宿主前置任务 H05 已识别 | [rc.2 API 审计](evidence/r05-host-api-audit.md)证明没有可恢复、可竞答的 pending interaction API；[H05](host-tasks/r05-durable-session-interactions.md)定义必须先发布的宿主能力 | 插件 IPC、Lens 决策 UI、真实 approval/ask-user 和自动批准能力 |
 | R06 | 自动实现与聚焦验证完成 | [R06 实现证据](evidence/r06-session-history-implementation.md)记录 durable history 分页、Native 命令、Lens 选择/恢复、旧订阅释放和跨语言验证 | 受支持的完整 Harness 导航 API、真实 profile、可见窗口和真实进程重启证据 |
 | R07 | 指定源码 Harness 的 L1 已通过，真实层待执行 | `R07_DSH_REPOSITORY` 可固定本地 Harness checkout；`test:session:e2e` 已在 `b150a551` 完成隔离 profile、插件加载、确定性回答和 durable 文件验证；`test:lens:e2e` 支持真实 Tauri/浏览器驱动报告 | L2 完整真实模型会话、R05 宿主交互、浏览器真实选区、可见窗口、进程重启和产品截图 |
-| R08 | R08.1～R08.4 自动检查通过待实测；R08.5 候选聚合器已实现但当前 NOT READY | `docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md`、`docs/evidence/r08-installer.md` 与 `docs/evidence/r08-release.md` 记录上下文预览、类型化 UI、a11y/visual 检查、Tauri 截图、本地性能/人因研究基础设施、安装诊断探针和候选校验结果 | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、真人效果、安装/升级/卸载和发布候选 |
+| R08 | R08.1～R08.3 自动检查通过待实测；R08.4 已生成 NSIS 并通过当前用户隔离安装/启动/覆盖安装/卸载；R08.5 校验器已补齐真实工件检查，候选仍 NOT READY | `docs/evidence/r08-context-expansion.md`、`docs/evidence/r08-ui.md`、`docs/evidence/r08-performance-human-factors.md`、`docs/evidence/r08-installer.md` 与 `docs/evidence/r08-release.md` | 真实 page/document Provider、宿主交互、真实模型/窗口、Narrator/DPI/多屏、真人效果、第二干净账户或 VM、跨版本升级和最终候选 |
 
 R04 将必需材料字段引入 `session.submit`，因此 IPC 已由 V2 升为 V3，默认 pipe 名保持版本隔离。当前 README、协议、会话集成和工具说明已经描述 V3；历史 R03 决策与证据保留其发生时的 V2 事实。R04 的持久绑定规则见[决策记录](decisions/2026-09-08-session-bound-selection-material.md)，实际命令和边界见[R04 证据](evidence/r04-session-bound-selection-tools.md)。
 

@@ -543,7 +543,7 @@ pnpm check:task5
 
 **完成标准。** 干净环境能完成浏览器选区主路径；缺少依赖时得到准确诊断；覆盖安装、上一候选升级和卸载；保留/清理的数据与 UI 说明一致；重复安装不会创建冲突注册或僵尸进程。
 
-**2026-09-09 实现切片。** 已交付版本一致性、Tauri 打包元数据、工件发现、SHA256 工具和递归脱敏诊断探针。当前 `bundle.active=false`，因此 `test:installer` 明确返回 NOT RUN/退出码 2；真实安装、升级、卸载和干净用户环境 smoke 仍需生成安装候选后执行。证据见 [R08.4 installer and diagnostic evidence](evidence/r08-installer.md)。
+**2026-09-14 实现状态。** 已交付版本一致性、NSIS/current-user 打包约束、工件发现与 SHA-256、递归脱敏诊断和 `test:installer:smoke`。提交 `68eafdf` 的候选在当前 Windows 用户的唯一临时目录完成安装、启动、同版本覆盖安装、卸载和残留检查。第二个干净账户/VM、跨版本升级、缺失依赖恢复、已安装完整浏览器路径和 Harness session 保留仍需外部验收。证据见 [R08.4 installer and diagnostic evidence](evidence/r08-installer.md)。
 
 **给 Codex 的提示词。**
 
