@@ -48,8 +48,25 @@ jobs:
       - run: pnpm check:task5
       - run: cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
 
-      # EC-08 REAL: run the plugin against the actual DeepSeek Harness CLI source,
-      # a real Protocol V4 named pipe, a real Harness Session, and a local
+  ec08-real:
+    name: EC-08 real boundary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+      - name: Install plugin dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build plugin package
+        run: pnpm build
+
+      # Run the plugin against the actual DeepSeek Harness CLI source, a real
+      # Protocol V4 named pipe, a real Harness Session, and a deterministic local
       # OpenAI-compatible model endpoint. No external model credential is used.
       - name: Checkout DeepSeek Harness
         uses: actions/checkout@v4
