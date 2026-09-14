@@ -34,7 +34,18 @@ pub async fn bridge_submit_prompt(
 
     #[cfg(windows)]
     {
-        return submit_windows(session_id, content, request_id, material).await;
+        let endpoint = env::var("DSH_SELECTION_COMPANION_PIPE")
+            .unwrap_or_else(|_| DEFAULT_PIPE_NAME.to_owned());
+        let timeout = submit_timeout()?;
+        return submit_windows_to(
+            &endpoint,
+            timeout,
+            session_id,
+            content,
+            request_id,
+            material,
+        )
+        .await;
     }
 
     #[cfg(not(windows))]
@@ -45,7 +56,9 @@ pub async fn bridge_submit_prompt(
 }
 
 #[cfg(windows)]
-async fn submit_windows(
+async fn submit_windows_to(
+    endpoint: &str,
+    timeout: Duration,
     session_id: Option<String>,
     content: String,
     logical_request_id: String,
@@ -54,14 +67,10 @@ async fn submit_windows(
     use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::time::sleep;
 
-    let endpoint = env::var("DSH_SELECTION_COMPANION_PIPE")
-        .unwrap_or_else(|_| DEFAULT_PIPE_NAME.to_owned());
-    let timeout = submit_timeout()?;
-
     let mut last_error = None;
     let mut client = None;
     for attempt in 0..20 {
-        match ClientOptions::new().open(&endpoint) {
+        match ClientOptions::new().open(endpoint) {
             Ok(opened) => {
                 client = Some(opened);
                 break;
@@ -272,10 +281,9 @@ fn transport_id(prefix: &str) -> String {
     format!("native-{prefix}-{}", uuid::Uuid::new_v4())
 }
 
-fn submit_timeout() -> Result<Duration, String> {
-    let millis = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS")
-        .ok()
-        .map(|value| value.parse::<u64>())
+fn timeout_from_value(value: Option<&str>) -> Result<Duration, String> {
+    let millis = value
+        .map(str::parse::<u64>)
         .transpose()
         .map_err(|_| "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be a positive integer".to_owned())?
         .unwrap_or(DEFAULT_SUBMIT_TIMEOUT_MS);
@@ -285,20 +293,22 @@ fn submit_timeout() -> Result<Duration, String> {
     Ok(Duration::from_millis(millis))
 }
 
+fn submit_timeout() -> Result<Duration, String> {
+    let value = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS").ok();
+    timeout_from_value(value.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn timeout_contract_matches_the_main_bridge() {
-        let previous = env::var("DSH_SELECTION_BRIDGE_TIMEOUT_MS").ok();
-        env::set_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS", "0");
-        assert!(submit_timeout().is_err());
-        if let Some(previous) = previous {
-            env::set_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS", previous);
-        } else {
-            env::remove_var("DSH_SELECTION_BRIDGE_TIMEOUT_MS");
-        }
+        assert_eq!(timeout_from_value(None).unwrap(), Duration::from_millis(5_000));
+        assert_eq!(timeout_from_value(Some("25")).unwrap(), Duration::from_millis(25));
+        assert!(timeout_from_value(Some("0")).is_err());
+        assert!(timeout_from_value(Some("60001")).is_err());
+        assert!(timeout_from_value(Some("not-a-number")).is_err());
     }
 
     #[cfg(windows)]
@@ -334,9 +344,6 @@ mod tests {
             r"\\.\pipe\dsh-selection-companion-ec05-{}",
             uuid::Uuid::new_v4()
         );
-        let previous_endpoint = env::var("DSH_SELECTION_COMPANION_PIPE").ok();
-        env::set_var("DSH_SELECTION_COMPANION_PIPE", &endpoint);
-
         let mut server = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&endpoint)
@@ -380,7 +387,7 @@ mod tests {
             submit
         });
 
-        let material = serde_json::json!({
+        let material_value = serde_json::json!({
             "snapshotId": "snapshot-ec05",
             "revision": 5,
             "capturedAt": 5_000,
@@ -395,26 +402,23 @@ mod tests {
                 "after": "EC05_AUTHORIZED_AFTER"
             }
         });
+        let material = normalize_submission_material(material_value.clone()).unwrap();
 
-        let result = bridge_submit_prompt(
+        let result = submit_windows_to(
+            &endpoint,
+            Duration::from_secs(2),
             Some("session-ec05".to_owned()),
             "fixed canonical prompt".to_owned(),
             "request-ec05".to_owned(),
-            material.clone(),
+            material,
         )
         .await
         .unwrap();
         let submitted = server_task.await.unwrap();
 
-        if let Some(previous) = previous_endpoint {
-            env::set_var("DSH_SELECTION_COMPANION_PIPE", previous);
-        } else {
-            env::remove_var("DSH_SELECTION_COMPANION_PIPE");
-        }
-
         assert_eq!(result.session_id, "session-ec05");
         assert_eq!(submitted.type_name, "session.submit");
-        assert_eq!(submitted.payload["material"], material);
+        assert_eq!(submitted.payload["material"], material_value);
         assert_eq!(submitted.payload["material"]["authorizedScope"], "local");
         assert_eq!(
             submitted.payload["material"]["context"]["before"],
