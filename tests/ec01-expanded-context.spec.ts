@@ -5,7 +5,7 @@ import {
   parseIpcMessage,
 } from '../src/index.js'
 
-function expandedSubmitMessage(protocol = IPC_PROTOCOL_VERSION) {
+function expandedSubmitMessage(protocol: number = IPC_PROTOCOL_VERSION) {
   return {
     protocol,
     id: 'ec01-expanded-submit',
