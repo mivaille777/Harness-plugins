@@ -26,6 +26,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test:ec07:model-boundary:unit
+      - run: pnpm test:ec08:session-model-boundary:unit
 
   windows-native:
     name: Windows native
