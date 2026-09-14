@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Chrome', 'Edge', 'Both')]
+    [ValidateSet('Chrome', 'Chromium', 'Edge', 'Both', 'All')]
     [string]$Browser = 'Both'
 )
 
@@ -12,11 +12,15 @@ function Remove-NativeHost([string]$RegistryPath) {
     }
 }
 
-if ($Browser -eq 'Chrome' -or $Browser -eq 'Both') {
+if ($Browser -eq 'Chrome' -or $Browser -eq 'Both' -or $Browser -eq 'All') {
     Remove-NativeHost "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$nativeHostName"
 }
-if ($Browser -eq 'Edge' -or $Browser -eq 'Both') {
+if ($Browser -eq 'Chromium' -or $Browser -eq 'All') {
+    Remove-NativeHost "HKCU:\Software\Chromium\NativeMessagingHosts\$nativeHostName"
+}
+if ($Browser -eq 'Edge' -or $Browser -eq 'Both' -or $Browser -eq 'All') {
     Remove-NativeHost "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$nativeHostName"
 }
 
 Write-Host "Native host registration removed: $nativeHostName"
+Write-Host "Browser: $Browser"
