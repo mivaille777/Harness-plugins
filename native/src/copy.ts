@@ -52,6 +52,7 @@ export interface AppCopy {
   readonly contextAuthorizationSelection: string
   readonly contextAuthorizationExpanded: (scope: string) => string
   readonly contextAuthorize: (scope: string) => string
+  readonly requestMaterialPreview: string
   readonly askLabel: string
   readonly askPlaceholder: string
   readonly explain: string
@@ -101,7 +102,7 @@ const english: AppCopy = {
   materialAriaLabel: 'Fixed source material',
   fixedMaterial: revision => `Fixed material · revision ${revision}`,
   contextLabel: 'Captured context',
-  contextDescription: 'Only context already captured with this selection is shown. The current request sends the fixed selection; this preview is not added automatically.',
+  contextDescription: 'Only context already captured with this selection is shown. Loading context is a preview only; expanded text is used only after explicit authorization.',
   contextNone: 'No surrounding context was captured for this selection.',
   contextBefore: 'Before selection',
   contextAfter: 'After selection',
@@ -120,6 +121,7 @@ const english: AppCopy = {
   contextAuthorizationSelection: 'This request is authorized for: Selection only',
   contextAuthorizationExpanded: scope => `This request is authorized for: Selection + ${scope} context`,
   contextAuthorize: scope => `Use ${scope} context for this request`,
+  requestMaterialPreview: 'What Harness will receive',
   askLabel: 'Ask about this selection',
   askPlaceholder: 'Ask a follow-up question',
   explain: 'Explain',
@@ -181,7 +183,7 @@ const simplifiedChinese: AppCopy = {
   materialAriaLabel: '固定来源材料',
   fixedMaterial: revision => `已固定材料 · 修订 ${revision}`,
   contextLabel: '已捕获上下文',
-  contextDescription: '这里只展示随选区一起捕获的上下文。当前请求只发送固定选区；这些预览内容不会自动加入请求。',
+  contextDescription: '这里只展示随选区一起捕获的上下文。加载上下文仅用于预览；只有经过明确授权后，扩展文本才可用于请求。',
   contextNone: '该选区没有捕获到周边上下文。',
   contextBefore: '选区之前',
   contextAfter: '选区之后',
@@ -200,6 +202,7 @@ const simplifiedChinese: AppCopy = {
   contextAuthorizationSelection: '本次请求已授权：仅当前选区',
   contextAuthorizationExpanded: scope => `本次请求已授权：当前选区 + ${scope} 上下文`,
   contextAuthorize: scope => `将 ${scope} 上下文用于本次请求`,
+  requestMaterialPreview: 'Harness 将收到的材料',
   askLabel: '针对当前选区提问',
   askPlaceholder: '输入追问',
   explain: '解释',
