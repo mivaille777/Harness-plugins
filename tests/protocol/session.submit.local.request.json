@@ -1,0 +1,42 @@
+{
+  "protocol": 4,
+  "id": "submit-local-1",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-expanded",
+    "requestId": "request-local-1",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain using the explicitly authorized local context."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-expanded",
+      "revision": 12,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Fixed selected material",
+        "language": "en"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome",
+        "windowTitle": "Expanded context fixture"
+      },
+      "document": {
+        "title": "Expanded context fixture",
+        "url": "https://example.test/ec02"
+      },
+      "authorizedScope": "local",
+      "actualScope": "local",
+      "completeness": "partial",
+      "truncated": true,
+      "context": {
+        "before": "Local context before the selection.",
+        "after": "Local context after the selection."
+      }
+    }
+  }
+}
