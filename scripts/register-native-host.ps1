@@ -5,7 +5,7 @@ param(
 
     [string]$BinaryPath = '.\native\src-tauri\target\debug\dsh-selection-companion-host.exe',
 
-    [ValidateSet('Chrome', 'Edge', 'Both')]
+    [ValidateSet('Chrome', 'Chromium', 'Edge', 'Both', 'All')]
     [string]$Browser = 'Both'
 )
 
@@ -35,10 +35,13 @@ function Register-NativeHost([string]$RegistryPath) {
     Set-Item -Path $RegistryPath -Value $manifestPath
 }
 
-if ($Browser -eq 'Chrome' -or $Browser -eq 'Both') {
+if ($Browser -eq 'Chrome' -or $Browser -eq 'Both' -or $Browser -eq 'All') {
     Register-NativeHost "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$nativeHostName"
 }
-if ($Browser -eq 'Edge' -or $Browser -eq 'Both') {
+if ($Browser -eq 'Chromium' -or $Browser -eq 'All') {
+    Register-NativeHost "HKCU:\Software\Chromium\NativeMessagingHosts\$nativeHostName"
+}
+if ($Browser -eq 'Edge' -or $Browser -eq 'Both' -or $Browser -eq 'All') {
     Register-NativeHost "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$nativeHostName"
 }
 
@@ -46,3 +49,4 @@ Write-Host "Native host registered: $nativeHostName"
 Write-Host "Manifest: $manifestPath"
 Write-Host "Binary:   $resolvedBinary"
 Write-Host "Origin:   chrome-extension://$ExtensionId/"
+Write-Host "Browser:  $Browser"
