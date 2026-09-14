@@ -47,3 +47,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:task5
       - run: cargo fmt --manifest-path native/src-tauri/Cargo.toml -- --check
+
+      # EC-08 REAL: run the plugin against the actual DeepSeek Harness CLI source,
+      # a real Protocol V4 named pipe, a real Harness Session, and a local
+      # OpenAI-compatible model endpoint. No external model credential is used.
+      - name: Checkout DeepSeek Harness
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: master
+          path: .ec08/deepseek-harness
+          fetch-depth: 1
+      - name: Install DeepSeek Harness dependencies
+        shell: pwsh
+        working-directory: .ec08/deepseek-harness
+        run: pnpm install --frozen-lockfile
+      - name: Run EC-08 real Session-to-model boundary
+        shell: pwsh
+        env:
+          R07_DSH_REPOSITORY: ${{ github.workspace }}\.ec08\deepseek-harness
+          EC08_ARTIFACT_ROOT: ${{ runner.temp }}\ec08-artifacts
+        run: pnpm test:ec08:session-model-boundary
+      - name: Upload EC-08 privacy-safe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec08-session-model-boundary-${{ github.run_id }}
+          path: ${{ runner.temp }}\ec08-artifacts\ec08-session-model-boundary.json
+          if-no-files-found: warn
+          retention-days: 14
