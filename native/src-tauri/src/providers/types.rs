@@ -55,8 +55,12 @@ impl ProviderCandidate {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderAttempt {
     Candidate(ProviderCandidate),
-    NoSelection { provider_id: &'static str },
-    NotApplicable { provider_id: &'static str },
+    NoSelection {
+        provider_id: &'static str,
+    },
+    NotApplicable {
+        provider_id: &'static str,
+    },
     Error {
         provider_id: &'static str,
         message: String,

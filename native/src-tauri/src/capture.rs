@@ -487,7 +487,9 @@ impl CaptureRuntime {
                                 }
                                 Err(error) => record_error(
                                     &worker_state,
-                                    format!("provider arbitration fallback capture failed: {error}"),
+                                    format!(
+                                        "provider arbitration fallback capture failed: {error}"
+                                    ),
                                 ),
                             }
                         }

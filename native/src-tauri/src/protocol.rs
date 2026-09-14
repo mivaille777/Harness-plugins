@@ -860,13 +860,16 @@ impl SelectionMaterial {
             captured_at: snapshot.captured_at,
             selection: snapshot.selection.clone(),
             source: snapshot.source.clone(),
-            document: snapshot.document.as_ref().map(|document| SelectionDocument {
-                title: document.title.clone(),
-                url: document.url.clone(),
-                file_path: None,
-                section: document.section.clone(),
-                frame_url: document.frame_url.clone(),
-            }),
+            document: snapshot
+                .document
+                .as_ref()
+                .map(|document| SelectionDocument {
+                    title: document.title.clone(),
+                    url: document.url.clone(),
+                    file_path: None,
+                    section: document.section.clone(),
+                    frame_url: document.frame_url.clone(),
+                }),
             authorized_scope: SelectionMaterialScope::Selection,
             actual_scope: SelectionMaterialScope::Selection,
             completeness: SelectionMaterialCompleteness::Complete,
@@ -1310,7 +1313,10 @@ mod tests {
             id: "snapshot-file".into(),
             revision: 1,
             captured_at: 1,
-            selection: SelectionValue { text: "selected".into(), language: None },
+            selection: SelectionValue {
+                text: "selected".into(),
+                language: None,
+            },
             source: SelectionSource {
                 kind: SelectionSourceKind::Browser,
                 app: Some("Chrome".into()),
@@ -1342,7 +1348,10 @@ mod tests {
             confidence: 1.0,
         };
         let material = SelectionMaterial::from_snapshot(&snapshot);
-        assert_eq!(material.document.and_then(|document| document.file_path), None);
+        assert_eq!(
+            material.document.and_then(|document| document.file_path),
+            None
+        );
     }
 
     #[test]

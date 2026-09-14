@@ -4,7 +4,12 @@ use dsh_selection_companion_native::{
 };
 use serde_json::{json, Value};
 
-fn material(scope: &str, completeness: &str, truncated: Option<bool>, context: Option<Value>) -> SelectionMaterial {
+fn material(
+    scope: &str,
+    completeness: &str,
+    truncated: Option<bool>,
+    context: Option<Value>,
+) -> SelectionMaterial {
     let mut value = json!({
         "snapshotId": "snapshot-ec02-rust",
         "revision": 8,
@@ -56,7 +61,9 @@ fn accepts_all_canonical_material_scopes() {
     ];
 
     for fixture in fixtures {
-        fixture.validate().expect("canonical V4 material must validate");
+        fixture
+            .validate()
+            .expect("canonical V4 material must validate");
     }
 }
 
@@ -76,7 +83,9 @@ fn allows_actual_scope_to_be_narrower_than_authorization() {
     }))
     .unwrap();
 
-    material.validate().expect("bounded fallback must remain within authorization");
+    material
+        .validate()
+        .expect("bounded fallback must remain within authorization");
 }
 
 #[test]

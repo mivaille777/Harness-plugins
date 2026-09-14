@@ -48,7 +48,10 @@ impl ProviderRegistry {
     }
 
     pub fn ids(&self) -> Vec<&'static str> {
-        self.providers.iter().map(|provider| provider.id()).collect()
+        self.providers
+            .iter()
+            .map(|provider| provider.id())
+            .collect()
     }
 
     /// Run the complete provider path for one capture trigger: collect provider
@@ -296,7 +299,10 @@ mod tests {
         assert!(matches!(attempts[2], ProviderAttempt::NotApplicable { .. }));
         assert!(matches!(attempts[3], ProviderAttempt::Error { .. }));
         assert_eq!(
-            attempts.iter().map(ProviderAttempt::provider_id).collect::<Vec<_>>(),
+            attempts
+                .iter()
+                .map(ProviderAttempt::provider_id)
+                .collect::<Vec<_>>(),
             vec!["dom", "uia", "word", "broken"]
         );
     }
@@ -412,7 +418,9 @@ mod tests {
 
         let result = registry.capture(CaptureTrigger::FallbackPoll).unwrap();
 
-        assert!(matches!(result, ProviderCapture::Captured(snapshot) if snapshot.selection.text == "Selection"));
+        assert!(
+            matches!(result, ProviderCapture::Captured(snapshot) if snapshot.selection.text == "Selection")
+        );
     }
 
     #[test]

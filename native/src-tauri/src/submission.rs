@@ -38,12 +38,7 @@ pub async fn bridge_submit_authorized_prompt(
             .unwrap_or_else(|_| DEFAULT_PIPE_NAME.to_owned());
         let timeout = submit_timeout()?;
         return submit_windows_to(
-            &endpoint,
-            timeout,
-            session_id,
-            content,
-            request_id,
-            material,
+            &endpoint, timeout, session_id, content, request_id, material,
         )
         .await;
     }
@@ -109,7 +104,10 @@ async fn submit_windows_to(
     let hello_response = exchange(&mut client, &hello, timeout).await?;
     ensure_response_id(&hello_response, &hello_id)?;
     if hello_response.type_name == "error.response" {
-        return Err(format!("Harness rejected bridge hello: {}", hello_response.payload));
+        return Err(format!(
+            "Harness rejected bridge hello: {}",
+            hello_response.payload
+        ));
     }
     if hello_response.type_name != "bridge.hello.result" {
         return Err(format!(
@@ -154,7 +152,10 @@ async fn submit_windows_to(
     ensure_response_id(&response, &transport_id)
         .map_err(|error| submission_unknown(&session_id, &logical_request_id, error))?;
     if response.type_name == "error.response" {
-        return Err(format!("Harness rejected session submission: {}", response.payload));
+        return Err(format!(
+            "Harness rejected session submission: {}",
+            response.payload
+        ));
     }
     if response.type_name != "session.submitted" {
         return Err(submission_unknown(
@@ -163,8 +164,8 @@ async fn submit_windows_to(
             format!("unexpected session.submit response: {}", response.type_name),
         ));
     }
-    let submitted: SessionSubmittedPayload = serde_json::from_value(response.payload)
-        .map_err(|error| {
+    let submitted: SessionSubmittedPayload =
+        serde_json::from_value(response.payload).map_err(|error| {
             submission_unknown(
                 &session_id,
                 &logical_request_id,
@@ -206,10 +207,12 @@ async fn create_session(
     let response = exchange(client, &create, timeout)
         .await
         .map_err(|error| format!("CREATE_UNKNOWN|{id}|{error}"))?;
-    ensure_response_id(&response, &id)
-        .map_err(|error| format!("CREATE_UNKNOWN|{id}|{error}"))?;
+    ensure_response_id(&response, &id).map_err(|error| format!("CREATE_UNKNOWN|{id}|{error}"))?;
     if response.type_name == "error.response" {
-        return Err(format!("Harness rejected session creation: {}", response.payload));
+        return Err(format!(
+            "Harness rejected session creation: {}",
+            response.payload
+        ));
     }
     if response.type_name != "session.created" {
         return Err(format!(
@@ -220,7 +223,9 @@ async fn create_session(
     let created: SessionCreatedPayload = serde_json::from_value(response.payload)
         .map_err(|error| format!("CREATE_UNKNOWN|{id}|invalid session.created payload: {error}"))?;
     if created.session_id.trim().is_empty() {
-        return Err(format!("CREATE_UNKNOWN|{id}|session.created response has no sessionId"));
+        return Err(format!(
+            "CREATE_UNKNOWN|{id}|session.created response has no sessionId"
+        ));
     }
     Ok(created.session_id)
 }
@@ -236,11 +241,17 @@ async fn exchange(
 
     let frame = encode_frame(message).map_err(|error| error.to_string())?;
     timeout(request_timeout, async {
-        client.write_all(&frame).await.map_err(|error| error.to_string())?;
+        client
+            .write_all(&frame)
+            .await
+            .map_err(|error| error.to_string())?;
         client.flush().await.map_err(|error| error.to_string())?;
 
         let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
-        client.read_exact(&mut header).await.map_err(|error| error.to_string())?;
+        client
+            .read_exact(&mut header)
+            .await
+            .map_err(|error| error.to_string())?;
         let declared = u32::from_be_bytes(header) as usize;
         if declared > IPC_MAX_FRAME_BYTES {
             return Err(format!(
@@ -248,14 +259,22 @@ async fn exchange(
             ));
         }
         let mut payload = vec![0_u8; declared];
-        client.read_exact(&mut payload).await.map_err(|error| error.to_string())?;
+        client
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| error.to_string())?;
         let mut full = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
         full.extend_from_slice(&header);
         full.extend_from_slice(&payload);
         decode_frame(&full).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|_| format!("bridge request timed out after {} ms", request_timeout.as_millis()))?
+    .map_err(|_| {
+        format!(
+            "bridge request timed out after {} ms",
+            request_timeout.as_millis()
+        )
+    })?
 }
 
 fn ensure_response_id(response: &IpcMessage, expected: &str) -> Result<(), String> {
@@ -269,11 +288,7 @@ fn ensure_response_id(response: &IpcMessage, expected: &str) -> Result<(), Strin
     }
 }
 
-fn submission_unknown(
-    session_id: &str,
-    request_id: &str,
-    error: impl std::fmt::Display,
-) -> String {
+fn submission_unknown(session_id: &str, request_id: &str, error: impl std::fmt::Display) -> String {
     format!("SUBMISSION_UNKNOWN|{session_id}|{request_id}|{error}")
 }
 
@@ -288,7 +303,9 @@ fn timeout_from_value(value: Option<&str>) -> Result<Duration, String> {
         .map_err(|_| "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be a positive integer".to_owned())?
         .unwrap_or(DEFAULT_SUBMIT_TIMEOUT_MS);
     if millis == 0 || millis > 60_000 {
-        return Err("DSH_SELECTION_BRIDGE_TIMEOUT_MS must be an integer from 1 to 60000".to_owned());
+        return Err(
+            "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be an integer from 1 to 60000".to_owned(),
+        );
     }
     Ok(Duration::from_millis(millis))
 }
@@ -304,8 +321,14 @@ mod tests {
 
     #[test]
     fn timeout_contract_matches_the_main_bridge() {
-        assert_eq!(timeout_from_value(None).unwrap(), Duration::from_millis(5_000));
-        assert_eq!(timeout_from_value(Some("25")).unwrap(), Duration::from_millis(25));
+        assert_eq!(
+            timeout_from_value(None).unwrap(),
+            Duration::from_millis(5_000)
+        );
+        assert_eq!(
+            timeout_from_value(Some("25")).unwrap(),
+            Duration::from_millis(25)
+        );
         assert!(timeout_from_value(Some("0")).is_err());
         assert!(timeout_from_value(Some("60001")).is_err());
         assert!(timeout_from_value(Some("not-a-number")).is_err());

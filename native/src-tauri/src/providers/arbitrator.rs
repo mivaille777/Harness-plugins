@@ -63,7 +63,10 @@ pub fn arbitrate_with_policy(
     let mut eligible = Vec::new();
 
     for candidate in candidates {
-        if candidate.snapshot.captured_at.saturating_add(policy.max_candidate_age_ms)
+        if candidate
+            .snapshot
+            .captured_at
+            .saturating_add(policy.max_candidate_age_ms)
             < context.captured_at
         {
             rejected.push(RejectedCandidate {
@@ -73,7 +76,9 @@ pub fn arbitrate_with_policy(
             continue;
         }
         if candidate.snapshot.captured_at
-            > context.captured_at.saturating_add(policy.max_future_skew_ms)
+            > context
+                .captured_at
+                .saturating_add(policy.max_future_skew_ms)
         {
             rejected.push(RejectedCandidate {
                 provider_id: candidate.provider_id,
@@ -151,7 +156,11 @@ fn normalized_text(value: &str) -> String {
 }
 
 fn points(condition: bool, value: i32) -> i32 {
-    if condition { value } else { 0 }
+    if condition {
+        value
+    } else {
+        0
+    }
 }
 
 fn quality_score(context: &CaptureContext, candidate: &ProviderCandidate) -> i32 {
@@ -176,10 +185,31 @@ fn quality_score(context: &CaptureContext, candidate: &ProviderCandidate) -> i32
     };
 
     if let Some(document) = &snapshot.document {
-        score += points(document.title.as_ref().is_some_and(|value| !value.is_empty()), 8);
-        score += points(document.url.as_ref().is_some_and(|value| !value.is_empty()), 12);
-        score += points(document.section.as_ref().is_some_and(|value| !value.is_empty()), 10);
-        score += points(document.frame_url.as_ref().is_some_and(|value| !value.is_empty()), 5);
+        score += points(
+            document
+                .title
+                .as_ref()
+                .is_some_and(|value| !value.is_empty()),
+            8,
+        );
+        score += points(
+            document.url.as_ref().is_some_and(|value| !value.is_empty()),
+            12,
+        );
+        score += points(
+            document
+                .section
+                .as_ref()
+                .is_some_and(|value| !value.is_empty()),
+            10,
+        );
+        score += points(
+            document
+                .frame_url
+                .as_ref()
+                .is_some_and(|value| !value.is_empty()),
+            5,
+        );
     }
     score += points(snapshot.capabilities.local_context, 8);
     score += points(snapshot.capabilities.section_context, 12);
@@ -324,7 +354,10 @@ mod tests {
         );
 
         match result {
-            ArbitrationResult::Selected { candidate, rejected } => {
+            ArbitrationResult::Selected {
+                candidate,
+                rejected,
+            } => {
                 assert_eq!(candidate.provider_id, "browser-accessibility");
                 assert_eq!(
                     rejected,
@@ -424,7 +457,10 @@ mod tests {
         );
 
         match result {
-            ArbitrationResult::Selected { candidate, rejected } => {
+            ArbitrationResult::Selected {
+                candidate,
+                rejected,
+            } => {
                 assert_eq!(candidate.provider_id, "generic-uia");
                 assert!(rejected.contains(&RejectedCandidate {
                     provider_id: "browser-dom",
