@@ -127,7 +127,7 @@ async function registerNativeHost(extensionId, binaryPath, env) {
     '-File', join(repoRoot, 'scripts', 'register-native-host.ps1'),
     '-ExtensionId', extensionId,
     '-BinaryPath', binaryPath,
-    '-Browser', 'Chrome',
+    '-Browser', 'Chromium',
   ], { cwd: repoRoot, env, timeoutMs: 20_000 })
 }
 
@@ -136,7 +136,7 @@ async function unregisterNativeHost(env) {
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-File', join(repoRoot, 'scripts', 'unregister-native-host.ps1'),
-    '-Browser', 'Chrome',
+    '-Browser', 'Chromium',
   ], { cwd: repoRoot, env, timeoutMs: 20_000 })
 }
 
