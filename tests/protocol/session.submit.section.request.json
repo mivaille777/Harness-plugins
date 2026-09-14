@@ -1,0 +1,42 @@
+{
+  "protocol": 4,
+  "id": "submit-section-1",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-expanded",
+    "requestId": "request-section-1",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "Explain using the explicitly authorized section context."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-expanded",
+      "revision": 12,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Fixed selected material",
+        "language": "en"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome",
+        "windowTitle": "Expanded context fixture"
+      },
+      "document": {
+        "title": "Expanded context fixture",
+        "url": "https://example.test/ec02",
+        "section": "Section 3"
+      },
+      "authorizedScope": "section",
+      "actualScope": "section",
+      "completeness": "complete",
+      "truncated": false,
+      "context": {
+        "sectionText": "Complete authorized section context."
+      }
+    }
+  }
+}
