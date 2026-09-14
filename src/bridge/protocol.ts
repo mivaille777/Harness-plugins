@@ -2,7 +2,7 @@ import { z, ZodError } from 'zod'
 import { normalizeSelectionSnapshot, type SelectionSnapshot } from '../context/snapshot.js'
 import { normalizeSelectionMaterial, selectionMaterialSchema, type SelectionMaterial } from '../session/material.js'
 
-export const IPC_PROTOCOL_VERSION = 3 as const
+export const IPC_PROTOCOL_VERSION = 4 as const
 export const IPC_MAX_FRAME_BYTES = 1024 * 1024
 export const MAX_HISTORY_PAGE_ENTRIES = 32
 
