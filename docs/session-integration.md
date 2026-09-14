@@ -7,9 +7,9 @@ The plugin declares these as peers and fails to load when the required Harness s
 It owns neither an LLM client nor a second conversation history.
 The exact prompt text and the fixed submitted material can therefore be reconstructed from the Harness `user/message` event and its source without reading current Native capture state.
 
-The native Lens sends only explicit user actions.
-It creates a Harness session on the first action and reuses its returned id for later prompts.
-It projects the exact displayed `SelectionSnapshot` into required Protocol V3 material on every submit and retains that snapshot for an unknown-submission retry. Selected page content is labelled as untrusted reference data in the user prompt; it cannot change harness permissions or instructions.
+Protocol V4 defines the current session-material contract. The canonical material can represent `selection`, `local`, `section`, or `page` authorization, records both `authorizedScope` and `actualScope`, and rejects any actual scope broader than the user's authorization. Scope-specific context fields are strict: local uses only `before`/`after`, section uses only `sectionText`, and page uses only `pageText`. The selection-only projection remains the default and carries no expanded context.
+
+The native Lens still sends only explicit user actions. In the current EC-02 implementation it projects the exact displayed `SelectionSnapshot` into the default selection-only V4 material on submit and retains that snapshot for an unknown-submission retry. `Load context` remains a preview and is not silently added to a request. Explicit expanded-context authorization and creation of expanded submission material are follow-up EC-03 through EC-05 work. Selected source content is labelled as untrusted reference data in the user prompt; it cannot change Harness permissions or instructions.
 
 `queue` maps to Harness `agent.followup`; `steer` maps to `agent.steer` and is available only to a caller that explicitly selects that delivery mode.
 The Lens generates a UUID logical request id before its first send and reuses it only for recovery of that exact prompt. Rust generates separate UUIDs for transport requests. A successful submit returns the logical request id, the Harness message id, the accepted delivery operation, and whether durable history proved that the request already existed.
@@ -18,27 +18,28 @@ An accepted in-memory receipt remains for five minutes after acceptance; pending
 `session.cancel` calls the host's documented user cancellation operation.
 
 Each submitted message uses the merge-extensible durable source `{ kind: 'selection-companion', requestId, deliveryMode, contentDigest, material }`.
-The V3 material is a strict, immutable projection containing the selected text and source needed to identify it. Its authorized and actual scopes are both `selection`, its completeness is `complete`, and it deliberately excludes local, section, page, geometry, capability, provider, and confidence fields.
-The Agent-scoped `selection_current` and `selection_read_context` tools resolve this durable material by their tool-call ID and turn. They never read a global current selection or reconstruct a snapshot from prompt text. `selection_read_context` accepts only `scope: 'selection'`; it cannot expand source material.
+The V4 material is strict and immutable. Local filesystem paths are removed from Native's session-material projection and stripped again at the TypeScript durable-material boundary. The complete normalized material participates in request fingerprinting, so changing scope, context, completeness, or truncation changes the logical request content.
+The Agent-scoped `selection_current` and `selection_read_context` tools continue to resolve durable material by tool-call ID and turn. They never read a global current selection or reconstruct a snapshot from prompt text. EC-02 intentionally leaves `selection_read_context` restricted to `scope: 'selection'`; expanded durable reads are an EC-07 change and must use only already-persisted request material.
 The subscription projects a request id only after the persisted `turn/start` and that exact source message establish a turn association.
 It preserves every companion request observed in one turn. Events for a turn with one request carry both `requestId` and `requestIds`; shared steer-turn output carries `requestIds` without inventing one exclusive owner. It applies that association to chunks, assistant messages, tool events, and `turn/end`, then discards it.
 An event outside that durable association has no request id, so a Lens must ignore it for a selected request instead of assigning it to the most recent submission.
 On reconnect the service first registers and buffers live session events, reads the durable log to rebuild associations, then merges the snapshot and buffer by sequence before replaying events after the acknowledged cursor. It removes duplicates and reports a sequence gap rather than silently skipping output. Transient agent status does not advance the durable cursor.
 
-The bridge also implements session list, create, submit, subscribe, and cancel messages.
+The bridge implements session list, history, create, submit, subscribe, and cancel messages over Protocol V4. The default Windows endpoint is `\\.\pipe\dsh-selection-companion-v4` on both the Harness service and Native client, so V3 and V4 peers cannot silently share a transport endpoint. V3 frames are rejected before payload dispatch.
 Subscriptions project durable session events and status events with a session id and cursor.
 The native client opens one dedicated named-pipe connection for each subscribed session.
 Its request/reply connection is never read by an event task, so a reply cannot race an `agent.event` frame.
 The native transport confirms `session.subscribed` before reading events and emits each accepted event as Tauri's `session-agent-event` application event. Each subscription has a caller-generated id carried across JS, Rust, and Node. Replacing a session subscription aborts the earlier reader, stale generations are ignored by the Lens, completed readers remove their handles, and bridge disconnect increments a lifecycle epoch before aborting every active reader.
 The Lens registers its Tauri event listener before subscribing after an accepted request. It renders text only from an event carrying its active session id and either its exclusive request id or a shared-turn `requestIds` entry, keeps turn and step identity, excludes reasoning and tool-argument deltas, and calibrates each step from its complete assistant message. Only the correlated `turn/end` event determines request completion or cancellation. Terminal projections accept later durable cursors without returning to streaming.
-The stop action cancels the selected Harness session, enters `cancelling`, and waits for a host event. A late cancel reply or error cannot replace a turn that already completed. If the submit frame may have been accepted but its reply cannot be confirmed, Rust closes the request pipe and the Lens enters `submission-unknown`. Other submit actions remain locked; the recovery action sends the same session id, request id, and prompt so durable history can return the existing receipt.
-Completing the user flow still requires host-policy/approval presentation, session/history navigation, a real model runner, and an interactive Windows Lens test. The current source registers the tools through the host ToolRuntime, but this document does not claim a real supported profile/model tool invocation or visible native interaction has passed; see [session-tools.md](session-tools.md).
+The stop action cancels the selected Harness session, enters `cancelling`, and waits for a host event. A late cancel reply or error cannot replace a turn that already completed. If the submit frame may have been accepted but its reply cannot be confirmed, Rust closes the request pipe and the Lens enters `submission-unknown`. Other submit actions remain locked; the recovery action sends the same session id, request id, prompt, and frozen material so durable history can return the existing receipt.
+Completing the user flow still requires explicit expanded-context authorization, expanded Agent-tool reads, host-policy/approval presentation, and the real product-path evidence described by the development plan. The current source registers the tools through the host ToolRuntime, but this document does not claim a new real supported profile/model invocation or visible native interaction has passed for Protocol V4.
 
-R01 through R03 provide the answer projection, continuous event transport, and request lifecycle foundation. [The integration development plan](harness-integration-development-plan.md) defines R04 through R08 and their acceptance evidence. The current automated and Windows pipe evidence does not prove a real model, visible Tauri window, browser selection, host-policy approval, or restart workflow.
+R01 through R03 provide the answer projection, continuous event transport, and request lifecycle foundation. [The integration development plan](harness-integration-development-plan.md) defines later acceptance evidence. [Protocol V4 authorized context material](decisions/2026-09-14-protocol-v4-authorized-context-material.md) records the EC-02 wire and authorization invariants.
 
 Run the available checks from the repository root:
 
 ```powershell
+pnpm check:ec02
 pnpm test:session
 pnpm test:session:replay
 pnpm test:session:transport
@@ -53,6 +54,5 @@ cargo check --manifest-path native/src-tauri/Cargo.toml
 pnpm test:session:e2e
 ```
 
-The session, protocol, and WebView commands run without a model key. `test:bridge:integration` requires Windows and exercises the Node/Rust named-pipe path; it is still not a real model or visible Tauri interaction test.
-`test:session:e2e` currently contains only a message and an unconditional exit code 2. It neither checks credentials nor launches an isolated profile; R07 of the development plan replaces it with an actual runner.
-It is not a passing substitute for a real model path.
+`check:ec02` runs the focused TypeScript V4/material checks, Native TypeScript build, and Rust tests. The connected repository currently reports no CI status checks for the latest EC-02 commits, so this document records the command as the required verification path rather than claiming a run result.
+`test:bridge:integration` requires Windows and exercises the Node/Rust named-pipe path; it is not by itself a real model or visible Tauri interaction test.
