@@ -2,7 +2,10 @@ import { buildBrowserSnapshot } from './snapshot'
 import type { ContentSelectionMessage } from './types'
 
 const NATIVE_HOST = 'io.github.mivaille777.dsh_selection_companion'
-const PROTOCOL_VERSION = 1
+// Browser Native Messaging forwards this envelope directly to the same Rust
+// Protocol V4 parser used by named-pipe clients. Keep this in lockstep with
+// src/bridge/protocol.ts and native/src-tauri/src/protocol.rs.
+const PROTOCOL_VERSION = 4
 let nativePort: chrome.runtime.Port | null = null
 
 function ensureNativePort(): chrome.runtime.Port | null {
