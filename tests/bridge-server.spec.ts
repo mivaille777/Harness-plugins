@@ -6,6 +6,7 @@ import {
   BridgeMessageRouter,
   DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_BRIDGE_CLIENTS,
+  IPC_PROTOCOL_VERSION,
   SelectionCompanionBridgeService,
   SelectionContextService,
   parseIpcMessage,
@@ -39,7 +40,7 @@ function setup(now = 42_000) {
 
 function selectionUpdate() {
   return parseIpcMessage({
-    protocol: 3,
+    protocol: IPC_PROTOCOL_VERSION,
     id: 'selection-update-1',
     type: 'selection.update',
     payload: {
@@ -92,11 +93,31 @@ describe('BridgeMessageRouter', () => {
     new SelectionContextService(clientContext)
     expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
   })
-  it('negotiates Protocol V3 and advertises session capabilities', async () => {
+
+  it('negotiates Protocol V4 and advertises session capabilities', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'hello-1',
+      type: 'bridge.hello',
+      payload: {
+        client: { name: 'native-test', version: '0.1.0', platform: 'windows' },
+        supportedProtocols: [IPC_PROTOCOL_VERSION],
+      },
+    }))
+
+    expect(response.type).toBe('bridge.hello.result')
+    if (response.type !== 'bridge.hello.result') throw new Error('unexpected response')
+    expect(response.payload.protocol).toBe(IPC_PROTOCOL_VERSION)
+    expect(response.payload.server.version).toBe('0.1.0-test')
+    expect(response.payload.capabilities).toEqual(BRIDGE_CAPABILITIES)
+  })
+
+  it('rejects a hello that does not advertise Protocol V4', async () => {
+    const { router } = setup()
+    const response = await router.handle(parseIpcMessage({
+      protocol: IPC_PROTOCOL_VERSION,
+      id: 'hello-legacy-1',
       type: 'bridge.hello',
       payload: {
         client: { name: 'native-test', version: '0.1.0', platform: 'windows' },
@@ -104,17 +125,19 @@ describe('BridgeMessageRouter', () => {
       },
     }))
 
-    expect(response.type).toBe('bridge.hello.result')
-    if (response.type !== 'bridge.hello.result') throw new Error('unexpected response')
-    expect(response.payload.protocol).toBe(3)
-    expect(response.payload.server.version).toBe('0.1.0-test')
-    expect(response.payload.capabilities).toEqual(BRIDGE_CAPABILITIES)
+    expect(response).toMatchObject({
+      type: 'error.response',
+      payload: {
+        code: 'PROTOCOL_MISMATCH',
+        message: expect.stringContaining('protocol 4'),
+      },
+    })
   })
 
   it('returns a deterministic pong', async () => {
     const { router } = setup(99_999)
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'ping-1',
       type: 'bridge.ping',
       payload: { sentAt: 12_345 },
@@ -140,7 +163,7 @@ describe('BridgeMessageRouter', () => {
     const { router } = setup()
     await router.handle(selectionUpdate())
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'current-1',
       type: 'selection.current',
       payload: {},
@@ -161,7 +184,7 @@ describe('BridgeMessageRouter', () => {
       entries: [{ seq: 12, time: 10, role: 'user' as const, text: 'A durable question' }],
     }))
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'history-1',
       type: 'session.history',
       payload: { sessionId: 'session-history', afterCursor: 4, limit: 8 },
@@ -176,7 +199,7 @@ describe('BridgeMessageRouter', () => {
   it('returns the durable message receipt for a submitted request', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'submit-transport-1',
       type: 'session.submit',
       payload: {
@@ -188,7 +211,7 @@ describe('BridgeMessageRouter', () => {
       },
     }))
     expect(response).toEqual({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'submit-transport-1',
       type: 'session.submitted',
       payload: {
@@ -205,7 +228,7 @@ describe('BridgeMessageRouter', () => {
     const { router, submit } = setup()
 
     await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'submit-rust-null-material',
       type: 'session.submit',
       payload: {
@@ -245,14 +268,14 @@ describe('BridgeMessageRouter', () => {
     const { router } = setup()
     await router.handle(selectionUpdate())
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'selection-expand-1',
       type: 'selection.expand',
       payload: { snapshotId: 'selection-1', scope: 'local' },
     }))
 
     expect(response).toEqual({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'selection-expand-1',
       type: 'selection.expanded',
       payload: {
@@ -265,7 +288,7 @@ describe('BridgeMessageRouter', () => {
       },
     })
     const current = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'current-after-expand',
       type: 'selection.current',
       payload: {},
@@ -276,7 +299,7 @@ describe('BridgeMessageRouter', () => {
   it('fails closed when an expansion snapshot is no longer available', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'selection-expand-missing-1',
       type: 'selection.expand',
       payload: { snapshotId: 'snapshot-1', scope: 'page' },
