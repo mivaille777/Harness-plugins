@@ -1,5 +1,5 @@
 {
-  "protocol": 3,
+  "protocol": 4,
   "id": "expand-invalid-1",
   "type": "selection.expand",
   "payload": {
