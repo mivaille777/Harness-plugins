@@ -1,12 +1,12 @@
 # R08.5 release readiness evidence
 
-Date: 2026-09-09
+Date: 2026-09-14
 
 Repository and branch: `mivaille777/Harness-plugins`, `feat/t05-session-integration`
 
-Implementation commits: `c264c08ff41f4735553bb55da2015bc808bb7699` introduced the manifest validator; `68eafdf9bc70f2ce87efb1d54ebaf17b9fad8278` added required Windows smoke and artifact integrity checks.
+Implementation commits: `c264c08ff41f4735553bb55da2015bc808bb7699` introduced the manifest validator; `68eafdf9bc70f2ce87efb1d54ebaf17b9fad8278` added required Windows smoke and artifact integrity checks; `f39c557eb3c302f01f3edab76bc17ae6580b14be` validates Node and the complete Harness peer-dependency map against `package.json`.
 
-Readiness status: NOT READY. The candidate validator is implemented, but no release manifest can claim readiness while real model, host interaction, browser/window, human-factors, and installer evidence remains unavailable.
+Readiness status: NOT READY. The candidate validator and current-user installer smoke are implemented, but no release manifest can claim readiness while real model, host interaction, full browser/window, human-factors, and cross-environment installer evidence remains unavailable.
 
 ## Delivered foundation
 
@@ -23,6 +23,7 @@ The validator checks repository inventory when a local root is supplied, never t
 | Release helper tests | `node --test scripts/release.test.mjs` | PASS, 7 tests, including missing-check/artifact, real hash mismatch and package/Harness version drift cases |
 | Candidate check without manifest | `pnpm check:release` | NOT READY, exit code 2; generated a PENDING skeleton and listed all required checks/evidence as non-PASS |
 | Candidate artifact discovery | generated skeleton after `pnpm pack` and `pnpm native:build` | PASS for discovering one npm bundle and one NSIS installer with real byte sizes and SHA-256; readiness remains NOT READY until evidence statuses are supplied |
+| Optional DOM provider | `pnpm check:browser-extension:e2e` | PASS: typecheck, 3 files/7 unit tests, extension build, Native Host build, and one real Chromium DOM mouse-selection test |
 
 ## Acceptance boundary
 

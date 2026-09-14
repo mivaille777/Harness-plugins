@@ -22,6 +22,7 @@ The TypeScript service applies positive safe-integer limits of 6,000 Unicode cod
 | TypeScript protocol | `pnpm test:protocol` | PASS, 14 tests |
 | Bridge server | `pnpm test:bridge` | PASS, 10 tests |
 | Browser page capability | `pnpm --dir browser-extension test` | PASS, 3 files and 7 tests |
+| Optional DOM selection path | `pnpm check:browser-extension:e2e` | PASS, including a real Chromium `mouseup` selection capture |
 | Native bridge API | `pnpm --dir native test src/api/bridge.test.ts` | PASS, 6 tests |
 | Native UI behavior | `pnpm --dir native test` | PASS, 4 files and 39 tests |
 | Native build | `pnpm --dir native build` | PASS |
