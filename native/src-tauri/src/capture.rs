@@ -418,8 +418,17 @@ impl CaptureRuntime {
                                 continue;
                             }
                             next_fallback_poll = Instant::now() + FALLBACK_SELECTION_POLL;
+                            let started = Instant::now();
                             match provider.capture() {
                                 Ok(ProviderCapture::Captured(snapshot)) => {
+                                    let latency = started.elapsed().as_millis() as u64;
+                                    if is_paused(&worker_state) {
+                                        increment(&worker_state, |metrics| {
+                                            metrics.paused_drops += 1
+                                        });
+                                        continue;
+                                    }
+
                                     let signature = snapshot_signature(&snapshot);
                                     // A fallback read observes the same active selection repeatedly.
                                     // Keep one fingerprint until focus moves away or selection clears.
@@ -432,8 +441,13 @@ impl CaptureRuntime {
                                         continue;
                                     }
                                     last_polled_signature = Some(signature);
-                                    let started = Instant::now();
-                                    let latency = started.elapsed().as_millis() as u64;
+
+                                    if config.excludes(&snapshot) {
+                                        transition(&worker_state, CapturePhase::Excluded, None);
+                                        increment(&worker_state, |metrics| metrics.excluded += 1);
+                                        continue;
+                                    }
+
                                     let replaced = worker_latest.replace(snapshot);
                                     let _ = ready_tx.try_send(());
                                     last_capture = Some((signature, Instant::now()));
@@ -446,13 +460,29 @@ impl CaptureRuntime {
                                         }
                                     });
                                 }
-                                Ok(
-                                    ProviderCapture::NoSelection | ProviderCapture::NotApplicable,
-                                ) => {
-                                    // Clearing this allows an identical later selection to become a
-                                    // deliberate new capture after the user returns to the browser.
+                                Ok(ProviderCapture::NoSelection) => {
+                                    // Clearing these fingerprints allows an identical later selection
+                                    // to become a deliberate new capture after the user selects again.
                                     last_polled_signature = None;
                                     last_capture = None;
+                                    let mut state =
+                                        worker_state.lock().expect("capture state poisoned");
+                                    if state.phase != CapturePhase::NoSelection {
+                                        state.metrics.no_selection += 1;
+                                        state.transition(CapturePhase::NoSelection, None);
+                                    }
+                                }
+                                Ok(ProviderCapture::NotApplicable) => {
+                                    // Leaving the browser ends the lifetime of the currently polled
+                                    // fingerprint so returning to it can produce a fresh capture.
+                                    last_polled_signature = None;
+                                    last_capture = None;
+                                    let mut state =
+                                        worker_state.lock().expect("capture state poisoned");
+                                    if state.phase != CapturePhase::NotApplicable {
+                                        state.metrics.not_applicable += 1;
+                                        state.transition(CapturePhase::NotApplicable, None);
+                                    }
                                 }
                                 Err(error) => record_error(
                                     &worker_state,
