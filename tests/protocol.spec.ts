@@ -63,13 +63,13 @@ describe('IPC message validation', () => {
       id: 'hello-2',
       type: 'bridge.ping',
       payload: { sentAt: 1 },
-    })).toThrow('unsupported IPC protocol 1; expected 3')
+    })).toThrow('unsupported IPC protocol 1; expected 4')
   })
 
   it('rejects unknown message types', () => {
     try {
       parseIpcMessage({
-        protocol: 3,
+        protocol: IPC_PROTOCOL_VERSION,
         id: 'unknown-1',
         type: 'unknown.method',
         payload: {},
@@ -83,7 +83,7 @@ describe('IPC message validation', () => {
 
   it('rejects unknown selection fields at the IPC boundary', () => {
     expect(() => parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'selection-1',
       type: 'selection.update',
       payload: {
@@ -110,7 +110,7 @@ describe('IPC message validation', () => {
 
   it('bounds history pages before a request reaches the session service', () => {
     expect(() => parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'history-limit-1',
       type: 'session.history',
       payload: { sessionId: 'session-1', limit: 33 },
@@ -119,7 +119,7 @@ describe('IPC message validation', () => {
 
   it('normalizes Rust null spellings for absent material fields before durable storage', () => {
     const parsed = parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'submit-rust-optional-fields',
       type: 'session.submit',
       payload: {
@@ -151,7 +151,7 @@ describe('IPC message validation', () => {
 
   it('accepts a bounded selection expansion response with its snapshot revision', () => {
     const parsed = parseIpcMessage({
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'selection-expand-response-1',
       type: 'selection.expanded',
       payload: {
@@ -175,6 +175,28 @@ describe('IPC message validation', () => {
         context: { pageText: 'Captured page context.' },
       },
     })
+  })
+
+  it('rejects V3 expanded material rather than silently interpreting it as V4', () => {
+    expect(() => parseIpcMessage({
+      protocol: 3,
+      id: 'legacy-expanded-submit',
+      type: 'session.submit',
+      payload: {
+        sessionId: 'session-1',
+        requestId: 'request-legacy',
+        mode: 'queue',
+        content: [{ type: 'text', text: 'Explain.' }],
+        material: {
+          ...selectionMaterialFixture(),
+          authorizedScope: 'page',
+          actualScope: 'page',
+          completeness: 'complete',
+          truncated: false,
+          context: { pageText: 'Legacy page text.' },
+        },
+      },
+    })).toThrow('unsupported IPC protocol 3; expected 4')
   })
 })
 
@@ -202,9 +224,9 @@ describe('IPC length-prefixed framing', () => {
       .toThrow('declares')
   })
 
-  it('rejects payloads larger than the v3 one-megabyte limit', () => {
+  it('rejects payloads larger than the v4 one-megabyte limit', () => {
     const oversized: IpcMessage = {
-      protocol: 3,
+      protocol: IPC_PROTOCOL_VERSION,
       id: 'large-1',
       type: 'session.submit',
       payload: {
