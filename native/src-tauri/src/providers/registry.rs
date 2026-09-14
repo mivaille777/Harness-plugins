@@ -1,5 +1,9 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::arbitrator::{arbitrate, ArbitrationResult};
 use super::browser_accessibility::BrowserAccessibilityProvider;
-use super::types::{CaptureContext, ProviderAttempt, ProviderCandidate};
+use super::canonicalizer::canonicalize;
+use super::types::{CaptureContext, CaptureTrigger, ProviderAttempt, ProviderCandidate};
 use super::{ProviderCapture, SelectionProvider};
 
 #[derive(Default)]
@@ -47,6 +51,69 @@ impl ProviderRegistry {
         self.providers.iter().map(|provider| provider.id()).collect()
     }
 
+    /// Run the complete provider path for one capture trigger: collect provider
+    /// attempts, arbitrate eligible candidates, and canonicalize exactly one
+    /// winning snapshot. Provider failures cannot bypass arbitration or common
+    /// CaptureRuntime policy, and candidates are never field-merged.
+    pub fn capture(&self, trigger: CaptureTrigger) -> Result<ProviderCapture, String> {
+        let mut context = CaptureContext::new(trigger, now_millis());
+        let attempts = self.capture_all(&context);
+        // Arbitration should compare freshness against the end of the provider
+        // read, not against its beginning. This avoids treating a slow but valid
+        // provider read as a future-dated candidate.
+        context.captured_at = now_millis();
+
+        let mut candidates = Vec::new();
+        let mut saw_no_selection = false;
+        let mut errors = Vec::new();
+
+        for attempt in attempts {
+            match attempt {
+                ProviderAttempt::Candidate(candidate) => candidates.push(candidate),
+                ProviderAttempt::NoSelection { .. } => saw_no_selection = true,
+                ProviderAttempt::NotApplicable { .. } => {}
+                ProviderAttempt::Error {
+                    provider_id,
+                    message,
+                } => errors.push((provider_id, message)),
+            }
+        }
+
+        if !candidates.is_empty() {
+            return match arbitrate(&context, candidates) {
+                ArbitrationResult::Selected { candidate, .. } => {
+                    canonicalize(candidate).map(ProviderCapture::Captured)
+                }
+                ArbitrationResult::NoCandidate { rejected } => Err(format!(
+                    "provider arbitration rejected all {} candidate(s)",
+                    rejected.len()
+                )),
+                ArbitrationResult::Conflict { provider_ids, .. } => Err(format!(
+                    "provider arbitration conflict between: {}",
+                    provider_ids.join(", ")
+                )),
+            };
+        }
+
+        // A healthy applicable provider that reports no selection wins over an
+        // unrelated provider error. This keeps one broken optional provider from
+        // turning an ordinary empty selection into a capture failure.
+        if saw_no_selection {
+            return Ok(ProviderCapture::NoSelection);
+        }
+
+        if !errors.is_empty() {
+            let summary = errors
+                .into_iter()
+                .map(|(provider_id, message)| format!("{provider_id}: {message}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(format!("all applicable providers failed: {summary}"));
+        }
+
+        Ok(ProviderCapture::NotApplicable)
+    }
+
     /// Capture all currently registered providers without choosing a winner.
     /// Arbitration intentionally lives in a separate layer so adding a richer
     /// provider cannot bypass common privacy/admission policy.
@@ -81,6 +148,13 @@ impl ProviderRegistry {
     }
 }
 
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,7 +162,6 @@ mod tests {
         SelectionCapabilities, SelectionContext, SelectionSnapshot, SelectionSource,
         SelectionSourceKind, SelectionValue,
     };
-    use crate::providers::types::CaptureTrigger;
 
     #[derive(Clone)]
     enum FakeResult {
@@ -115,10 +188,14 @@ mod tests {
     }
 
     fn snapshot(provider: &str, text: &str) -> SelectionSnapshot {
+        snapshot_at(provider, text, 1)
+    }
+
+    fn snapshot_at(provider: &str, text: &str, captured_at: u64) -> SelectionSnapshot {
         SelectionSnapshot {
             id: format!("{provider}-snapshot"),
             revision: 1,
-            captured_at: 1,
+            captured_at,
             selection: SelectionValue {
                 text: text.to_owned(),
                 language: None,
@@ -244,5 +321,119 @@ mod tests {
             ProviderAttempt::Error { provider_id, message }
                 if *provider_id == "registered-id" && message.contains("identity mismatch")
         ));
+    }
+
+    #[test]
+    fn capture_routes_candidates_through_arbitration_and_canonicalization() {
+        let captured_at = now_millis();
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(FakeProvider {
+                id: "browser-accessibility",
+                result: FakeResult::Capture(ProviderCapture::Captured(snapshot_at(
+                    "browser-accessibility",
+                    "Unified selection",
+                    captured_at,
+                ))),
+            })
+            .unwrap();
+        registry
+            .register(FakeProvider {
+                id: "browser-dom",
+                result: FakeResult::Capture(ProviderCapture::Captured(snapshot_at(
+                    "browser-dom",
+                    "Unified selection",
+                    captured_at,
+                ))),
+            })
+            .unwrap();
+
+        let result = registry.capture(CaptureTrigger::UiaEvent).unwrap();
+
+        assert!(matches!(
+            result,
+            ProviderCapture::Captured(snapshot)
+                if snapshot.provider == "browser-dom" && snapshot.selection.text == "Unified selection"
+        ));
+    }
+
+    #[test]
+    fn capture_fails_closed_when_fresh_providers_disagree_on_selection_text() {
+        let captured_at = now_millis();
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(FakeProvider {
+                id: "browser-accessibility",
+                result: FakeResult::Capture(ProviderCapture::Captured(snapshot_at(
+                    "browser-accessibility",
+                    "Selection A",
+                    captured_at,
+                ))),
+            })
+            .unwrap();
+        registry
+            .register(FakeProvider {
+                id: "browser-dom",
+                result: FakeResult::Capture(ProviderCapture::Captured(snapshot_at(
+                    "browser-dom",
+                    "Selection B",
+                    captured_at,
+                ))),
+            })
+            .unwrap();
+
+        let error = registry.capture(CaptureTrigger::UiaEvent).unwrap_err();
+
+        assert!(error.contains("arbitration conflict"));
+        assert!(error.contains("browser-accessibility"));
+        assert!(error.contains("browser-dom"));
+    }
+
+    #[test]
+    fn capture_allows_a_valid_candidate_to_survive_an_optional_provider_error() {
+        let captured_at = now_millis();
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(FakeProvider {
+                id: "browser-accessibility",
+                result: FakeResult::Capture(ProviderCapture::Captured(snapshot_at(
+                    "browser-accessibility",
+                    "Selection",
+                    captured_at,
+                ))),
+            })
+            .unwrap();
+        registry
+            .register(FakeProvider {
+                id: "broken-provider",
+                result: FakeResult::Error("simulated failure".to_owned()),
+            })
+            .unwrap();
+
+        let result = registry.capture(CaptureTrigger::FallbackPoll).unwrap();
+
+        assert!(matches!(result, ProviderCapture::Captured(snapshot) if snapshot.selection.text == "Selection"));
+    }
+
+    #[test]
+    fn capture_prefers_no_selection_over_an_unrelated_provider_error() {
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(FakeProvider {
+                id: "browser-accessibility",
+                result: FakeResult::Capture(ProviderCapture::NoSelection),
+            })
+            .unwrap();
+        registry
+            .register(FakeProvider {
+                id: "broken-provider",
+                result: FakeResult::Error("simulated failure".to_owned()),
+            })
+            .unwrap();
+
+        assert_eq!(
+            registry.capture(CaptureTrigger::FallbackPoll).unwrap(),
+            ProviderCapture::NoSelection
+        );
     }
 }
