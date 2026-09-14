@@ -31,7 +31,13 @@ import {
 } from './sessionProjection'
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
 import type { ContextScope } from '../../src/bridge/protocol.js'
+import type { SelectionMaterial } from '../../src/session/material.js'
 import { getAppCopy, type AppCopy } from './copy'
+import {
+  authorizeExpandedContext,
+  defaultAuthorizedMaterial,
+  isAuthorizationCurrent,
+} from './contextAuthorization'
 
 const emptyCapture: CaptureStatus = {
   paused: false,
@@ -126,6 +132,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<SelectionSnapshot | null>(null)
   const [contextScope, setContextScope] = useState<ExpandableContextScope>('local')
   const [expandedContext, setExpandedContext] = useState<SelectionExpansion | null>(null)
+  const [authorizedMaterial, setAuthorizedMaterial] = useState<SelectionMaterial | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
   const [contextError, setContextError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -183,6 +190,7 @@ export default function App() {
     const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
     snapshotIdentityRef.current = identity
     setExpandedContext(null)
+    setAuthorizedMaterial(snapshot === null ? null : defaultAuthorizedMaterial(snapshot))
     setContextError(null)
     if (snapshot?.capabilities.localContext) setContextScope('local')
     else if (snapshot?.capabilities.sectionContext) setContextScope('section')
@@ -475,11 +483,17 @@ export default function App() {
   const loadContext = useCallback(() => {
     if (snapshot === null || contextLoading) return
     const identity = `${snapshot.id}:${snapshot.revision}`
+    setExpandedContext(null)
+    setAuthorizedMaterial(defaultAuthorizedMaterial(snapshot))
     setContextLoading(true)
     setContextError(null)
     void expandSelection(snapshot.id, contextScope)
       .then(result => {
-        if (result.snapshotId !== snapshot.id || typeof result.revision === 'number' && result.revision !== snapshot.revision) {
+        if (
+          result.snapshotId !== snapshot.id
+          || result.scope !== contextScope
+          || result.revision !== snapshot.revision
+        ) {
           throw new Error(copy.contextChanged)
         }
         if (snapshotIdentityRef.current === identity) setExpandedContext(result)
@@ -489,6 +503,26 @@ export default function App() {
       })
       .finally(() => setContextLoading(false))
   }, [contextLoading, contextScope, copy, snapshot])
+
+  const authorizeContext = useCallback(() => {
+    if (snapshot === null || expandedContext === null) return
+    try {
+      const material = authorizeExpandedContext(snapshot, expandedContext)
+      if (material.actualScope !== contextScope) throw new Error('Loaded context does not match the selected authorization scope.')
+      setAuthorizedMaterial(material)
+      setContextError(null)
+    } catch (error) {
+      setAuthorizedMaterial(defaultAuthorizedMaterial(snapshot))
+      setContextError(String(error))
+    }
+  }, [contextScope, expandedContext, snapshot])
+
+  const changeContextScope = useCallback((nextScope: ExpandableContextScope) => {
+    setContextScope(nextScope)
+    setExpandedContext(null)
+    setContextError(null)
+    if (snapshot !== null) setAuthorizedMaterial(defaultAuthorizedMaterial(snapshot))
+  }, [snapshot])
 
   const source = snapshot?.document?.title ?? snapshot?.source.windowTitle ?? snapshot?.source.app ?? copy.currentSelection
   const displayedContext = expandedContext?.context ?? snapshot?.context
@@ -503,6 +537,14 @@ export default function App() {
     ...(snapshot.capabilities.sectionContext ? [{ value: 'section' as const, label: copy.contextScopeSection }] : []),
     ...(snapshot.capabilities.pageContext && snapshot.context.pageAvailable ? [{ value: 'page' as const, label: copy.contextScopePage }] : []),
   ]
+  const currentAuthorization = isAuthorizationCurrent(authorizedMaterial, snapshot) ? authorizedMaterial : null
+  const authorizedScope = currentAuthorization?.authorizedScope ?? 'selection'
+  const canAuthorizePreview = expandedContext !== null
+    && snapshot !== null
+    && expandedContext.snapshotId === snapshot.id
+    && expandedContext.revision === snapshot.revision
+    && expandedContext.scope === contextScope
+    && authorizedScope !== contextScope
   const showAnswer = projection.answer !== ''
   const phaseLabel = copy.phaseLabels[projection.phase] ?? projection.phase
 
@@ -539,7 +581,20 @@ export default function App() {
         <p className="selection-caption">{copy.currentSelection}</p>
         <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
         <p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p>
-        <details className="context-panel" data-testid="captured-context"><summary>{copy.contextLabel}</summary><p className="context-description">{copy.contextDescription}</p>{contextScopes.length > 0 ? <div className="context-controls"><label htmlFor="context-scope">{copy.contextScopeLabel}</label><select id="context-scope" value={contextScope} disabled={contextLoading} onChange={event => setContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select><button type="button" className="secondary" onClick={loadContext} disabled={contextLoading}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button></div> : null}{expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}{contextError ? <p className="context-error" role="alert">{contextError}</p> : null}{contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}</details>
+        <details className="context-panel" data-testid="captured-context">
+          <summary>{copy.contextLabel}</summary>
+          <p className="context-description">{copy.contextDescription}</p>
+          {contextScopes.length > 0 ? <div className="context-controls">
+            <label htmlFor="context-scope">{copy.contextScopeLabel}</label>
+            <select id="context-scope" value={contextScope} disabled={contextLoading || busy} onChange={event => changeContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+            <button type="button" className="secondary" onClick={loadContext} disabled={contextLoading || busy}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button>
+          </div> : null}
+          {expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}
+          <p className="context-result" data-testid="request-context-authorization" role="status">{authorizedScope === 'selection' ? copy.contextAuthorizationSelection : copy.contextAuthorizationExpanded(authorizedScope)}</p>
+          {canAuthorizePreview ? <button type="button" className="secondary" onClick={authorizeContext} disabled={busy}>{copy.contextAuthorize(contextScope)}</button> : null}
+          {contextError ? <p className="context-error" role="alert">{contextError}</p> : null}
+          {contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}
+        </details>
       </section>
       <div className="quick-actions quick-actions-single"><button type="button" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button></div>
       <label className="question-label" htmlFor="question">{copy.askLabel}</label><textarea id="question" value={draft} onChange={event => { const value = event.target.value; setDraft(value); if (sessionId !== null) drafts.current.set(sessionId, value) }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit('ask') } }} placeholder={copy.askPlaceholder} rows={3} />
