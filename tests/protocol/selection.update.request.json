@@ -1,5 +1,5 @@
 {
-  "protocol": 3,
+  "protocol": 4,
   "id": "selection-update-1",
   "type": "selection.update",
   "payload": {
