@@ -19,6 +19,9 @@ const DEFAULT_CAPTURE_SETTLE_DELAY_MS: u64 = 35;
 const DEFAULT_DEDUPE_WINDOW_MS: u64 = 120;
 const DEFAULT_CONTEXT_CHARS: i32 = 900;
 const WORKER_POLL: Duration = Duration::from_millis(250);
+// Chromium does not reliably raise Text_TextSelectionChanged on every page. This
+// bounded foreground read is a fallback, not a second capture transport.
+const FALLBACK_SELECTION_POLL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 struct CaptureConfig {
@@ -340,6 +343,8 @@ impl CaptureRuntime {
                     }
                 };
                 let mut last_capture: Option<(u64, Instant)> = None;
+                let mut last_polled_signature: Option<u64> = None;
+                let mut next_fallback_poll = Instant::now() + FALLBACK_SELECTION_POLL;
 
                 while !worker_stop.load(Ordering::Acquire) {
                     match trigger_rx.recv_timeout(WORKER_POLL) {
@@ -408,7 +413,55 @@ impl CaptureRuntime {
                                 ),
                             }
                         }
-                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if Instant::now() < next_fallback_poll || is_paused(&worker_state) {
+                                continue;
+                            }
+                            next_fallback_poll = Instant::now() + FALLBACK_SELECTION_POLL;
+                            match provider.capture() {
+                                Ok(ProviderCapture::Captured(snapshot)) => {
+                                    let signature = snapshot_signature(&snapshot);
+                                    // A fallback read observes the same active selection repeatedly.
+                                    // Keep one fingerprint until focus moves away or selection clears.
+                                    if last_polled_signature == Some(signature)
+                                        || last_capture
+                                            .as_ref()
+                                            .is_some_and(|(previous, _)| *previous == signature)
+                                    {
+                                        last_polled_signature = Some(signature);
+                                        continue;
+                                    }
+                                    last_polled_signature = Some(signature);
+                                    let started = Instant::now();
+                                    let latency = started.elapsed().as_millis() as u64;
+                                    let replaced = worker_latest.replace(snapshot);
+                                    let _ = ready_tx.try_send(());
+                                    last_capture = Some((signature, Instant::now()));
+                                    transition(&worker_state, CapturePhase::Publishing, None);
+                                    increment(&worker_state, |metrics| {
+                                        metrics.captured += 1;
+                                        metrics.last_capture_latency_ms = Some(latency);
+                                        if replaced {
+                                            metrics.coalesced += 1;
+                                        }
+                                    });
+                                }
+                                Ok(
+                                    ProviderCapture::NoSelection | ProviderCapture::NotApplicable,
+                                ) => {
+                                    // Clearing this allows an identical later selection to become a
+                                    // deliberate new capture after the user returns to the browser.
+                                    last_polled_signature = None;
+                                    last_capture = None;
+                                }
+                                Err(error) => record_error(
+                                    &worker_state,
+                                    format!(
+                                        "browser accessibility fallback capture failed: {error}"
+                                    ),
+                                ),
+                            }
+                        }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 }

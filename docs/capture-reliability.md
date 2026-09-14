@@ -10,7 +10,7 @@ When the user submits an explicit Lens action, the native bridge projects that d
 
 `Pause capture` clears the one pending unpublished value and makes later UIA events no-ops. It is independent of the named-pipe connection: reconnecting the bridge cannot resume capture. `Resume capture` is the only local action that resumes it. The setting is intentionally process-local and resets to running on a new native-companion launch; persistent preferences require a reviewed settings owner and are not silently written by the capture runtime.
 
-The event listener and capture worker stop when the managed runtime drops. The worker polls for shutdown at most every 250 ms and the UIA event handler is removed before its thread exits. A UIA call already in progress is allowed to finish; its result is discarded if pause or shutdown occurred meanwhile.
+The event listener and capture worker stop when the managed runtime drops. The worker polls for shutdown at most every 250 ms and the UIA event handler is removed before its thread exits. Chromium does not consistently raise `Text_TextSelectionChanged` on every page, so the worker also performs a bounded 500 ms fallback read of the foreground accessibility selection. It reads only a non-empty browser selection, keeps one fingerprint while that selection remains active, and clears the fingerprint when focus leaves the browser or the selection clears. A UIA call already in progress is allowed to finish; its result is discarded if pause or shutdown occurred meanwhile.
 
 ## Configuration
 
