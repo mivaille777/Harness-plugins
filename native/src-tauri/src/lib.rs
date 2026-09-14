@@ -3,6 +3,7 @@ pub mod capture;
 pub mod native_messaging;
 pub mod protocol;
 pub mod providers;
+pub mod submission_material;
 
 use tauri::Manager;
 
