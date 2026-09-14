@@ -1,0 +1,35 @@
+{
+  "protocol": 4,
+  "id": "submit-escalation-invalid",
+  "type": "session.submit",
+  "payload": {
+    "sessionId": "session-expanded",
+    "requestId": "request-escalation-invalid",
+    "mode": "queue",
+    "content": [
+      {
+        "type": "text",
+        "text": "This request must fail closed."
+      }
+    ],
+    "material": {
+      "snapshotId": "snapshot-expanded",
+      "revision": 12,
+      "capturedAt": 1725753600000,
+      "selection": {
+        "text": "Fixed selected material"
+      },
+      "source": {
+        "kind": "browser",
+        "app": "Chrome"
+      },
+      "authorizedScope": "local",
+      "actualScope": "page",
+      "completeness": "complete",
+      "truncated": false,
+      "context": {
+        "pageText": "This page context exceeds the user's authorization."
+      }
+    }
+  }
+}
