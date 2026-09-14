@@ -8,6 +8,9 @@ import type { SelectionSnapshot } from '../context/snapshot.js'
 export const SELECTION_CURRENT_TOOL_NAME = 'selection_current'
 export const SELECTION_READ_CONTEXT_TOOL_NAME = 'selection_read_context'
 
+export const SELECTION_MATERIAL_SCOPES = ['selection', 'local', 'section', 'page'] as const
+export type SelectionMaterialScope = (typeof SELECTION_MATERIAL_SCOPES)[number]
+
 /** Rust serializes absent optional fields as null; normalize that wire spelling to omission. */
 const optionalText = z.preprocess(value => value === null ? undefined : value, z.string().optional())
 
@@ -30,7 +33,28 @@ const optionalDocument = z.preprocess(value => {
   frameUrl: optionalText,
 }).strict().optional())
 
-/** The least material the user can authorize: the exact selection and its source. */
+const scopeSchema = z.enum(SELECTION_MATERIAL_SCOPES)
+const contextSchema = z.object({
+  before: optionalText,
+  after: optionalText,
+  sectionText: optionalText,
+  pageText: optionalText,
+}).strict()
+
+const scopeRank: Readonly<Record<SelectionMaterialScope, number>> = {
+  selection: 0,
+  local: 1,
+  section: 2,
+  page: 3,
+}
+
+/**
+ * Canonical request material. `authorizedScope` records what the user allowed;
+ * `actualScope` records what was actually frozen. Actual scope may be narrower
+ * than authorization, but can never exceed it. The context payload must match
+ * actualScope exactly, so unrelated broader text cannot be smuggled through a
+ * narrower authorization.
+ */
 export const selectionMaterialSchema = z.object({
   snapshotId: z.string().min(1).max(256),
   revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -46,10 +70,67 @@ export const selectionMaterialSchema = z.object({
     windowTitle: optionalText,
   }).strict(),
   document: optionalDocument,
-  authorizedScope: z.literal('selection'),
-  actualScope: z.literal('selection'),
-  completeness: z.literal('complete'),
-}).strict()
+  authorizedScope: scopeSchema,
+  actualScope: scopeSchema,
+  completeness: z.enum(['complete', 'partial']),
+  truncated: z.boolean().optional(),
+  context: contextSchema.optional(),
+}).strict().superRefine((value, refinement) => {
+  if (scopeRank[value.actualScope] > scopeRank[value.authorizedScope]) {
+    refinement.addIssue({
+      code: 'custom',
+      path: ['actualScope'],
+      message: 'actualScope must not exceed authorizedScope',
+    })
+  }
+
+  const context = value.context
+  const present = (key: keyof NonNullable<typeof context>): boolean => {
+    const text = context?.[key]
+    return typeof text === 'string' && text.length > 0
+  }
+  const hasAnyContext = context !== undefined && Object.values(context).some(text => typeof text === 'string' && text.length > 0)
+
+  if (value.actualScope === 'selection') {
+    if (hasAnyContext) {
+      refinement.addIssue({ code: 'custom', path: ['context'], message: 'selection scope must not carry expanded context' })
+    }
+    if (value.completeness !== 'complete') {
+      refinement.addIssue({ code: 'custom', path: ['completeness'], message: 'selection scope is always complete' })
+    }
+    if (value.truncated === true) {
+      refinement.addIssue({ code: 'custom', path: ['truncated'], message: 'selection scope cannot be truncated' })
+    }
+    return
+  }
+
+  if (value.actualScope === 'local') {
+    if (!present('before') && !present('after')) {
+      refinement.addIssue({ code: 'custom', path: ['context'], message: 'local scope requires before and/or after context' })
+    }
+    if (present('sectionText') || present('pageText')) {
+      refinement.addIssue({ code: 'custom', path: ['context'], message: 'local scope cannot carry section or page context' })
+    }
+    return
+  }
+
+  if (value.actualScope === 'section') {
+    if (!present('sectionText')) {
+      refinement.addIssue({ code: 'custom', path: ['context', 'sectionText'], message: 'section scope requires sectionText' })
+    }
+    if (present('before') || present('after') || present('pageText')) {
+      refinement.addIssue({ code: 'custom', path: ['context'], message: 'section scope can carry only sectionText' })
+    }
+    return
+  }
+
+  if (!present('pageText')) {
+    refinement.addIssue({ code: 'custom', path: ['context', 'pageText'], message: 'page scope requires pageText' })
+  }
+  if (present('before') || present('after') || present('sectionText')) {
+    refinement.addIssue({ code: 'custom', path: ['context'], message: 'page scope can carry only pageText' })
+  }
+})
 
 export type SelectionMaterial = z.infer<typeof selectionMaterialSchema>
 
@@ -58,7 +139,7 @@ export interface BoundSelectionMaterial {
   readonly material: SelectionMaterial
 }
 
-/** Project a full provider snapshot onto the exact material shown and authorized by Lens. */
+/** Project a full provider snapshot onto the exact selection shown by Lens. */
 export function selectionMaterialFromSnapshot(snapshot: SelectionSnapshot): SelectionMaterial {
   return normalizeSelectionMaterial({
     snapshotId: snapshot.id,
@@ -182,7 +263,7 @@ export function registerSelectionTools(agentCtx: Context): void {
 
   agentCtx.tools.register(defineTool({
     name: SELECTION_READ_CONTEXT_TOOL_NAME,
-    description: 'Read the exact untrusted selection text persisted for the current Harness request. This version cannot expand beyond the selected text.',
+    description: 'Read the exact untrusted selection text persisted for the current Harness request. Expanded context authorization is persisted in V4 material but tool scope expansion is enabled in EC-07.',
     parameters: {
       scope: {
         type: 'string',
@@ -253,9 +334,9 @@ const currentMaterialOutputSchema = {
     snapshotId: { type: 'string', required: true },
     revision: { type: 'integer', required: true },
     capturedAt: { type: 'integer', required: true },
-    authorizedScope: { type: 'string', const: 'selection', required: true },
-    actualScope: { type: 'string', const: 'selection', required: true },
-    completeness: { type: 'string', const: 'complete', required: true },
+    authorizedScope: { type: 'string', enum: [...SELECTION_MATERIAL_SCOPES], required: true },
+    actualScope: { type: 'string', enum: [...SELECTION_MATERIAL_SCOPES], required: true },
+    completeness: { type: 'string', enum: ['complete', 'partial'], required: true },
     selectionLength: { type: 'integer', required: true },
     language: { type: 'string' },
     source: { ...sourceOutputSchema, required: true },
