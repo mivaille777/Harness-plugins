@@ -1,5 +1,7 @@
 # Session-bound selection material
 
+> Historical V3 decision. Protocol V4 supersedes the wire/material scope rules while preserving the request-bound durable-session principles described here. See [Protocol V4 authorized context material](2026-09-14-protocol-v4-authorized-context-material.md).
+
 ## Decision
 
 Protocol V3 requires every `session.submit` to contain a validated `material` object. The object is a deliberately small projection of the frozen browser snapshot: snapshot and revision identities, capture time, selected text and language, source, optional document identity, and literal `authorizedScope`, `actualScope`, and `completeness` values of `selection`, `selection`, and `complete`.
@@ -24,7 +26,7 @@ Keeping Protocol V2 with optional material would let a peer submit a request tha
 
 Selection text is now intentionally durable Harness session data for every accepted V3 submission. Product surfaces must treat it as sensitive reference material and avoid exposing it in diagnostics, screenshots, or unrelated sessions.
 
-The implementation does not expand local, section, or page context; that is R08.1 work requiring explicit user authorization. It does not prove a supported `dsh` profile, real model, visible Tauri window, actual host-policy flow, or process-directory restart. R07 owns those product-path checks.
+The V3 implementation does not expand local, section, or page context. Protocol V4 adds a strict representation for explicitly authorized expanded material, while Lens authorization/submission and expanded Agent-tool reads remain separate follow-up work. It does not prove a supported `dsh` profile, real model, visible Tauri window, actual host-policy flow, or process-directory restart. R07 owns those product-path checks.
 
 ## Verification evidence
 
