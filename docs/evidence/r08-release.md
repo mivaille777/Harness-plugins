@@ -10,7 +10,7 @@ Readiness status: NOT READY. The candidate validator is implemented, but no rele
 
 ## Delivered foundation
 
-`scripts/release.mjs` defines the release manifest schema, required package scripts, required evidence paths, candidate SHA validation, protocol/version checks, PASS/NOT RUN/PENDING consistency rules, support-matrix status and required limitations. It requires both an npm bundle and Windows installer, confines their paths to the repository, and compares their declared byte sizes and SHA-256 values with the actual files. The required command set includes the system-changing `test:installer:smoke`; omitting it or either artifact is a hard failure.
+`scripts/release.mjs` defines the release manifest schema, required package scripts, required evidence paths, candidate SHA validation, protocol/version checks, PASS/NOT RUN/PENDING consistency rules, support-matrix status and required limitations. It requires both an npm bundle and Windows installer, confines their paths to the repository, and compares their declared byte sizes and SHA-256 values with the actual files. It also compares the manifest's plugin version, Node range and complete `@deepseek-ai/dsh-*` compatibility map with `package.json`. The required command set includes the system-changing `test:installer:smoke`; omitting it or either artifact is a hard failure.
 
 `scripts/check-release.mjs` validates an explicitly supplied manifest or generates a PENDING skeleton for the current candidate. The skeleton discovers existing npm and installer artifacts and records their actual hashes without promoting any result to PASS. The command returns READY with exit code 0 only when every required check, evidence item and support-matrix row is PASS; NOT READY with exit code 2 represents disclosed pending or descriptive evidence; malformed, failed or mismatched files return exit code 1.
 
@@ -20,7 +20,7 @@ The validator checks repository inventory when a local root is supplied, never t
 
 | Check | Command | Result |
 |---|---|---|
-| Release helper tests | `node --test scripts/release.test.mjs` | PASS, 6 tests, including missing-check/artifact and real hash mismatch cases |
+| Release helper tests | `node --test scripts/release.test.mjs` | PASS, 7 tests, including missing-check/artifact, real hash mismatch and package/Harness version drift cases |
 | Candidate check without manifest | `pnpm check:release` | NOT READY, exit code 2; generated a PENDING skeleton and listed all required checks/evidence as non-PASS |
 | Candidate artifact discovery | generated skeleton after `pnpm pack` and `pnpm native:build` | PASS for discovering one npm bundle and one NSIS installer with real byte sizes and SHA-256; readiness remains NOT READY until evidence statuses are supplied |
 

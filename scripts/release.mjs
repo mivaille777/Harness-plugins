@@ -48,6 +48,7 @@ export async function validateReleaseManifest(manifest, { root, candidateSha } =
   if (candidateSha !== undefined && manifest?.candidateSha !== candidateSha) issues.push('manifest candidateSha does not match the requested candidate')
   if (!isRecord(manifest) || typeof manifest.pluginVersion !== 'string' || manifest.pluginVersion.trim() === '') issues.push('manifest pluginVersion is required')
   if (!isRecord(manifest) || manifest.protocolVersion !== 3) issues.push('manifest protocolVersion must be 3')
+  if (!isRecord(manifest) || !isRecord(manifest.compatibility) || typeof manifest.compatibility.node !== 'string' || !isRecord(manifest.compatibility.harnessPackages)) issues.push('manifest compatibility needs node and harnessPackages')
   if (!isRecord(manifest) || !Array.isArray(manifest.checks)) issues.push('manifest checks must be an array')
   else {
     const result = validateChecks(manifest.checks)
@@ -93,6 +94,12 @@ export async function validateReleaseManifest(manifest, { root, candidateSha } =
     } catch (error) {
       issues.push(`package.json could not be read: ${error instanceof Error ? error.message : String(error)}`)
     }
+    if (packageJson !== undefined && manifest?.pluginVersion !== packageJson.version) issues.push('manifest pluginVersion does not match package.json')
+    if (packageJson !== undefined && manifest?.compatibility?.node !== packageJson.engines?.node) issues.push('manifest Node compatibility does not match package.json')
+    if (packageJson !== undefined && isRecord(manifest?.compatibility?.harnessPackages)) {
+      const expectedPeers = harnessPeerVersions(packageJson)
+      if (JSON.stringify(manifest.compatibility.harnessPackages) !== JSON.stringify(expectedPeers)) issues.push('manifest Harness compatibility does not match peerDependencies')
+    }
     for (const script of REQUIRED_SCRIPTS) {
       if (typeof packageJson?.scripts?.[script] !== 'string') issues.push(`required package script is missing: ${script}`)
     }
@@ -113,6 +120,10 @@ export async function createManifestSkeleton(root, candidateSha = currentCandida
     candidateSha,
     pluginVersion: packageJson.version,
     protocolVersion: 3,
+    compatibility: {
+      node: packageJson.engines?.node,
+      harnessPackages: harnessPeerVersions(packageJson),
+    },
     checks: REQUIRED_SCRIPTS.map(command => ({ command, status: 'PENDING', exitCode: null })),
     evidence: REQUIRED_EVIDENCE.map(path => ({ path, status: 'PENDING' })),
     artifacts,
@@ -201,6 +212,10 @@ async function discoverArtifacts(root) {
     sha256: await sha256File(entry.path),
     bytes: (await stat(entry.path)).size,
   })))
+}
+
+function harnessPeerVersions(packageJson) {
+  return Object.fromEntries(Object.entries(packageJson.peerDependencies ?? {}).filter(([name]) => name.startsWith('@deepseek-ai/dsh-')).sort(([left], [right]) => left.localeCompare(right)))
 }
 
 function isRecord(value) { return typeof value === 'object' && value !== null && !Array.isArray(value) }

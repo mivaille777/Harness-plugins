@@ -12,6 +12,7 @@ const manifestFor = overrides => ({
   candidateSha: sha,
   pluginVersion: '0.1.0',
   protocolVersion: 3,
+  compatibility: { node: '^22.19.0 || >=24.0.0', harnessPackages: { '@deepseek-ai/dsh-agent': '^0.1.1-rc.2' } },
   checks: [
     { command: 'check', status: 'PASS', exitCode: 0 },
     { command: 'test:context-expansion', status: 'PASS', exitCode: 0 },
@@ -78,7 +79,12 @@ test('release validator rejects missing required checks and artifacts', async ()
 test('release validator checks artifact bytes and hashes against the repository', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-release-test-'))
   await mkdir(join(root, 'docs', 'evidence'), { recursive: true })
-  await writeFile(join(root, 'package.json'), JSON.stringify({ version: '0.1.0', scripts: Object.fromEntries(manifestFor().checks.map(check => [check.command, 'true'])) }))
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    version: '0.1.0',
+    engines: { node: '^22.19.0 || >=24.0.0' },
+    peerDependencies: { '@deepseek-ai/dsh-agent': '^0.1.1-rc.2' },
+    scripts: Object.fromEntries(manifestFor().checks.map(check => [check.command, 'true'])),
+  }))
   for (const evidence of manifestFor().evidence) await writeFile(join(root, evidence.path), 'evidence')
   const npmBytes = Buffer.from('npm bundle')
   const installerBytes = Buffer.from('installer')
@@ -93,6 +99,31 @@ test('release validator checks artifact bytes and hashes against the repository'
   manifest.artifacts[1].sha256 = '0'.repeat(64)
   const failing = await validateReleaseManifest(manifest, { root, candidateSha: sha })
   assert.match(failing.issues.join('; '), /sha256 does not match/)
+})
+
+test('release validator rejects package and Harness compatibility drift', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-release-version-test-'))
+  await mkdir(join(root, 'docs', 'evidence'), { recursive: true })
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    version: '0.2.0',
+    engines: { node: '>=24' },
+    peerDependencies: { '@deepseek-ai/dsh-agent': '^0.2.0' },
+    scripts: Object.fromEntries(manifestFor().checks.map(check => [check.command, 'true'])),
+  }))
+  for (const evidence of manifestFor().evidence) await writeFile(join(root, evidence.path), 'evidence')
+  const npmBytes = Buffer.alloc(10)
+  const installerBytes = Buffer.alloc(20)
+  await writeFile(join(root, 'candidate.tgz'), npmBytes)
+  await writeFile(join(root, 'candidate-setup.exe'), installerBytes)
+  const manifest = manifestFor({ artifacts: [
+    { kind: 'npm-bundle', path: 'candidate.tgz', sha256: createHash('sha256').update(npmBytes).digest('hex'), bytes: npmBytes.length },
+    { kind: 'windows-installer', path: 'candidate-setup.exe', sha256: createHash('sha256').update(installerBytes).digest('hex'), bytes: installerBytes.length },
+  ] })
+  const result = await validateReleaseManifest(manifest, { root, candidateSha: sha })
+  assert.equal(result.status, 'FAIL')
+  assert.match(result.issues.join('; '), /pluginVersion does not match/)
+  assert.match(result.issues.join('; '), /Node compatibility does not match/)
+  assert.match(result.issues.join('; '), /Harness compatibility does not match/)
 })
 
 test('release skeleton marks every check and evidence item pending', async () => {
