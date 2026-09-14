@@ -23,7 +23,7 @@ pub fn run() {
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
             bridge::bridge_expand_selection,
-            submission::bridge_submit_prompt,
+            submission::bridge_submit_authorized_prompt,
             bridge::bridge_list_sessions,
             bridge::bridge_create_session,
             bridge::bridge_read_session_history,
