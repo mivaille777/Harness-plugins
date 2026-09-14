@@ -27,6 +27,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "check:ec01": "pnpm typecheck && pnpm test && pnpm test:native-ui && pnpm test:lens:session",
     "test:selection": "vitest run tests/selection-context.spec.ts",
     "test:context-expansion": "vitest run tests/selection-context.spec.ts",
     "test:protocol": "vitest run tests/protocol.spec.ts",
