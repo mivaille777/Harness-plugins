@@ -163,6 +163,7 @@ export default function App() {
     requestId: string
     prompt: string
     material: SelectionSnapshot
+    authorizedMaterial: SelectionMaterial
   } | null>(null)
   const listenerReady = useRef<Promise<void>>(Promise.resolve())
   const viewActive = useRef(true)
@@ -437,7 +438,13 @@ export default function App() {
       : defaultAuthorizedMaterial(snapshot)
     const prompt = buildAuthorizedMaterialPrompt(material, instruction)
     const logicalRequestId = `selection-${crypto.randomUUID()}`
-    pendingSubmission.current = { sessionId, requestId: logicalRequestId, prompt, material: snapshot }
+    pendingSubmission.current = {
+      sessionId,
+      requestId: logicalRequestId,
+      prompt,
+      material: snapshot,
+      authorizedMaterial: material,
+    }
     sessionGeneration.current += 1
     const previous = active.current
     active.current = { sessionId: null, requestId: null, subscriptionId: null }
@@ -446,7 +453,7 @@ export default function App() {
     setRequestId(null)
     setProjection({ ...initialRequestProjection, phase: 'submitting' })
     setNotice('Submitting the authorized request to Harness…')
-    void submitSessionPrompt(sessionId, prompt, logicalRequestId, snapshot).then(acceptSubmission).catch(submissionFailed)
+    void submitSessionPrompt(sessionId, prompt, logicalRequestId, snapshot, material).then(acceptSubmission).catch(submissionFailed)
   }
 
   const retrySubmission = () => {
@@ -454,7 +461,13 @@ export default function App() {
     if (pending === null || projection.phase !== 'submission-unknown') return
     setProjection(previous => ({ ...previous, phase: 'submitting', notice: null }))
     setNotice('Checking the existing request with Harness…')
-    void submitSessionPrompt(pending.sessionId, pending.prompt, pending.requestId, pending.material).then(acceptSubmission).catch(submissionFailed)
+    void submitSessionPrompt(
+      pending.sessionId,
+      pending.prompt,
+      pending.requestId,
+      pending.material,
+      pending.authorizedMaterial,
+    ).then(acceptSubmission).catch(submissionFailed)
   }
 
   const stop = () => {
