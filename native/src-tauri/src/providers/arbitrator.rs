@@ -150,6 +150,10 @@ fn normalized_text(value: &str) -> String {
     value.trim().to_owned()
 }
 
+fn points(condition: bool, value: i32) -> i32 {
+    if condition { value } else { 0 }
+}
+
 fn quality_score(context: &CaptureContext, candidate: &ProviderCandidate) -> i32 {
     let snapshot = &candidate.snapshot;
     let mut score = provider_priority(candidate.provider_id);
@@ -172,15 +176,15 @@ fn quality_score(context: &CaptureContext, candidate: &ProviderCandidate) -> i32
     };
 
     if let Some(document) = &snapshot.document {
-        score += i32::from(document.title.as_ref().is_some_and(|value| !value.is_empty())) * 8;
-        score += i32::from(document.url.as_ref().is_some_and(|value| !value.is_empty())) * 12;
-        score += i32::from(document.section.as_ref().is_some_and(|value| !value.is_empty())) * 10;
-        score += i32::from(document.frame_url.as_ref().is_some_and(|value| !value.is_empty())) * 5;
+        score += points(document.title.as_ref().is_some_and(|value| !value.is_empty()), 8);
+        score += points(document.url.as_ref().is_some_and(|value| !value.is_empty()), 12);
+        score += points(document.section.as_ref().is_some_and(|value| !value.is_empty()), 10);
+        score += points(document.frame_url.as_ref().is_some_and(|value| !value.is_empty()), 5);
     }
-    score += i32::from(snapshot.capabilities.local_context) * 8;
-    score += i32::from(snapshot.capabilities.section_context) * 12;
-    score += i32::from(snapshot.capabilities.page_context) * 16;
-    score += i32::from(snapshot.geometry.is_some()) * 4;
+    score += points(snapshot.capabilities.local_context, 8);
+    score += points(snapshot.capabilities.section_context, 12);
+    score += points(snapshot.capabilities.page_context, 16);
+    score += points(snapshot.geometry.is_some(), 4);
 
     // Confidence is a bounded quality hint only. It never grants scope or
     // bypasses freshness/foreground/conflict checks.
