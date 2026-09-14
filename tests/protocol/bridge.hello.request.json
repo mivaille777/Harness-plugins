@@ -1,5 +1,5 @@
 {
-  "protocol": 3,
+  "protocol": 4,
   "id": "hello-1",
   "type": "bridge.hello",
   "payload": {
@@ -8,6 +8,6 @@
       "version": "0.1.0",
       "platform": "windows"
     },
-    "supportedProtocols": [3]
+    "supportedProtocols": [4]
   }
 }
