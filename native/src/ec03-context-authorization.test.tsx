@@ -176,7 +176,9 @@ describe('EC-03 Lens context authorization', () => {
     eventApi.selectionHandler?.({ payload: { snapshotId: 'ec03-s2', revision: 3 } })
 
     expect(await screen.findByText('EC03 new selected text')).toBeInTheDocument()
-    expect(screen.getByTestId('request-context-authorization')).toHaveTextContent('Selection only')
-    expect(screen.queryByText('EC03_LOCAL_BEFORE')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('request-context-authorization')).toHaveTextContent('Selection only')
+      expect(screen.queryByText('EC03_LOCAL_BEFORE')).not.toBeInTheDocument()
+    })
   })
 })
