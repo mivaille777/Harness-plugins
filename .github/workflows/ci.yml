@@ -97,3 +97,66 @@ jobs:
           path: ${{ runner.temp }}\ec08-artifacts\ec08-session-model-boundary.json
           if-no-files-found: warn
           retention-days: 14
+
+  ec09-browser-real:
+    name: EC-09B real browser boundary
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Install project dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build plugin package
+        run: pnpm build
+      - name: Build browser extension
+        run: pnpm browser:build
+      - name: Build Windows native messaging host
+        run: pnpm native:host:build
+      - name: Install Playwright Chromium
+        run: pnpm --dir browser-extension exec playwright install chromium
+
+      - name: Checkout DeepSeek Harness 0.1.1-rc.2
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+          path: .ec09/deepseek-harness
+          fetch-depth: 1
+      - name: Install DeepSeek Harness dependencies
+        shell: pwsh
+        working-directory: .ec09/deepseek-harness
+        run: pnpm install --frozen-lockfile
+      - name: Build DeepSeek Harness
+        shell: pwsh
+        working-directory: .ec09/deepseek-harness
+        run: pnpm run build
+
+      # This is a real Chromium + MV3 extension + Windows Native Messaging Host
+      # boundary. The runner creates an actual DOM Range selection, lets the
+      # content/background scripts deliver it, and verifies it through the live
+      # Protocol V4 Harness pipe with selection.current.
+      - name: Run EC-09B real browser native-pipe boundary
+        shell: pwsh
+        env:
+          R07_DSH_REPOSITORY: ${{ github.workspace }}\.ec09\deepseek-harness
+          EC09_BROWSER_ARTIFACT_ROOT: ${{ runner.temp }}\ec09-browser-artifacts
+        run: pnpm test:ec09:browser-native-pipe
+      - name: Upload EC-09B evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec09-browser-native-pipe-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\ec09-browser-artifacts\ec09-browser-native-pipe.json
+            ${{ runner.temp }}\ec09-browser-artifacts\browser-selection.png
+          if-no-files-found: warn
+          retention-days: 14
