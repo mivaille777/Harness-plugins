@@ -1,3 +1,4 @@
+pub mod arbitrator;
 pub mod browser_accessibility;
 pub mod canonicalizer;
 pub mod registry;
