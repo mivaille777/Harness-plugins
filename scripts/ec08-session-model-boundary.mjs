@@ -23,7 +23,6 @@ export const EC08_PAGE_SENTINEL = 'EC08_SESSION_PAGE_CONTEXT_31415'
 export const EC08_GLOBAL_SENTINEL = 'EC08_GLOBAL_CURRENT_MUST_NOT_LEAK_16180'
 export const EC08_MODEL_TOKEN = 'EC08_SESSION_MODEL_OK'
 export const EC08_PROTOCOL = 4
-export const EC08_DEFAULT_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v4`
 const MAX_OUTPUT_BYTES = 256 * 1024
 
 export function ec08Material() {
@@ -128,14 +127,15 @@ function sseResponse(response, token) {
 }
 
 /**
- * Keep the CLI bootstrap request open so the plugin and named pipe remain alive.
- * A second request carrying the Session sentinels proves the pipe submission reached
- * the actual model boundary. Full prompts are never persisted.
+ * Hold the first non-target model request open. The runner waits for this bootstrap
+ * gate before touching the pipe, making the DSH/plugin lifetime deterministic.
  */
 export async function startEc08ModelGate() {
   const requests = []
   let bootstrapResponse = null
+  let bootstrapResolve
   let matchedResolve
+  const bootstrapStarted = new Promise(resolveBootstrap => { bootstrapResolve = resolveBootstrap })
   const matched = new Promise(resolveMatch => { matchedResolve = resolveMatch })
   const server = createServer((request, response) => {
     let body = ''
@@ -156,15 +156,11 @@ export async function startEc08ModelGate() {
       if (ec08RequestMatches(observation)) {
         sseResponse(response, EC08_MODEL_TOKEN)
         matchedResolve(observation)
-        if (bootstrapResponse !== null) {
-          const held = bootstrapResponse
-          bootstrapResponse = null
-          setTimeout(() => sseResponse(held, 'EC08_BOOTSTRAP_RELEASED'), 250)
-        }
         return
       }
       if (bootstrapResponse === null) {
         bootstrapResponse = response
+        bootstrapResolve(observation)
         return
       }
       sseResponse(response, 'EC08_NON_TARGET_REQUEST')
@@ -179,6 +175,7 @@ export async function startEc08ModelGate() {
   return {
     url: `http://127.0.0.1:${address.port}`,
     requests,
+    bootstrapStarted,
     matched,
     releaseBootstrap() {
       if (bootstrapResponse !== null) {
@@ -270,7 +267,16 @@ function spawnDsh(invocation, options) {
   }
   child.stdout?.on('data', chunk => { stdout = append(stdout, chunk) })
   child.stderr?.on('data', chunk => { stderr = append(stderr, chunk) })
-  const exited = new Promise(resolveExit => child.once('close', (code, signal) => resolveExit({ code, signal })))
+  const exited = new Promise(resolveExit => {
+    let settled = false
+    const settle = value => {
+      if (settled) return
+      settled = true
+      resolveExit(value)
+    }
+    child.once('error', error => settle({ code: null, signal: null, error: String(error) }))
+    child.once('close', (code, signal) => settle({ code, signal, error: null }))
+  })
   return {
     child,
     exited,
@@ -289,6 +295,28 @@ function timeoutPromise(ms, label) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms))
 }
 
+async function waitForDurableRequestHistory(client, sessionId, requestId, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const history = await client.request('session.history', { sessionId, afterCursor: 0, limit: 32 })
+    const entries = Array.isArray(history.payload?.entries) ? history.payload.entries : []
+    const entry = entries.find(item => item?.requestId === requestId)
+    if (
+      typeof entry?.text === 'string'
+      && entry.text.includes(EC08_SELECTION_SENTINEL)
+      && entry.text.includes(EC08_PAGE_SENTINEL)
+      && !entry.text.includes(EC08_GLOBAL_SENTINEL)
+    ) {
+      return {
+        entryCount: entries.length,
+        capturedThroughCursor: history.payload?.capturedThroughCursor ?? null,
+      }
+    }
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 100))
+  }
+  throw new Error(`EC-08 durable history did not expose request ${requestId}`)
+}
+
 export async function runEc08SessionModelBoundary(env = process.env) {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const dirs = await createRunDirectories('dsh-selection-companion-ec08-')
@@ -296,6 +324,7 @@ export async function runEc08SessionModelBoundary(env = process.env) {
     ? join(tmpdir(), 'dsh-selection-companion-r07-reports')
     : resolve(env.EC08_ARTIFACT_ROOT)
   const endpoint = env.EC08_PIPE ?? String.raw`\\.\pipe\dsh-selection-companion-ec08-${process.pid}-${Date.now()}`
+  const requestId = 'request-ec08-session-model-boundary'
   const report = {
     schemaVersion: 1,
     layer: 'EC08-session-model-boundary',
@@ -304,7 +333,14 @@ export async function runEc08SessionModelBoundary(env = process.env) {
     reason: null,
     preflight: null,
     install: null,
-    bridge: { hello: false, globalSnapshotInstalled: false, sessionCreated: false, submitted: false },
+    bridge: {
+      bootstrapHeld: false,
+      hello: false,
+      globalSnapshotInstalled: false,
+      sessionCreated: false,
+      submitted: false,
+      historyVerified: false,
+    },
     modelProbe: { requestCount: 0, matched: false, requests: [] },
     durableSessionFileCount: 0,
     artifacts: { report: join(artifactRoot, 'ec08-session-model-boundary.json') },
@@ -356,6 +392,8 @@ export async function runEc08SessionModelBoundary(env = process.env) {
       runEnv,
     )
     dsh = spawnDsh(invocation, { cwd: dirs.workspace, env: runEnv })
+    await Promise.race([gate.bootstrapStarted, timeoutPromise(30_000, 'EC-08 bootstrap model request')])
+    report.bridge.bootstrapHeld = true
 
     const socket = await connectPipe(endpoint)
     client = createEc08PipeClient(socket)
@@ -378,7 +416,7 @@ export async function runEc08SessionModelBoundary(env = process.env) {
     const material = ec08Material()
     const submitted = await client.request('session.submit', {
       sessionId,
-      requestId: 'request-ec08-session-model-boundary',
+      requestId,
       mode: 'queue',
       content: [{ type: 'text', text: canonicalEc08Prompt(material) }],
       material,
@@ -387,7 +425,8 @@ export async function runEc08SessionModelBoundary(env = process.env) {
     if (!report.bridge.submitted) throw new Error('EC-08 session.submit was not accepted')
 
     await Promise.race([gate.matched, timeoutPromise(30_000, 'EC-08 target model request')])
-    await new Promise(resolveDelay => setTimeout(resolveDelay, 500))
+    report.bridge.history = await waitForDurableRequestHistory(client, sessionId, requestId)
+    report.bridge.historyVerified = true
     gate.releaseBootstrap()
     await Promise.race([dsh.exited, timeoutPromise(30_000, 'EC-08 bootstrap DSH process')]).catch(() => undefined)
 
@@ -400,16 +439,18 @@ export async function runEc08SessionModelBoundary(env = process.env) {
     }
     const output = dsh.output()
     const pluginLoaded = /\[selection-companion\] plugin loaded!/.test(`${output.stdout}\n${output.stderr}`)
-    const pass = report.bridge.hello
+    const pass = report.bridge.bootstrapHeld
+      && report.bridge.hello
       && report.bridge.globalSnapshotInstalled
       && report.bridge.sessionCreated
       && report.bridge.submitted
+      && report.bridge.historyVerified
       && report.modelProbe.matched
       && pluginLoaded
       && sessionFiles.length > 0
     report.status = pass ? 'PASS' : 'FAIL'
     report.reason = pass
-      ? 'Protocol V4 session.submit reached the actual model request with authorized sentinels while excluding unrelated global selection state'
+      ? 'Protocol V4 session.submit was durable and reached the actual model request with authorized sentinels while excluding unrelated global selection state'
       : 'EC-08 session-to-model assertion failed'
     report.process = {
       pluginLoaded,
