@@ -1,3 +1,4 @@
+use super::browser_accessibility::BrowserAccessibilityProvider;
 use super::types::{CaptureContext, ProviderAttempt, ProviderCandidate};
 use super::{ProviderCapture, SelectionProvider};
 
@@ -9,6 +10,14 @@ pub struct ProviderRegistry {
 impl ProviderRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Current production-equivalent registry. Later batches may add DOM, Word,
+    /// PDF, and generic UIA providers without changing the capture/session seam.
+    pub fn browser_default(context_chars: i32) -> Result<Self, String> {
+        let mut registry = Self::new();
+        registry.register(BrowserAccessibilityProvider::new(context_chars)?)?;
+        Ok(registry)
     }
 
     pub fn register<P>(&mut self, provider: P) -> Result<(), String>
@@ -142,6 +151,12 @@ mod tests {
 
     fn context() -> CaptureContext {
         CaptureContext::new(CaptureTrigger::Manual, 1)
+    }
+
+    #[test]
+    fn browser_default_registers_the_existing_accessibility_provider() {
+        let registry = ProviderRegistry::browser_default(900).unwrap();
+        assert_eq!(registry.ids(), vec!["browser-accessibility"]);
     }
 
     #[test]
