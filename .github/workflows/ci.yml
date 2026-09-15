@@ -164,3 +164,82 @@ jobs:
             ${{ runner.temp }}\ec09-browser-artifacts\browser-selection.png
           if-no-files-found: warn
           retention-days: 14
+
+  ec09-tauri-real:
+    name: EC-09C real Tauri Lens boundary
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Install project dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build plugin package
+        run: pnpm build
+      - name: Build browser extension
+        run: pnpm browser:build
+      - name: Build debug Tauri application
+        shell: pwsh
+        run: pnpm --dir native exec tauri build --debug --no-bundle
+      - name: Build Windows native messaging host
+        run: pnpm native:host:build
+      - name: Install Playwright Chromium
+        run: pnpm --dir browser-extension exec playwright install chromium
+
+      # Tauri's direct WebDriver route on Windows proxies through the native
+      # Microsoft Edge WebDriver. Keep it synchronized with the hosted runner's
+      # Edge/WebView2 installation before starting tauri-driver.
+      - name: Install matching Microsoft Edge Driver
+        shell: pwsh
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          $PWD.Path >> $env:GITHUB_PATH
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Checkout DeepSeek Harness 0.1.1-rc.2
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+          path: .ec09c/deepseek-harness
+          fetch-depth: 1
+      - name: Install DeepSeek Harness dependencies
+        shell: pwsh
+        working-directory: .ec09c/deepseek-harness
+        run: pnpm install --frozen-lockfile
+      - name: Build DeepSeek Harness
+        shell: pwsh
+        working-directory: .ec09c/deepseek-harness
+        run: pnpm run build
+
+      # Final core acceptance: a real Chromium selection reaches Harness, a real
+      # Tauri WebView2 Lens explicitly authorizes section context, the material
+      # remains bound to the authorized snapshot, and the same request reaches
+      # the real Session/Agent/model boundary and durable history.
+      - name: Run EC-09C real Tauri Lens authorization boundary
+        shell: pwsh
+        env:
+          R07_DSH_REPOSITORY: ${{ github.workspace }}\.ec09c\deepseek-harness
+          DSH_LENS_REPORT_PATH: ${{ runner.temp }}\ec09-tauri-artifacts\ec09-tauri-lens-driver.json
+          DSH_LENS_SCREENSHOT_DIR: ${{ runner.temp }}\ec09-tauri-artifacts\screenshots
+        run: pnpm test:ec09:tauri-lens
+      - name: Upload EC-09C evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec09-tauri-lens-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\ec09-tauri-artifacts\ec09-tauri-lens-driver.json
+            ${{ runner.temp }}\ec09-tauri-artifacts\screenshots\*.png
+          if-no-files-found: warn
+          retention-days: 14
