@@ -42,7 +42,7 @@
     "test:ec08:session-model-boundary": "node scripts/ec08-session-model-boundary.mjs",
     "test:ec09:driver-contract": "node --test scripts/test-lens-runner.mjs",
     "test:ec09:browser-native-pipe": "node browser-extension/scripts/ec09-browser-native-pipe.mjs",
-    "test:ec09:tauri-lens": "node browser-extension/scripts/ec09-tauri-lens-driver.mjs",
+    "test:ec09:tauri-lens": "node browser-extension/scripts/ec09-tauri-lens-webview2.mjs",
     "test:selection": "vitest run tests/selection-context.spec.ts",
     "test:context-expansion": "vitest run tests/selection-context.spec.ts",
     "test:protocol": "vitest run tests/protocol.spec.ts",
