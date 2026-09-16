@@ -27,7 +27,7 @@ SelectionSnapshot
 Tauri / Rust Native Companion
         ↓ Protocol V3
 Windows Named Pipe
-\\.\pipe\dsh-selection-companion-v3
+\\.\pipe\dsh-selection-companion-v4
         ↓
 dsh-selection-companion Cordis plugin
         ↓
@@ -406,7 +406,7 @@ Expected logs include:
 
 ```text
 [selection-companion] plugin loaded!
-selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v3
+selection companion native bridge listening on \\.\pipe\dsh-selection-companion-v4
 ```
 
 ### 3. Start Native Companion

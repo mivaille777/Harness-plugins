@@ -1,9 +1,7 @@
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
-import {
-  normalizeSelectionMaterial,
-  selectionMaterialFromSnapshot,
-  type SelectionMaterial,
-  type SelectionMaterialScope,
+import type {
+  SelectionMaterial,
+  SelectionMaterialScope,
 } from '../../src/session/material.js'
 import type { SelectionExpansion } from './api/bridge'
 
@@ -25,8 +23,8 @@ export function authorizeExpandedContext(
   }
 
   const context = contextForScope(expansion.scope, expansion.context)
-  return normalizeSelectionMaterial({
-    ...selectionMaterialFromSnapshot(snapshot),
+  return freezeMaterial({
+    ...materialFromSnapshot(snapshot),
     authorizedScope: expansion.scope,
     actualScope: expansion.scope,
     completeness: expansion.completeness ?? 'complete',
@@ -37,7 +35,7 @@ export function authorizeExpandedContext(
 
 /** Default request authorization remains the exact fixed selection. */
 export function defaultAuthorizedMaterial(snapshot: SelectionSnapshot): SelectionMaterial {
-  return selectionMaterialFromSnapshot(snapshot)
+  return materialFromSnapshot(snapshot)
 }
 
 /** Authorization is bound to one immutable snapshot revision. */
@@ -66,4 +64,52 @@ function contextForScope(
     case 'page':
       return context.pageText === undefined ? {} : { pageText: context.pageText }
   }
+}
+
+/**
+ * Browser-safe projection of a snapshot already validated at the Native IPC
+ * boundary. The host validates this material again before durable persistence;
+ * keeping the projection here prevents the WebView from importing host-only
+ * Agent and model packages.
+ */
+function materialFromSnapshot(snapshot: SelectionSnapshot): SelectionMaterial {
+  if (snapshot.selection.text.trim().length === 0) {
+    throw new Error('selection.text must not be blank')
+  }
+  return freezeMaterial({
+    snapshotId: snapshot.id,
+    revision: snapshot.revision,
+    capturedAt: snapshot.capturedAt,
+    selection: {
+      text: snapshot.selection.text,
+      ...(snapshot.selection.language === undefined ? {} : { language: snapshot.selection.language }),
+    },
+    source: {
+      kind: snapshot.source.kind,
+      ...(snapshot.source.app === undefined ? {} : { app: snapshot.source.app }),
+      ...(snapshot.source.process === undefined ? {} : { process: snapshot.source.process }),
+      ...(snapshot.source.windowTitle === undefined ? {} : { windowTitle: snapshot.source.windowTitle }),
+    },
+    ...(snapshot.document === undefined ? {} : {
+      document: {
+        ...(snapshot.document.title === undefined ? {} : { title: snapshot.document.title }),
+        ...(snapshot.document.url === undefined ? {} : { url: snapshot.document.url }),
+        ...(snapshot.document.section === undefined ? {} : { section: snapshot.document.section }),
+        ...(snapshot.document.frameUrl === undefined ? {} : { frameUrl: snapshot.document.frameUrl }),
+      },
+    }),
+    authorizedScope: 'selection',
+    actualScope: 'selection',
+    completeness: 'complete',
+  })
+}
+
+function freezeMaterial(material: SelectionMaterial): SelectionMaterial {
+  const freeze = (value: unknown): void => {
+    if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return
+    Object.freeze(value)
+    for (const child of Object.values(value as Record<string, unknown>)) freeze(child)
+  }
+  freeze(material)
+  return material
 }

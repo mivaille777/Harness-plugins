@@ -1,6 +1,6 @@
 # Protocol contract
 
-The native companion and the Harness bundle exchange Protocol V3 messages through a length-prefixed UTF-8 JSON stream. The default Windows endpoint is `\\.\pipe\dsh-selection-companion-v3`. V3 requires the durable submission receipt, shared-turn request identity fields, and fixed submitted material. It does not negotiate with V1 or V2. Every message has a protocol version, a transport correlation ID, a known message type, and an object payload. Both implementations reject unknown fields at the IPC boundary.
+The native companion and the Harness bundle exchange Protocol V4 messages through a length-prefixed UTF-8 JSON stream. The default Windows endpoint is `\\.\pipe\dsh-selection-companion-v4`. V4 requires the durable submission receipt, shared-turn request identity fields, fixed submitted material, and explicit authorized versus actual context scope. It does not negotiate with earlier protocol versions. Every message has a protocol version, a transport correlation ID, a known message type, and an object payload. Both implementations reject unknown fields at the IPC boundary.
 
 ## Message availability
 

@@ -80,7 +80,7 @@ export function buildDiagnosticReport({ metadata, candidateSha, bridge, capture,
     versions: {
       plugin: metadata.packageVersion,
       native: metadata.nativeVersion,
-      protocol: 3,
+      protocol: 4,
     },
     bridge: {
       connected: bridge?.connected === true,

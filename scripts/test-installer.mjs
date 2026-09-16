@@ -20,7 +20,7 @@ const diagnostic = buildDiagnosticReport({
 const manifest = {
   schemaVersion: 1,
   candidateSha,
-  versions: { plugin: metadata.packageVersion, native: metadata.nativeVersion, tauri: metadata.tauriVersion, protocol: 3 },
+  versions: { plugin: metadata.packageVersion, native: metadata.nativeVersion, tauri: metadata.tauriVersion, protocol: 4 },
   bundleActive: metadata.bundleActive,
   artifacts: metadata.bundleActive ? await describeArtifacts(metadata.artifactDirectory, artifacts) : [],
   diagnostic,

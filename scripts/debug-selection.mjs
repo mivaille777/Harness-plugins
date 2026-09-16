@@ -3,7 +3,7 @@ import { createConnection } from 'node:net'
 import { once } from 'node:events'
 
 const endpoint = process.env.DSH_SELECTION_COMPANION_PIPE
-  ?? String.raw`\\.\pipe\dsh-selection-companion-v3`
+  ?? String.raw`\\.\pipe\dsh-selection-companion-v4`
 const socket = createConnection(endpoint)
 const pending = []
 let buffer = Buffer.alloc(0)
@@ -53,7 +53,7 @@ function nextMessage(timeoutMs = 3_000) {
 async function request(type, payload) {
   const id = `debug-${randomUUID()}`
   const responsePromise = nextMessage()
-  socket.write(encode({ protocol: 3, id, type, payload }))
+  socket.write(encode({ protocol: 4, id, type, payload }))
   const response = await responsePromise
   if (response.id !== id) throw new Error(`response id mismatch: ${response.id}`)
   if (response.type === 'error.response') {
@@ -66,7 +66,7 @@ try {
   await once(socket, 'connect')
   await request('bridge.hello', {
     client: { name: 'selection-debugger', version: '0.1.0', platform: 'windows' },
-    supportedProtocols: [3],
+    supportedProtocols: [4],
   })
   const response = await request('selection.current', {})
   const snapshot = response.payload.snapshot
