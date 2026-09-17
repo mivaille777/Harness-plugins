@@ -574,10 +574,14 @@ export default function App() {
         reselect: '重新选择',
         persistentHistory: '持久历史',
         heroTitle: '基于选中文本提问',
-        heroDescription: '我可以帮你解释、分析或基于这段内容继续提问。',
+        heroDescription: '选中的文本和经过授权的附近上下文会作为本次请求的 Context。',
         ready: '准备就绪',
+        waiting: '等待选区',
+        captureError: '采集异常',
         paused: '采集已暂停',
         openMainChat: '打开主对话',
+        selectFirst: '请先在 Chrome / Edge 中选择文本',
+        composerWaiting: '选择文本后即可提问',
         selectionSummary: (lines: number, chars: number) => `已选择 ${lines} 行文本 · 约 ${chars} 个字`,
       }
     : {
@@ -585,10 +589,14 @@ export default function App() {
         reselect: 'Reselect',
         persistentHistory: 'Persistent history',
         heroTitle: 'Ask about this selection',
-        heroDescription: 'Explain, analyze, or continue the conversation from the selected material.',
+        heroDescription: 'The selected text and explicitly authorized nearby context are attached to this request.',
         ready: 'Ready',
+        waiting: 'Waiting for selection',
+        captureError: 'Capture error',
         paused: 'Capture paused',
         openMainChat: 'Open main chat',
+        selectFirst: 'Select text in Chrome / Edge first',
+        composerWaiting: 'Select text to start asking',
         selectionSummary: (lines: number, chars: number) => `${lines} line${lines === 1 ? '' : 's'} selected · about ${chars} characters`,
       }
   const sourceApp = snapshot?.source.app ?? snapshot?.source.process ?? snapshot?.provider ?? ''
@@ -597,6 +605,13 @@ export default function App() {
   const selectedLines = selectedText === '' ? 0 : selectedText.split(/\r?\n/).length
   const selectedChars = Array.from(selectedText).length
   const sourceInitial = sourceApp.trim().slice(0, 1).toUpperCase() || '•'
+  const captureStatusLabel = capture.paused
+    ? ui.paused
+    : capture.lastError !== null || capture.phase === 'error'
+      ? ui.captureError
+      : snapshot === null
+        ? ui.waiting
+        : ui.ready
 
   return <main className="lens" data-testid="selection-lens" data-phase={projection.phase} lang={copy.locale}>
     <header className="lens-header" data-tauri-drag-region>
@@ -610,120 +625,121 @@ export default function App() {
     </header>
 
     {snapshot === null ? <section className="empty-state" aria-live="polite">
-      <div className="empty-mark" aria-hidden="true">✦</div>
-      <h1>{copy.emptyTitle}</h1>
-      <p>{copy.emptyDescription}</p>
-      <button type="button" onClick={() => void refresh()}>{copy.refreshSelection}</button>
-    </section> : <>
-      <section className="material" aria-label={copy.materialAriaLabel}>
-        <div className="selection-source-row">
-          <div className="selection-source">
-            <span className="selection-source-dot" aria-hidden="true" />
-            <span className={`source-app-mark source-${sourceKind}`} aria-hidden="true">{sourceInitial}</span>
-            <strong>{sourceApp}</strong>
-            <span className="selection-source-divider" aria-hidden="true">·</span>
-            <span className="source-kind">{sourceKind}</span>
-          </div>
-          <span className="source-chevron" aria-hidden="true">⌄</span>
+      <div className="empty-source-row">
+        <span className="selection-source-dot waiting" aria-hidden="true" />
+        <div><strong>{copy.emptyTitle}</strong><span>{ui.selectFirst}</span></div>
+        <button type="button" className="secondary compact-button" onClick={() => void refresh()}>{copy.refreshSelection}</button>
+      </div>
+      {capture.lastError ? <p className="capture-diagnostic" role="alert">{capture.lastError}</p> : null}
+    </section> : <section className="material" aria-label={copy.materialAriaLabel}>
+      <div className="selection-source-row">
+        <div className="selection-source">
+          <span className="selection-source-dot" aria-hidden="true" />
+          <span className={`source-app-mark source-${sourceKind}`} aria-hidden="true">{sourceInitial}</span>
+          <strong>{sourceApp}</strong>
+          <span className="selection-source-divider" aria-hidden="true">·</span>
+          <span className="source-kind">{sourceKind}</span>
         </div>
-        <p className="selection-caption">{ui.selectedText}</p>
-        <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
-        <div className="selection-meta-row">
-          <span>{ui.selectionSummary(selectedLines, selectedChars)}</span>
-          <button type="button" className="secondary compact-button" onClick={() => void refresh()} disabled={busy}>⌗ <span>{ui.reselect}</span></button>
-        </div>
-        <p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p>
-        <details className="context-panel" data-testid="captured-context">
-          <summary>{copy.contextLabel}</summary>
-          <div className="context-panel-body">
-            <p className="context-description">{copy.contextDescription}</p>
-            {contextScopes.length > 0 ? <div className="context-controls">
-              <label htmlFor="context-scope">{copy.contextScopeLabel}</label>
-              <select id="context-scope" value={contextScope} disabled={contextLoading || busy} onChange={event => changeContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
-              <button type="button" className="secondary" onClick={loadContext} disabled={contextLoading || busy}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button>
-            </div> : null}
-            {expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}
-            <p className="context-result" data-testid="request-context-authorization" role="status">{authorizedScope === 'selection' ? copy.contextAuthorizationSelection : copy.contextAuthorizationExpanded(authorizedScope)}</p>
-            {canAuthorizePreview ? <button type="button" className="secondary authorization-button" onClick={authorizeContext} disabled={busy}>{copy.contextAuthorize(contextScope)}</button> : null}
-            {contextError ? <p className="context-error" role="alert">{contextError}</p> : null}
-            {contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}
-            <details className="request-material-preview-panel" data-testid="request-material-preview-panel">
-              <summary>{copy.requestMaterialPreview}</summary>
-              <pre data-testid="request-material-preview">{requestMaterialPreview}</pre>
-            </details>
-          </div>
-        </details>
-      </section>
-
-      <section className="session-bar" aria-label={copy.sessionAriaLabel}>
-        <div className="session-heading">
-          <span className="session-title">{copy.sessionTitle}</span>
-          <details className="history-drawer">
-            <summary>{ui.persistentHistory} <span aria-hidden="true">›</span></summary>
-            <div className="history-popover">
-              {historyLoading ? <p className="history-state">{copy.restoringHistory}</p> : null}
-              {historyError ? <p className="history-state error" role="alert">{historyError}</p> : null}
-              {history.length > 0 ? <section className="history" aria-label={copy.historyAriaLabel}>
-                <div className="history-heading"><span>{copy.historyLabel}</span><span>{copy.messages(history.length)}</span></div>
-                <div className="history-list">
-                  {history.map(entry => <article className={`history-entry ${entry.role}`} key={entry.seq} data-testid={`history-entry-${entry.seq}`}>
-                    <div className="history-meta"><span>{entry.role === 'user' ? copy.you : copy.harness}</span>{entry.sourceKind ? <span>{entry.sourceKind}</span> : null}</div>
-                    <p>{entry.text}</p>
-                  </article>)}
-                </div>
-              </section> : <p className="history-state">{isChinese ? '当前会话暂无历史消息。' : 'No durable messages in this session yet.'}</p>}
-            </div>
+        <span className="source-chevron" aria-hidden="true">⌄</span>
+      </div>
+      <p className="selection-caption">{ui.selectedText}</p>
+      <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
+      <div className="selection-meta-row">
+        <span>{ui.selectionSummary(selectedLines, selectedChars)}</span>
+        <button type="button" className="secondary compact-button" onClick={() => void refresh()} disabled={busy}>⌗ <span>{ui.reselect}</span></button>
+      </div>
+      <p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p>
+      <details className="context-panel" data-testid="captured-context">
+        <summary>{copy.contextLabel}</summary>
+        <div className="context-panel-body">
+          <p className="context-description">{copy.contextDescription}</p>
+          {contextScopes.length > 0 ? <div className="context-controls">
+            <label htmlFor="context-scope">{copy.contextScopeLabel}</label>
+            <select id="context-scope" value={contextScope} disabled={contextLoading || busy} onChange={event => changeContextScope(event.target.value as ExpandableContextScope)}>{contextScopes.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+            <button type="button" className="secondary" onClick={loadContext} disabled={contextLoading || busy}>{contextLoading ? copy.contextLoading : copy.contextLoad}</button>
+          </div> : null}
+          {expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}
+          <p className="context-result" data-testid="request-context-authorization" role="status">{authorizedScope === 'selection' ? copy.contextAuthorizationSelection : copy.contextAuthorizationExpanded(authorizedScope)}</p>
+          {canAuthorizePreview ? <button type="button" className="secondary authorization-button" onClick={authorizeContext} disabled={busy}>{copy.contextAuthorize(contextScope)}</button> : null}
+          {contextError ? <p className="context-error" role="alert">{contextError}</p> : null}
+          {contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}
+          <details className="request-material-preview-panel" data-testid="request-material-preview-panel">
+            <summary>{copy.requestMaterialPreview}</summary>
+            <pre data-testid="request-material-preview">{requestMaterialPreview}</pre>
           </details>
         </div>
-        <div className="session-controls">
-          <select aria-label={copy.sessionSelectAriaLabel} value={sessionId ?? ''} disabled={sessionsLoading || historyLoading} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
-            {sessionId === null ? <option value="">{copy.noSession}</option> : null}
-            {sessions.map((session, index) => <option value={session.id} key={session.id}>{sessionLabel(session, index, copy)} · {sessionStatusLabel(session, copy)}</option>)}
-          </select>
-          <button type="button" className="secondary new-session-button" onClick={createAndOpenSession} disabled={sessionsLoading || historyLoading}><span aria-hidden="true">＋</span>{copy.newSession}</button>
-        </div>
-        <p className="session-navigation-note sr-only" role="note">{copy.navigationUnavailable}</p>
-      </section>
+      </details>
+    </section>}
 
-      <section className="ask-hero" aria-hidden="true">
-        <div className="hero-mark">✦</div>
-        <h1>{ui.heroTitle}</h1>
-        <p>{ui.heroDescription}</p>
-      </section>
+    <section className="session-bar" aria-label={copy.sessionAriaLabel}>
+      <div className="session-heading">
+        <span className="session-title">{copy.sessionTitle}</span>
+        <details className="history-drawer">
+          <summary>{ui.persistentHistory} <span aria-hidden="true">›</span></summary>
+          <div className="history-popover">
+            {historyLoading ? <p className="history-state">{copy.restoringHistory}</p> : null}
+            {historyError ? <p className="history-state error" role="alert">{historyError}</p> : null}
+            {history.length > 0 ? <section className="history" aria-label={copy.historyAriaLabel}>
+              <div className="history-heading"><span>{copy.historyLabel}</span><span>{copy.messages(history.length)}</span></div>
+              <div className="history-list">
+                {history.map(entry => <article className={`history-entry ${entry.role}`} key={entry.seq} data-testid={`history-entry-${entry.seq}`}>
+                  <div className="history-meta"><span>{entry.role === 'user' ? copy.you : copy.harness}</span>{entry.sourceKind ? <span>{entry.sourceKind}</span> : null}</div>
+                  <p>{entry.text}</p>
+                </article>)}
+              </div>
+            </section> : <p className="history-state">{isChinese ? '当前会话暂无历史消息。' : 'No durable messages in this session yet.'}</p>}
+          </div>
+        </details>
+      </div>
+      <div className="session-controls">
+        <select aria-label={copy.sessionSelectAriaLabel} value={sessionId ?? ''} disabled={sessionsLoading || historyLoading} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
+          {sessionId === null ? <option value="">{copy.noSession}</option> : null}
+          {sessions.map((session, index) => <option value={session.id} key={session.id}>{sessionLabel(session, index, copy)} · {sessionStatusLabel(session, copy)}</option>)}
+        </select>
+        <button type="button" className="secondary new-session-button" onClick={createAndOpenSession} disabled={sessionsLoading || historyLoading}><span aria-hidden="true">＋</span>{copy.newSession}</button>
+      </div>
+      <p className="session-navigation-note sr-only" role="note">{copy.navigationUnavailable}</p>
+    </section>
 
-      <section className="composer-shell">
-        <label className="question-label sr-only" htmlFor="question">{copy.askLabel}</label>
-        <textarea
-          id="question"
-          value={draft}
-          maxLength={COMPOSER_LIMIT}
-          onChange={event => {
-            const value = event.target.value
-            setDraft(value)
-            if (sessionId !== null) drafts.current.set(sessionId, value)
-          }}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              submit('ask')
-            }
-          }}
-          placeholder={copy.askPlaceholder}
-          rows={4}
-        />
-        <span className="composer-count" aria-hidden="true">{Array.from(draft).length} / {COMPOSER_LIMIT}</span>
-        <button className="send-button" type="button" onClick={() => submit('ask')} disabled={busy || draft.trim().length === 0} aria-label={copy.ask}>➤</button>
-      </section>
+    <section className="ask-hero" aria-hidden="true">
+      <div className="hero-mark">✦</div>
+      <h1>{snapshot === null ? copy.emptyTitle : ui.heroTitle}</h1>
+      <p>{snapshot === null ? copy.emptyDescription : ui.heroDescription}</p>
+    </section>
 
-      <button type="button" className="sr-only-action" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button>
+    <section className={`composer-shell ${snapshot === null ? 'composer-waiting' : ''}`}>
+      <label className="question-label sr-only" htmlFor="question">{copy.askLabel}</label>
+      <textarea
+        id="question"
+        value={draft}
+        maxLength={COMPOSER_LIMIT}
+        disabled={snapshot === null || busy}
+        onChange={event => {
+          const value = event.target.value
+          setDraft(value)
+          if (sessionId !== null) drafts.current.set(sessionId, value)
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            submit('ask')
+          }
+        }}
+        placeholder={snapshot === null ? ui.composerWaiting : copy.askPlaceholder}
+        rows={4}
+      />
+      <span className="composer-count" aria-hidden="true">{Array.from(draft).length} / {COMPOSER_LIMIT}</span>
+      <button className="send-button" type="button" onClick={() => submit('ask')} disabled={snapshot === null || busy || draft.trim().length === 0} aria-label={copy.ask}>➤</button>
+    </section>
 
-      {showAnswer ? <section className={`answer ${projection.phase === 'streaming' ? 'answer-live' : ''}`} aria-label={copy.answerLabel} aria-live={projection.phase === 'streaming' ? 'polite' : undefined}>
-        <div className="answer-heading"><span>{copy.answerLabel}</span><button className="text-button" type="button" onClick={copyAnswer}>{copy.copyAnswer}</button></div>
-        <p>{projection.answer}</p>
-      </section> : null}
-      {(['queued', 'streaming'] as RequestPhase[]).includes(projection.phase) ? <button type="button" className="secondary session-action" onClick={stop}>{copy.stopSession}</button> : null}
-      {projection.phase === 'submission-unknown' ? <button type="button" className="secondary session-action" onClick={retrySubmission}>{copy.retrySafely}</button> : null}
-    </>}
+    {snapshot !== null ? <button type="button" className="sr-only-action" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button> : null}
+
+    {showAnswer ? <section className={`answer ${projection.phase === 'streaming' ? 'answer-live' : ''}`} aria-label={copy.answerLabel} aria-live={projection.phase === 'streaming' ? 'polite' : undefined}>
+      <div className="answer-heading"><span>{copy.answerLabel}</span><button className="text-button" type="button" onClick={copyAnswer}>{copy.copyAnswer}</button></div>
+      <p>{projection.answer}</p>
+    </section> : null}
+    {(['queued', 'streaming'] as RequestPhase[]).includes(projection.phase) ? <button type="button" className="secondary session-action" onClick={stop}>{copy.stopSession}</button> : null}
+    {projection.phase === 'submission-unknown' ? <button type="button" className="secondary session-action" onClick={retrySubmission}>{copy.retrySafely}</button> : null}
 
     {projection.error ? <p className="notice error" role="alert">{projection.error}</p> : null}
     {notice ?? projection.notice ? <p className="notice" role="status">{notice ?? projection.notice}</p> : null}
@@ -735,8 +751,8 @@ export default function App() {
         aria-label={capture.paused ? copy.resumeCapture : copy.pauseCapture}
         onClick={() => void (capture.paused ? resumeCapture() : pauseCapture()).then(setCapture)}
       >
-        <span className={`status-dot ${capture.paused ? 'paused' : ''}`} aria-hidden="true" />
-        <span>{capture.paused ? ui.paused : ui.ready}</span>
+        <span className={`status-dot ${capture.paused ? 'paused' : capture.lastError ? 'error' : snapshot === null ? 'waiting' : ''}`} aria-hidden="true" />
+        <span>{captureStatusLabel}</span>
       </button>
       <span className="phase-live" aria-live="polite">{action === null ? copy.phaseLabels.idle : phaseLabel}</span>
       <button type="button" className="main-chat-link" onClick={() => setNotice(copy.navigationUnavailable)}>{ui.openMainChat} <span aria-hidden="true">↗</span></button>
