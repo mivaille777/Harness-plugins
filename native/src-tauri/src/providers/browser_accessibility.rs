@@ -9,7 +9,10 @@ use crate::providers::{ProviderCapture, SelectionProvider};
 const PROVIDER_ID: &str = "browser-accessibility";
 const DEFAULT_CONTEXT_CHARS: i32 = 900;
 const MAX_ANCESTOR_DEPTH: usize = 24;
-const MAX_FALLBACK_NODES: usize = 400;
+// Modern Chromium accessibility trees can easily exceed a few hundred nodes.
+// Keep the fallback bounded, but large enough to reach the active document.
+const MAX_FALLBACK_NODES: usize = 2_400;
+const MAX_TOP_LEVEL_WINDOWS: usize = 160;
 
 #[derive(Debug, Clone)]
 pub struct BrowserAccessibilityProvider {
@@ -146,6 +149,8 @@ mod windows_impl {
     use uiautomation::types::{HeadingLevel, TextPatternRangeEndpoint, TextUnit};
     use uiautomation::{UIAutomation, UIElement, UITreeWalker};
 
+    type SelectedRange = (UITextRange, String, UIElement);
+
     pub(super) fn capture(
         automation: &UIAutomation,
         context_chars: i32,
@@ -157,46 +162,66 @@ mod windows_impl {
             .get_focused_element()
             .map_err(|error| error.to_string())?;
 
-        let Some(browser_window) = find_browser_window(&focused, &walker) else {
-            return Ok(ProviderCapture::NotApplicable);
-        };
-
-        let selected = find_selected_range(&focused, &walker).or_else(|| {
-            let mut visited = 0usize;
-            search_selected_range(&browser_window, &walker, &mut visited)
-        });
-        let Some((range, selected_text, text_provider)) = selected else {
+        // Fast path: the user is still focused in Chromium.
+        if let Some(browser_window) = find_browser_window(&focused, &walker) {
+            let selected = find_selected_range(&focused, &walker).or_else(|| {
+                let mut visited = 0usize;
+                search_selected_range(&browser_window, &walker, &mut visited)
+            });
+            if let Some(selected) = selected {
+                return build_snapshot(&browser_window, selected, &walker, context_chars)
+                    .map(ProviderCapture::Captured);
+            }
             return Ok(ProviderCapture::NoSelection);
-        };
+        }
 
+        // The Lens becomes foreground as soon as the user clicks it. Chromium
+        // keeps its visual/text selection, so recover that selection by scanning
+        // top-level browser windows instead of requiring browser focus.
+        match find_background_browser_selection(automation, &walker)? {
+            Some((browser_window, selected)) => build_snapshot(
+                &browser_window,
+                selected,
+                &walker,
+                context_chars,
+            )
+            .map(ProviderCapture::Captured),
+            None if has_browser_window(automation, &walker)? => Ok(ProviderCapture::NoSelection),
+            None => Ok(ProviderCapture::NotApplicable),
+        }
+    }
+
+    fn build_snapshot(
+        browser_window: &UIElement,
+        selected: SelectedRange,
+        walker: &UITreeWalker,
+        context_chars: i32,
+    ) -> Result<SelectionSnapshot, String> {
+        let (range, selected_text, text_provider) = selected;
         let before = context_before(&range, context_chars);
         let after = context_after(&range, context_chars);
         let paragraph = paragraph_text(&range);
         let enclosing = range.get_enclosing_element().ok();
         let heading = enclosing
             .as_ref()
-            .and_then(|element| nearest_heading(element, &walker));
-        let document_title = find_document_title(&text_provider, &walker)
-            .or_else(|| document_title_from_window(&browser_window.get_name().unwrap_or_default()));
-        let url = find_address_bar_url(&browser_window, &walker);
+            .and_then(|element| nearest_heading(element, walker));
+        let window_title = browser_window.get_name().unwrap_or_default();
+        let document_title = find_document_title(&text_provider, walker)
+            .or_else(|| document_title_from_window(&window_title));
+        let url = find_address_bar_url(browser_window, walker);
         let geometry = enclosing.as_ref().and_then(element_geometry);
 
-        let window_title = browser_window.get_name().unwrap_or_default();
         let (app, process_name) = browser_identity(&window_title);
-        let process_id = focused.get_process_id().unwrap_or_default();
+        let process_id = browser_window.get_process_id().unwrap_or_default();
         let local_context = before.is_some() || after.is_some();
         let section_context = paragraph.is_some() || heading.is_some();
-        let has_heading = heading.is_some();
-        let has_url = url.is_some();
-        let has_title = document_title.is_some();
-        let has_geometry = geometry.is_some();
         let confidence_value = confidence(
             local_context,
             section_context,
-            has_heading,
-            has_url,
-            has_title,
-            has_geometry,
+            heading.is_some(),
+            url.is_some(),
+            document_title.is_some(),
+            geometry.is_some(),
         );
         let captured_at = now_millis();
 
@@ -240,15 +265,21 @@ mod windows_impl {
         };
 
         snapshot.validate().map_err(|error| error.to_string())?;
-        Ok(ProviderCapture::Captured(snapshot))
+        Ok(snapshot)
+    }
+
+    fn is_browser_window(element: &UIElement) -> bool {
+        element
+            .get_classname()
+            .map(|class_name| class_name.starts_with("Chrome_WidgetWin_"))
+            .unwrap_or(false)
     }
 
     fn find_browser_window(focused: &UIElement, walker: &UITreeWalker) -> Option<UIElement> {
         let mut current = focused.clone();
         let mut candidate = None;
         for _ in 0..MAX_ANCESTOR_DEPTH {
-            let class_name = current.get_classname().unwrap_or_default();
-            if class_name.starts_with("Chrome_WidgetWin_") {
+            if is_browser_window(&current) {
                 candidate = Some(current.clone());
             }
             match walker.get_parent(&current) {
@@ -259,10 +290,57 @@ mod windows_impl {
         candidate
     }
 
+    fn find_background_browser_selection(
+        automation: &UIAutomation,
+        walker: &UITreeWalker,
+    ) -> Result<Option<(UIElement, SelectedRange)>, String> {
+        let root = automation
+            .get_root_element()
+            .map_err(|error| error.to_string())?;
+        let mut current = walker.get_first_child(&root).ok();
+        let mut windows = 0usize;
+        while let Some(element) = current {
+            windows += 1;
+            if windows > MAX_TOP_LEVEL_WINDOWS {
+                break;
+            }
+            if is_browser_window(&element) {
+                let mut visited = 0usize;
+                if let Some(selected) = search_selected_range(&element, walker, &mut visited) {
+                    return Ok(Some((element, selected)));
+                }
+            }
+            current = walker.get_next_sibling(&element).ok();
+        }
+        Ok(None)
+    }
+
+    fn has_browser_window(
+        automation: &UIAutomation,
+        walker: &UITreeWalker,
+    ) -> Result<bool, String> {
+        let root = automation
+            .get_root_element()
+            .map_err(|error| error.to_string())?;
+        let mut current = walker.get_first_child(&root).ok();
+        let mut windows = 0usize;
+        while let Some(element) = current {
+            windows += 1;
+            if windows > MAX_TOP_LEVEL_WINDOWS {
+                break;
+            }
+            if is_browser_window(&element) {
+                return Ok(true);
+            }
+            current = walker.get_next_sibling(&element).ok();
+        }
+        Ok(false)
+    }
+
     fn find_selected_range(
         focused: &UIElement,
         walker: &UITreeWalker,
-    ) -> Option<(UITextRange, String, UIElement)> {
+    ) -> Option<SelectedRange> {
         let mut current = focused.clone();
         for _ in 0..MAX_ANCESTOR_DEPTH {
             if let Some(found) = selected_range_from_element(&current) {
@@ -277,7 +355,7 @@ mod windows_impl {
         element: &UIElement,
         walker: &UITreeWalker,
         visited: &mut usize,
-    ) -> Option<(UITextRange, String, UIElement)> {
+    ) -> Option<SelectedRange> {
         if *visited >= MAX_FALLBACK_NODES {
             return None;
         }
@@ -300,7 +378,6 @@ mod windows_impl {
     }
 
     fn selected_range_from_element(element: &UIElement) -> Option<(UITextRange, String)> {
-        // Password controls can expose a text pattern. Never turn it into a selection snapshot.
         if element.is_password().unwrap_or(false) {
             return None;
         }
@@ -477,10 +554,6 @@ mod windows_impl {
     }
 
     fn element_geometry(element: &UIElement) -> Option<SelectionGeometry> {
-        // uiautomation 0.16 does not wrap TextRange.GetBoundingRectangles.
-        // Use the enclosing accessibility element as a conservative screen-space
-        // anchor. Task 6 can refine the exact selection range rectangle without
-        // changing SelectionSnapshot or the provider seam.
         let rect = element.get_bounding_rectangle().ok()?;
         let width = rect.get_width();
         let height = rect.get_height();
