@@ -660,7 +660,7 @@ export default function App() {
           </div> : null}
           {expandedContext ? <p className="context-result" role="status">{expandedContext.completeness === 'partial' ? copy.contextPartial : copy.contextComplete}{expandedContext.truncated ? ` · ${copy.contextTruncated}` : ''}</p> : null}
           <p className="context-result" data-testid="request-context-authorization" role="status">{authorizedScope === 'selection' ? copy.contextAuthorizationSelection : copy.contextAuthorizationExpanded(authorizedScope)}</p>
-          {canAuthorizePreview ? <button type="button" className="secondary authorization-button" onClick={authorizeContext} disabled={busy}>{copy.contextAuthorize(contextScope)}</button> : null}
+          {canAuthorizePreview ? <button type="button" className="secondary authorization-button" data-testid="authorize-context" onClick={authorizeContext} disabled={busy}>{copy.contextAuthorize(contextScope)}</button> : null}
           {contextError ? <p className="context-error" role="alert">{contextError}</p> : null}
           {contextItems.length === 0 ? <p className="context-none">{copy.contextNone}</p> : <div className="context-list">{contextItems.map(item => <div className="context-item" key={item.label}><span className="context-item-label">{item.label}</span><pre>{item.text}</pre></div>)}</div>}
           <details className="request-material-preview-panel" data-testid="request-material-preview-panel">
@@ -732,7 +732,7 @@ export default function App() {
       <button className="send-button" type="button" onClick={() => submit('ask')} disabled={snapshot === null || busy || draft.trim().length === 0} aria-label={copy.ask}>➤</button>
     </section>
 
-    {snapshot !== null ? <button type="button" className="sr-only-action" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button> : null}
+    {snapshot !== null ? <button type="button" className="sr-only-action" data-testid="explain-action" onClick={() => submit('explain')} disabled={busy}>{copy.explain}</button> : null}
 
     {showAnswer ? <section className={`answer ${projection.phase === 'streaming' ? 'answer-live' : ''}`} aria-label={copy.answerLabel} aria-live={projection.phase === 'streaming' ? 'polite' : undefined}>
       <div className="answer-heading"><span>{copy.answerLabel}</span><button className="text-button" type="button" onClick={copyAnswer}>{copy.copyAnswer}</button></div>
