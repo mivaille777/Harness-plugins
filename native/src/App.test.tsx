@@ -80,7 +80,7 @@ describe('selection lens', () => {
     eventApi.selectionHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
     expect(await screen.findByText('A newer visible selection')).toBeInTheDocument()
     expect(screen.getByText('Latest browser selection is now shown.')).toBeInTheDocument()
-    expect(screen.getByText('Updated source')).toBeInTheDocument()
+    expect(screen.getByText('Fixed material · revision 3')).toBeInTheDocument()
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
   it('keeps captured context behind an explicit disclosure', async () => {
@@ -161,7 +161,7 @@ describe('selection lens', () => {
     expect((await screen.findByLabelText('Ask about this selection') as HTMLTextAreaElement).value).toBe('draft for first session')
   })
   it('does not submit while composing Chinese input and subscribes after composition completes', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(api.submitSessionPrompt).not.toHaveBeenCalled(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)); await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledWith('session-1', expect.any(String), 0)); expect(await screen.findByText(/Waiting for Harness session session-1/)).toBeInTheDocument() })
-  it('hides on Escape and keeps pause separate from Lens close', async () => { render(<App />); await screen.findByText('Fixture page'); fireEvent.keyDown(window, { key: 'Escape' }); expect(hide).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: 'Pause capture' })); await waitFor(() => expect(api.pauseCapture).toHaveBeenCalledTimes(1)) })
+  it('hides on Escape and keeps pause separate from Lens close', async () => { render(<App />); await screen.findByTestId('selected-text'); fireEvent.keyDown(window, { key: 'Escape' }); expect(hide).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: 'Pause capture' })); await waitFor(() => expect(api.pauseCapture).toHaveBeenCalledTimes(1)) })
   it('renders correlated text and completes only on turn end', async () => {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
@@ -243,7 +243,7 @@ describe('selection lens', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
     expect(await screen.findByText('Submission status unknown')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Explain' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Use latest selection' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Reselect' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
     await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(2))
     expect(api.submitSessionPrompt.mock.calls[1]?.[0]).toBe('session-recovered')
@@ -268,10 +268,10 @@ describe('selection lens', () => {
     const subscriptionId = api.subscribeSession.mock.calls[0]?.[1]
     fireEvent.click(screen.getByRole('button', { name: 'Stop session' }))
     eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId, requestId: 'request-1', event: { kind: 'status', data: { cursor: 5, persistent: true, value: { status: 'turn-end', turn: 1, reason: { kind: 'completed' } } } } } })
-    expect(await screen.findByText('Answer complete')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('selection-lens')).toHaveAttribute('data-phase', 'completed'))
     finishCancel?.(false)
     await waitFor(() => expect(screen.queryByText('Request failed')).not.toBeInTheDocument())
-    expect(screen.getByText('Answer complete')).toBeInTheDocument()
+    expect(screen.getByTestId('selection-lens')).toHaveAttribute('data-phase', 'completed')
   })
   it('keeps a completed turn when cancellation rejects after completion', async () => {
     let rejectCancel: ((error: Error) => void) | undefined
