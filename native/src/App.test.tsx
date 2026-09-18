@@ -243,7 +243,7 @@ describe('selection lens', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
     expect(await screen.findByText('Submission status unknown')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Explain' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Reselect' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Reselect/ })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
     await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(2))
     expect(api.submitSessionPrompt.mock.calls[1]?.[0]).toBe('session-recovered')
