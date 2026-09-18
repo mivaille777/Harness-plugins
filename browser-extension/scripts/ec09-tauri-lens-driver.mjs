@@ -316,9 +316,15 @@ function createWebDriver(base = 'http://127.0.0.1:4444') {
         try { await request('/status'); return true } catch { return false }
       }, 'tauri-driver status', timeoutMs)
     },
-    async start(application) {
+    async attach(debuggerAddress) {
       const value = await request('/session', 'POST', {
-        capabilities: { alwaysMatch: { 'tauri:options': { application } } },
+        capabilities: {
+          alwaysMatch: {
+            browserName: 'webview2',
+            'ms:edgeChromium': true,
+            'ms:edgeOptions': { debuggerAddress },
+          },
+        },
       })
       sessionId = value?.sessionId
       if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('tauri-driver did not return a sessionId')
@@ -363,6 +369,71 @@ function spawnTauriDriver(env) {
       if (child.exitCode === null) child.kill()
     },
   }
+}
+
+
+async function reserveLocalPort() {
+  const server = createServer()
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen)
+    server.listen(0, '127.0.0.1', resolveListen)
+  })
+  const address = server.address()
+  if (address === null || typeof address === 'string') {
+    await new Promise(resolveClose => server.close(() => resolveClose()))
+    throw new Error('could not reserve a WebView2 remote debugging port')
+  }
+  const port = address.port
+  await new Promise(resolveClose => server.close(() => resolveClose()))
+  return port
+}
+
+function spawnTauriApplication(application, env, debugPort, userDataFolder) {
+  const inheritedArgs = env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS?.trim()
+  const remoteDebugging = `--remote-debugging-port=${debugPort}`
+  const childEnv = {
+    ...env,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: inheritedArgs ? `${inheritedArgs} ${remoteDebugging}` : remoteDebugging,
+    WEBVIEW2_USER_DATA_FOLDER: userDataFolder,
+  }
+  const child = spawn(application, [], {
+    cwd: dirname(application),
+    env: childEnv,
+    windowsHide: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout?.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(-MAX_OUTPUT_BYTES) })
+  child.stderr?.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-MAX_OUTPUT_BYTES) })
+  return {
+    child,
+    output: () => ({ stdout, stderr }),
+    stop() {
+      if (child.exitCode !== null) return
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+        killer.once('error', () => undefined)
+      } else child.kill('SIGTERM')
+    },
+  }
+}
+
+async function waitForWebView2Debugger(debugPort, applicationProcess, timeoutMs = 20_000) {
+  await waitUntil(async () => {
+    if (applicationProcess.child.exitCode !== null) {
+      const output = applicationProcess.output()
+      throw new Error(`Tauri application exited before WebView2 debugging became available (code ${applicationProcess.child.exitCode}): ${redactOutput(output.stderr).trim().slice(-2_000)}`)
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${debugPort}/json/version`, {
+        signal: AbortSignal.timeout(750),
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  }, 'Tauri WebView2 remote debugging endpoint', timeoutMs, 100)
 }
 
 async function waitForBrowserSnapshot(client, timeoutMs = 15_000) {
@@ -421,6 +492,7 @@ export async function runEc09TauriLensDriver(env = process.env) {
   let browser
   let pipeClient
   let tauriDriver
+  let tauriApplication
   const webdriver = createWebDriver()
   let nativeHostRegistered = false
   try {
@@ -472,10 +544,16 @@ export async function runEc09TauriLensDriver(env = process.env) {
     report.realSelection = true
     report.assertions.push('browser-selection-captured')
 
+    const debugPort = await reserveLocalPort()
+    const webviewUserDataFolder = join(dirs.root, 'webview2-profile')
+    await mkdir(webviewUserDataFolder, { recursive: true })
+    tauriApplication = spawnTauriApplication(application, runEnv, debugPort, webviewUserDataFolder)
+    await waitForWebView2Debugger(debugPort, tauriApplication)
     tauriDriver = spawnTauriDriver(runEnv)
     await webdriver.waitReady()
-    await webdriver.start(application)
+    await webdriver.attach(`127.0.0.1:${debugPort}`)
     report.realWindow = true
+    report.diagnostics.webview2DebugPort = debugPort
 
     await waitUntil(async () => (await webdriver.execute(`return document.querySelector('[data-testid="selected-text"]')?.textContent || ''`)).includes(EC09_LENS_SELECTION), 'Tauri selected-text')
     const idlePath = join(screenshotDir, 'idle.png')
@@ -497,8 +575,8 @@ export async function runEc09TauriLensDriver(env = process.env) {
     await waitUntil(async () => (await webdriver.execute(`return document.querySelector('[data-testid="captured-context"]')?.textContent || ''`)).includes(EC09_LENS_SECTION), 'expanded section context')
     report.assertions.push('expanded-context-loaded')
 
-    await waitUntil(async () => await webdriver.execute(`return !!document.querySelector('[data-testid="captured-context"] > button.secondary')`), 'explicit authorization button')
-    await webdriver.click('[data-testid="captured-context"] > button.secondary')
+    await waitUntil(async () => await webdriver.execute(`return !!document.querySelector('[data-testid="authorize-context"]')`), 'explicit authorization button')
+    await webdriver.click('[data-testid="authorize-context"]')
     const authorizationText = await waitUntil(async () => {
       const value = await webdriver.execute(`return document.querySelector('[data-testid="request-context-authorization"]')?.textContent || ''`)
       return typeof value === 'string' && value.toLowerCase().includes('section') ? value : null
@@ -528,7 +606,7 @@ export async function runEc09TauriLensDriver(env = process.env) {
     const materialFrozen = previewAfterGlobalChange === preview && !previewAfterGlobalChange.includes(EC09_LENS_NEWER_GLOBAL)
     if (!materialFrozen) throw new Error('authorized request material changed after an unrelated global selection update')
 
-    await webdriver.click('.quick-actions button')
+    await webdriver.click('[data-testid="explain-action"]')
     const target = await Promise.race([gate.targetStarted, timeoutPromise(30_000, 'EC-09 Lens target model request')])
     if (target.forbidden?.[EC09_LENS_NEWER_GLOBAL] !== false) throw new Error('newer global selection leaked into model request')
     if (target.previewObserved !== true) throw new Error('model request did not contain the exact authorized material preview')
@@ -543,6 +621,7 @@ export async function runEc09TauriLensDriver(env = process.env) {
     const requestId = history.user.requestId
     if (typeof requestId !== 'string' || requestId.length === 0) throw new Error('durable Session history did not expose the Lens requestId')
     if (history.user.text.includes(EC09_LENS_NEWER_GLOBAL)) throw new Error('newer global selection leaked into durable Session transcript')
+    await webdriver.click('.history-drawer > summary')
     await waitUntil(async () => {
       const text = await webdriver.execute(`return document.querySelector('.history')?.textContent || ''`)
       return typeof text === 'string' && text.includes(EC09_LENS_MODEL_TOKEN)
@@ -586,12 +665,15 @@ export async function runEc09TauriLensDriver(env = process.env) {
     report.diagnostics.reason = error instanceof Error ? error.message : String(error)
     const dshOutput = dsh?.output()
     const driverOutput = tauriDriver?.output()
+    const applicationOutput = tauriApplication?.output()
     if (dshOutput !== undefined) report.diagnostics.dshStderr = redactOutput(dshOutput.stderr).trim().slice(-8_000)
     if (driverOutput !== undefined) report.diagnostics.tauriDriverStderr = redactOutput(driverOutput.stderr).trim().slice(-8_000)
+    if (applicationOutput !== undefined) report.diagnostics.tauriApplicationStderr = redactOutput(applicationOutput.stderr).trim().slice(-8_000)
   } finally {
     report.diagnostics.modelRequests = gate?.requests ?? report.diagnostics.modelRequests
     await webdriver.close().catch(() => undefined)
     tauriDriver?.stop()
+    tauriApplication?.stop()
     if (browser?.context !== undefined) await browser.context.close().catch(() => undefined)
     if (nativeHostRegistered) await unregisterNativeHost(env).catch(() => undefined)
     pipeClient?.close()
