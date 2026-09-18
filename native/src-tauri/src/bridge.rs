@@ -638,6 +638,10 @@ impl BridgeRuntime {
         snapshot.validate().map_err(|error| error.to_string())?;
         self.connect().await?;
 
+        // Keep one immutable request identity across a transport retry. A stale
+        // named-pipe handle is expected after Harness' idle timeout or a Harness
+        // restart; retrying the exact same selection.update is safe and avoids
+        // silently replacing the user's captured snapshot.
         let request_id = request_id("selection");
         let message = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
@@ -646,48 +650,52 @@ impl BridgeRuntime {
             payload: serde_json::json!({ "snapshot": snapshot }),
         };
 
-        let mut inner = self.inner.lock().await;
-        if !inner.connected || inner.client.is_none() {
-            let message = "bridge is not connected".to_owned();
-            inner.last_error = Some(message.clone());
-            return Err(message);
-        }
+        let mut attempts = 0;
+        let response = loop {
+            let mut inner = self.inner.lock().await;
+            let client = inner
+                .client
+                .as_mut()
+                .ok_or_else(|| "bridge is not connected".to_owned())?;
+            match exchange(client, &message, self.request_timeout).await {
+                Ok(response) => break response,
+                Err(error) => {
+                    let detail = format!("selection update failed: {error}");
+                    inner.connected = false;
+                    inner.client = None;
+                    inner.last_error = Some(detail.clone());
+                    drop(inner);
 
-        let result = {
-            let client = inner.client.as_mut().expect("connected client");
-            exchange(client, &message, self.request_timeout).await
+                    attempts += 1;
+                    if attempts >= 2 {
+                        return Err(detail);
+                    }
+
+                    self.connect().await?;
+                }
+            }
         };
 
-        match result {
-            Ok(response) => {
-                if let Err(error) = ensure_response_id(&response, &request_id) {
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                if response.type_name == "error.response" {
-                    let error = format!("Harness rejected selection update: {}", response.payload);
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                if response.type_name != "selection.updated" {
-                    let error = format!(
-                        "unexpected selection update response: {}",
-                        response.type_name
-                    );
-                    inner.last_error = Some(error.clone());
-                    return Err(error);
-                }
-                inner.last_error = None;
-                Ok(())
-            }
-            Err(error) => {
-                let message = format!("selection update failed: {error}");
-                inner.connected = false;
-                inner.client = None;
-                inner.last_error = Some(message.clone());
-                Err(message)
-            }
+        let mut inner = self.inner.lock().await;
+        if let Err(error) = ensure_response_id(&response, &request_id) {
+            inner.last_error = Some(error.clone());
+            return Err(error);
         }
+        if response.type_name == "error.response" {
+            let error = format!("Harness rejected selection update: {}", response.payload);
+            inner.last_error = Some(error.clone());
+            return Err(error);
+        }
+        if response.type_name != "selection.updated" {
+            let error = format!(
+                "unexpected selection update response: {}",
+                response.type_name
+            );
+            inner.last_error = Some(error.clone());
+            return Err(error);
+        }
+        inner.last_error = None;
+        Ok(())
     }
 
     #[cfg(not(windows))]
@@ -1664,6 +1672,112 @@ mod tests {
         );
         assert!(failure.starts_with("SUBMISSION_UNKNOWN|session-unknown|request-unknown|"));
         assert!(!runtime.status().await.connected);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn selection_update_reconnects_after_harness_closes_an_idle_pipe() {
+        use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+        use tokio::net::windows::named_pipe::ServerOptions;
+        use tokio::sync::oneshot;
+
+        async fn read_frame(reader: &mut (impl AsyncRead + Unpin)) -> IpcMessage {
+            let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+            reader.read_exact(&mut header).await.unwrap();
+            let declared = u32::from_be_bytes(header) as usize;
+            let mut body = vec![0_u8; declared];
+            reader.read_exact(&mut body).await.unwrap();
+            let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+            frame.extend_from_slice(&header);
+            frame.extend_from_slice(&body);
+            crate::protocol::decode_frame(&frame).unwrap()
+        }
+
+        async fn write_frame(writer: &mut (impl AsyncWrite + Unpin), message: &IpcMessage) {
+            let frame = crate::protocol::encode_frame(message).unwrap();
+            writer.write_all(&frame).await.unwrap();
+            writer.flush().await.unwrap();
+        }
+
+        fn hello_response(id: String) -> IpcMessage {
+            IpcMessage {
+                protocol: IPC_PROTOCOL_VERSION,
+                id,
+                type_name: "bridge.hello.result".to_owned(),
+                payload: serde_json::json!({
+                    "protocol": IPC_PROTOCOL_VERSION,
+                    "server": { "name": "selection-reconnect-test", "version": "0.1.0" },
+                    "capabilities": ["selection"]
+                }),
+            }
+        }
+
+        let endpoint = format!(
+            r"\\.\pipe\dsh-selection-companion-selection-reconnect-{}",
+            uuid::Uuid::new_v4()
+        );
+        let mut first_server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&endpoint)
+            .unwrap();
+        let second_endpoint = endpoint.clone();
+        let (second_ready_tx, second_ready_rx) = oneshot::channel();
+
+        let server_task = tokio::spawn(async move {
+            first_server.connect().await.unwrap();
+            let first_hello = read_frame(&mut first_server).await;
+            write_frame(&mut first_server, &hello_response(first_hello.id)).await;
+
+            // Reproduce Harness' idle-timeout behavior: the server side closes
+            // while Native still retains its apparently connected client handle.
+            drop(first_server);
+
+            let mut second_server = ServerOptions::new().create(&second_endpoint).unwrap();
+            let _ = second_ready_tx.send(());
+            second_server.connect().await.unwrap();
+
+            let second_hello = read_frame(&mut second_server).await;
+            write_frame(&mut second_server, &hello_response(second_hello.id)).await;
+
+            let update = read_frame(&mut second_server).await;
+            write_frame(
+                &mut second_server,
+                &IpcMessage {
+                    protocol: IPC_PROTOCOL_VERSION,
+                    id: update.id.clone(),
+                    type_name: "selection.updated".to_owned(),
+                    payload: serde_json::json!({ "accepted": true }),
+                },
+            )
+            .await;
+            update
+        });
+
+        let runtime = BridgeRuntime {
+            endpoint,
+            request_timeout: std::time::Duration::from_secs(2),
+            inner: Mutex::new(BridgeInner {
+                connected: false,
+                server_version: None,
+                last_error: None,
+                last_latency_ms: None,
+                client: None,
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+        };
+
+        runtime.connect().await.unwrap();
+        second_ready_rx.await.unwrap();
+
+        runtime.submit_selection(material_snapshot()).await.unwrap();
+        let update = server_task.await.unwrap();
+
+        assert_eq!(update.type_name, "selection.update");
+        assert_eq!(update.payload["snapshot"]["id"], "snapshot-submit");
+        let status = runtime.status().await;
+        assert!(status.connected);
+        assert!(status.last_error.is_none());
     }
 
     #[tokio::test]
