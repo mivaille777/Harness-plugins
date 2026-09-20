@@ -1,45 +1,60 @@
 import { Context, Service } from '@deepseek-ai/cordis'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import SelectionBridgePlugin from '../src/bridge/plugin.js'
+import SelectionContextPlugin from '../src/context/plugin.js'
+import SelectionSessionsPlugin from '../src/session/plugin.js'
 import {
   SelectionCompanionBridgeService,
   SelectionCompanionSessionService,
   SelectionContextService,
-  apply,
-  name,
 } from '../src/index.js'
 
-describe('dsh-selection-companion bundle entry', () => {
-  it('exports the expected Cordis plugin name', () => {
-    expect(name).toBe('selection-companion')
+describe('dsh-selection-companion Cordis Loader entries', () => {
+  it('exports each runtime capability as a first-class Service plugin', () => {
+    expect(SelectionContextPlugin).toBe(SelectionContextService)
+    expect(SelectionSessionsPlugin).toBe(SelectionCompanionSessionService)
+    expect(SelectionBridgePlugin).toBe(SelectionCompanionBridgeService)
+
+    expect(SelectionCompanionSessionService.inject).toEqual([
+      'agents',
+      'agentDefaultModel',
+      'sessionQuery',
+      'tools',
+    ])
+    expect(SelectionCompanionBridgeService.inject).toEqual([
+      'selectionContext',
+      'selectionCompanionSessions',
+    ])
   })
 
-  it('mounts services as Cordis class plugins and publishes Harness capabilities', async () => {
+  it('mounts the three Loader entries without a parent apply() orchestration layer', async () => {
     const previous = process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE
     process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE = '1'
     const ctx = new Context()
+
     class RequiredHarnessService extends Service {
       constructor(context: Context, key: string) { super(context, key) }
     }
+
     new RequiredHarnessService(ctx, 'agents')
     new RequiredHarnessService(ctx, 'agentDefaultModel')
     new RequiredHarnessService(ctx, 'sessionQuery')
     new RequiredHarnessService(ctx, 'tools')
-    const plugin = vi.spyOn(ctx, 'plugin')
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
     try {
-      await expect(apply(ctx)).resolves.toBeUndefined()
-      expect(plugin).toHaveBeenCalledWith(SelectionContextService)
-      expect(plugin).toHaveBeenCalledWith(SelectionCompanionSessionService)
-      expect(plugin).toHaveBeenCalledWith(SelectionCompanionBridgeService)
+      await ctx.plugin(SelectionContextPlugin)
+      await ctx.plugin(SelectionSessionsPlugin)
+      await ctx.plugin(SelectionBridgePlugin)
+
       expect(ctx.selectionContext).toBeDefined()
       expect(ctx.selectionContext.current()).toBeUndefined()
+      expect(ctx.selectionCompanionSessions).toBeDefined()
       expect(ctx.selectionCompanionBridge).toBeDefined()
-      expect(ctx.selectionCompanionBridge.status().listening).toBe(false)
-      expect(log).toHaveBeenCalledWith('[selection-companion] plugin loaded!')
+      expect(ctx.selectionCompanionBridge.status()).toMatchObject({
+        enabled: false,
+        listening: false,
+      })
     } finally {
-      plugin.mockRestore()
-      log.mockRestore()
       if (previous === undefined) delete process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE
       else process.env.DSH_SELECTION_COMPANION_DISABLE_BRIDGE = previous
       await ctx.fiber.dispose()

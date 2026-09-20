@@ -1,3 +1,12 @@
 - insert:
-    - id: selection-companion
-      name: dsh-selection-companion
+    # Each runtime capability is a first-class Cordis Loader entry.
+    # Cordis service injection, rather than a parent apply() chain, owns
+    # activation ordering and exposes PENDING/FAILED/ACTIVE state to Harness.
+    - id: selection-context
+      name: dsh-selection-companion/context
+
+    - id: selection-sessions
+      name: dsh-selection-companion/session
+
+    - id: selection-bridge
+      name: dsh-selection-companion/bridge

@@ -15,7 +15,19 @@
       "default": "./lib/bridge/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./context": {
+      "types": "./lib/context/plugin.d.ts",
+      "default": "./lib/context/plugin.js"
+    },
+    "./session": {
+      "types": "./lib/session/plugin.d.ts",
+      "default": "./lib/session/plugin.js"
+    },
+    "./bridge": {
+      "types": "./lib/bridge/plugin.d.ts",
+      "default": "./lib/bridge/plugin.js"
+    }
   },
   "files": [
     "lib",

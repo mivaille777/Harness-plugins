@@ -17,15 +17,54 @@ if (pkg.dsh?.bundle?.patch !== './cordis.patch.yml') {
   fail('package.json must declare dsh.bundle.patch as ./cordis.patch.yml')
 }
 
+const entrypoints = [
+  {
+    id: 'selection-context',
+    specifier: 'dsh-selection-companion/context',
+    exportKey: './context',
+    js: './lib/context/plugin.js',
+    dts: './lib/context/plugin.d.ts',
+  },
+  {
+    id: 'selection-sessions',
+    specifier: 'dsh-selection-companion/session',
+    exportKey: './session',
+    js: './lib/session/plugin.js',
+    dts: './lib/session/plugin.d.ts',
+  },
+  {
+    id: 'selection-bridge',
+    specifier: 'dsh-selection-companion/bridge',
+    exportKey: './bridge',
+    js: './lib/bridge/plugin.js',
+    dts: './lib/bridge/plugin.d.ts',
+  },
+]
+
 const patch = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
-if (!patch.includes('id: selection-companion')) {
-  fail('cordis.patch.yml is missing the selection-companion row id')
-}
-if (!patch.includes('name: dsh-selection-companion')) {
-  fail('cordis.patch.yml does not resolve the installed package by package name')
+for (const entry of entrypoints) {
+  if (!patch.includes(`- id: ${entry.id}`)) {
+    fail(`cordis.patch.yml is missing Loader row ${entry.id}`)
+  }
+  if (!patch.includes(`name: ${entry.specifier}`)) {
+    fail(`cordis.patch.yml does not load ${entry.specifier}`)
+  }
+
+  const exported = pkg.exports?.[entry.exportKey]
+  if (exported?.default !== entry.js || exported?.types !== entry.dts) {
+    fail(`package.json export ${entry.exportKey} must point at ${entry.js} / ${entry.dts}`)
+  }
 }
 
-for (const file of ['lib/index.js', 'lib/index.d.ts']) {
+if (/^\s*name:\s+dsh-selection-companion\s*$/m.test(patch)) {
+  fail('cordis.patch.yml must not load the legacy root plugin entry')
+}
+
+for (const file of [
+  'lib/index.js',
+  'lib/index.d.ts',
+  ...entrypoints.flatMap(entry => [entry.js.slice(2), entry.dts.slice(2)]),
+]) {
   try {
     await access(resolve(root, file))
   } catch {
@@ -34,5 +73,5 @@ for (const file of ['lib/index.js', 'lib/index.d.ts']) {
 }
 
 if (process.exitCode === undefined) {
-  console.log('[verify-bundle] bundle manifest and build artifacts are valid')
+  console.log('[verify-bundle] bundle exposes three Loader-visible Cordis service entries')
 }
