@@ -7,7 +7,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 
 const PROTOCOL = 4
-const DEFAULT_PIPE = String.raw`\\\\.\\pipe\\dsh-selection-companion-v4`
+const DEFAULT_PIPE = String.raw`\\.\pipe\dsh-selection-companion-v4`
 const endpoint = process.env.DSH_SELECTION_COMPANION_PIPE?.trim() || DEFAULT_PIPE
 const dshHome = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
 const failures = []
