@@ -12,6 +12,10 @@ const MAX_ANCESTOR_DEPTH: usize = 24;
 // Modern Chromium accessibility trees can easily exceed a few hundred nodes.
 // Keep the fallback bounded, but large enough to reach the active document.
 const MAX_FALLBACK_NODES: usize = 2_400;
+// Raw View contains Chromium's accessibility-only Document nodes that may be
+// omitted from Control View. Keep this bounded, but allow substantially more
+// nodes than the generic fallback because modern pages can expose large AX trees.
+const MAX_DOCUMENT_SEARCH_NODES: usize = 12_000;
 const MAX_TOP_LEVEL_WINDOWS: usize = 160;
 
 #[derive(Debug, Clone)]
@@ -155,22 +159,46 @@ mod windows_impl {
         automation: &UIAutomation,
         context_chars: i32,
     ) -> Result<ProviderCapture, String> {
+        // Chromium exposes important accessibility-only nodes (notably the
+        // page Document/TextPattern provider) in Raw View. Control View can omit
+        // those nodes, which makes a real visual selection look like NoSelection.
         let walker = automation
-            .get_control_view_walker()
+            .get_raw_view_walker()
             .map_err(|error| error.to_string())?;
         let focused = automation
             .get_focused_element()
             .map_err(|error| error.to_string())?;
 
-        // Fast path: the user is still focused in Chromium.
+        // Fast path: the user is still focused in Chromium. First inspect the
+        // focused ancestry, then query the Chromium Document TextPattern
+        // directly, and only then fall back to the older generic tree scan.
         if let Some(browser_window) = find_browser_window(&focused, &walker) {
-            let selected = find_selected_range(&focused, &walker).or_else(|| {
-                let mut visited = 0usize;
-                search_selected_range(&browser_window, &walker, &mut visited)
-            });
-            if let Some(selected) = selected {
+            if let Some(selected) = find_selected_range(&focused, &walker) {
                 return build_snapshot(&browser_window, selected, &walker, context_chars)
                     .map(ProviderCapture::Captured);
+            }
+
+            let document_result = find_document_selected_range(&browser_window, &walker);
+            if let Ok(Some(selected)) = document_result.as_ref() {
+                return build_snapshot(
+                    &browser_window,
+                    selected.clone(),
+                    &walker,
+                    context_chars,
+                )
+                .map(ProviderCapture::Captured);
+            }
+
+            let mut visited = 0usize;
+            if let Some(selected) =
+                search_selected_range(&browser_window, &walker, &mut visited)
+            {
+                return build_snapshot(&browser_window, selected, &walker, context_chars)
+                    .map(ProviderCapture::Captured);
+            }
+
+            if let Err(error) = document_result {
+                return Err(error);
             }
             return Ok(ProviderCapture::NoSelection);
         }
@@ -296,18 +324,28 @@ mod windows_impl {
             .map_err(|error| error.to_string())?;
         let mut current = walker.get_first_child(&root).ok();
         let mut windows = 0usize;
+        let mut diagnostic_error = None;
         while let Some(element) = current {
             windows += 1;
             if windows > MAX_TOP_LEVEL_WINDOWS {
                 break;
             }
             if is_browser_window(&element) {
+                match find_document_selected_range(&element, walker) {
+                    Ok(Some(selected)) => return Ok(Some((element, selected))),
+                    Ok(None) => {}
+                    Err(error) => diagnostic_error = Some(error),
+                }
+
                 let mut visited = 0usize;
                 if let Some(selected) = search_selected_range(&element, walker, &mut visited) {
                     return Ok(Some((element, selected)));
                 }
             }
             current = walker.get_next_sibling(&element).ok();
+        }
+        if let Some(error) = diagnostic_error {
+            return Err(error);
         }
         Ok(None)
     }
@@ -332,6 +370,88 @@ mod windows_impl {
             current = walker.get_next_sibling(&element).ok();
         }
         Ok(false)
+    }
+
+    #[derive(Default)]
+    struct DocumentSelectionProbe {
+        visited: usize,
+        saw_document: bool,
+        saw_text_pattern: bool,
+        successful_selection_reads: usize,
+        last_error: Option<String>,
+    }
+
+    fn find_document_selected_range(
+        browser_window: &UIElement,
+        walker: &UITreeWalker,
+    ) -> Result<Option<SelectedRange>, String> {
+        let mut probe = DocumentSelectionProbe::default();
+        let selected = search_document_selected_range(browser_window, walker, &mut probe);
+        if selected.is_some() {
+            return Ok(selected);
+        }
+
+        if probe.saw_document && !probe.saw_text_pattern {
+            return Err(
+                "Chromium accessibility Document found, but it does not expose UIA TextPattern"
+                    .to_owned(),
+            );
+        }
+        if probe.saw_text_pattern && probe.successful_selection_reads == 0 {
+            let detail = probe
+                .last_error
+                .unwrap_or_else(|| "unknown UIA error".to_owned());
+            return Err(format!(
+                "Chromium UIA TextPattern.GetSelection failed: {detail}"
+            ));
+        }
+        Ok(None)
+    }
+
+    fn search_document_selected_range(
+        element: &UIElement,
+        walker: &UITreeWalker,
+        probe: &mut DocumentSelectionProbe,
+    ) -> Option<SelectedRange> {
+        if probe.visited >= MAX_DOCUMENT_SEARCH_NODES {
+            return None;
+        }
+        probe.visited += 1;
+
+        if element.get_control_type().ok() == Some(ControlType::Document)
+            && !element.is_password().unwrap_or(false)
+        {
+            probe.saw_document = true;
+            if let Ok(pattern) = element.get_pattern::<UITextPattern>() {
+                probe.saw_text_pattern = true;
+                match pattern.get_selection() {
+                    Ok(ranges) => {
+                        probe.successful_selection_reads += 1;
+                        if let Some(found) = ranges.into_iter().find_map(|range| {
+                            let text = range.get_text(-1).ok()?;
+                            (!text.trim().is_empty()).then_some((range, text, element.clone()))
+                        }) {
+                            return Some(found);
+                        }
+                    }
+                    Err(error) => {
+                        probe.last_error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+
+        let mut child = walker.get_first_child(element).ok();
+        while let Some(current) = child {
+            if let Some(found) = search_document_selected_range(&current, walker, probe) {
+                return Some(found);
+            }
+            if probe.visited >= MAX_DOCUMENT_SEARCH_NODES {
+                return None;
+            }
+            child = walker.get_next_sibling(&current).ok();
+        }
+        None
     }
 
     fn find_selected_range(focused: &UIElement, walker: &UITreeWalker) -> Option<SelectedRange> {
