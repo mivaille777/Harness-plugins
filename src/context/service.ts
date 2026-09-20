@@ -36,6 +36,10 @@ export class SelectionContextService extends Service {
     }
   }
 
+  [Service.init](): void {
+    this.ctx.logger.info('selection companion context service active')
+  }
+
   update(snapshot: SelectionSnapshot): SelectionSnapshotUpdateResult {
     return this.cache.update(snapshot)
   }

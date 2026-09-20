@@ -202,6 +202,10 @@ export class SelectionCompanionSessionService extends Service {
     }, 'selectionCompanionSessions.agents')
   }
 
+  [Service.init](): void {
+    this.ctx.logger.info('selection companion session service active')
+  }
+
   async list(): Promise<readonly SessionSummary[]> {
     const records = await this.ctx.sessionQuery.listSessions()
     const titles = records.length === 0

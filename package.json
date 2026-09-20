@@ -105,7 +105,8 @@
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:bundle",
     "prepare": "pnpm build",
-    "prepack": "pnpm check"
+    "prepack": "pnpm check",
+    "diagnose:harness": "node scripts/diagnose-harness.mjs"
   },
   "packageManager": "pnpm@11.7.0",
   "engines": {
