@@ -1355,6 +1355,71 @@ mod tests {
     }
 
     #[test]
+    fn selection_update_wire_omits_absent_optional_fields() {
+        let snapshot = SelectionSnapshot {
+            id: "snapshot-wire".into(),
+            revision: 1,
+            captured_at: 1,
+            selection: SelectionValue {
+                text: "selected".into(),
+                language: None,
+            },
+            source: SelectionSource {
+                kind: SelectionSourceKind::Browser,
+                app: Some("Chrome".into()),
+                process: None,
+                window_title: None,
+            },
+            document: Some(SelectionDocument {
+                title: Some("Fixture".into()),
+                url: None,
+                file_path: None,
+                section: None,
+                frame_url: None,
+            }),
+            context: SelectionContext {
+                before: None,
+                after: Some("after".into()),
+                section_text: None,
+                page_text: None,
+                page_available: false,
+            },
+            capabilities: SelectionCapabilities {
+                local_context: true,
+                section_context: false,
+                page_context: false,
+                screenshot: false,
+            },
+            geometry: Some(SelectionGeometry {
+                monitor_id: None,
+                x: 1.0,
+                y: 2.0,
+                width: 3.0,
+                height: 4.0,
+            }),
+            provider: "browser-accessibility".into(),
+            confidence: 0.8,
+        };
+
+        let value = serde_json::to_value(&snapshot).unwrap();
+        assert!(value.pointer("/selection/language").is_none());
+        assert!(value.pointer("/source/process").is_none());
+        assert!(value.pointer("/source/windowTitle").is_none());
+        assert!(value.pointer("/document/url").is_none());
+        assert!(value.pointer("/document/filePath").is_none());
+        assert!(value.pointer("/document/section").is_none());
+        assert!(value.pointer("/document/frameUrl").is_none());
+        assert!(value.pointer("/context/before").is_none());
+        assert!(value.pointer("/context/sectionText").is_none());
+        assert!(value.pointer("/context/pageText").is_none());
+        assert!(value.pointer("/geometry/monitorId").is_none());
+        assert_eq!(
+            value.pointer("/context/after").and_then(serde_json::Value::as_str),
+            Some("after")
+        );
+    }
+
+    #[test]
     fn frames_round_trip_and_support_partial_chunks() {
         let message = IpcMessage::from_json(FIXTURES[0]).unwrap();
         let frame = encode_frame(&message).unwrap();
