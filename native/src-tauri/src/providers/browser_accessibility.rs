@@ -178,16 +178,14 @@ mod windows_impl {
                     .map(ProviderCapture::Captured);
             }
 
-            let document_result = find_document_selected_range(&browser_window, &walker);
-            if let Ok(Some(selected)) = document_result.as_ref() {
-                return build_snapshot(
-                    &browser_window,
-                    selected.clone(),
-                    &walker,
-                    context_chars,
-                )
-                .map(ProviderCapture::Captured);
-            }
+            let document_error = match find_document_selected_range(&browser_window, &walker) {
+                Ok(Some(selected)) => {
+                    return build_snapshot(&browser_window, selected, &walker, context_chars)
+                        .map(ProviderCapture::Captured);
+                }
+                Ok(None) => None,
+                Err(error) => Some(error),
+            };
 
             let mut visited = 0usize;
             if let Some(selected) =
@@ -197,7 +195,7 @@ mod windows_impl {
                     .map(ProviderCapture::Captured);
             }
 
-            if let Err(error) = document_result {
+            if let Some(error) = document_error {
                 return Err(error);
             }
             return Ok(ProviderCapture::NoSelection);
