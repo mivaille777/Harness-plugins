@@ -704,7 +704,7 @@ impl BridgeRuntime {
     }
 
     #[cfg(windows)]
-    async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
+    pub async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
         self.connect().await?;
         let request_id = request_id("selection-current");
         let message = IpcMessage {
@@ -988,7 +988,7 @@ impl BridgeRuntime {
     }
 
     #[cfg(not(windows))]
-    async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
+    pub async fn current_selection(&self) -> Result<Option<SelectionSnapshot>, String> {
         self.connect().await?;
         Ok(None)
     }
