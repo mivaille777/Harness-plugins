@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
 
 describe('Harness runtime diagnostics contract', () => {
+  it('is valid executable JavaScript', () => {
+    const script = resolve('scripts/diagnose-harness.mjs')
+    const result = spawnSync(process.execPath, ['--check', script], { encoding: 'utf8' })
+    expect(result.status, result.stderr).toBe(0)
+  })
+
   it('checks Loader composition and existing Protocol V4 runtime surfaces', async () => {
     const source = await readFile(resolve('scripts/diagnose-harness.mjs'), 'utf8')
     expect(source).toContain('selection-context')
