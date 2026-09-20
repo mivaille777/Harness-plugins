@@ -391,13 +391,22 @@ mod windows_impl {
             return Ok(selected);
         }
 
-        if probe.saw_document && !probe.saw_text_pattern {
+        if !probe.saw_document {
+            return Err(if probe.visited >= MAX_DOCUMENT_SEARCH_NODES {
+                format!(
+                    "Chromium UIA Raw View scan reached {MAX_DOCUMENT_SEARCH_NODES} nodes without finding a Document provider"
+                )
+            } else {
+                "Chromium browser window found, but no UIA Document provider was exposed".to_owned()
+            });
+        }
+        if !probe.saw_text_pattern {
             return Err(
                 "Chromium accessibility Document found, but it does not expose UIA TextPattern"
                     .to_owned(),
             );
         }
-        if probe.saw_text_pattern && probe.successful_selection_reads == 0 {
+        if probe.successful_selection_reads == 0 {
             let detail = probe
                 .last_error
                 .unwrap_or_else(|| "unknown UIA error".to_owned());
