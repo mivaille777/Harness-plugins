@@ -1746,7 +1746,11 @@ mod tests {
                     protocol: IPC_PROTOCOL_VERSION,
                     id: update.id.clone(),
                     type_name: "selection.updated".to_owned(),
-                    payload: serde_json::json!({ "accepted": true }),
+                    payload: serde_json::json!({
+                        "accepted": true,
+                        "snapshotId": "snapshot-submit",
+                        "revision": 1
+                    }),
                 },
             )
             .await;

@@ -104,6 +104,15 @@ function writeSseChunk(response, chunk) {
   response.write(`data: ${JSON.stringify(chunk)}\n\n`)
 }
 
+function containsText(value, expected) {
+  if (typeof value === 'string') return value.includes(expected)
+  if (Array.isArray(value)) return value.some(item => containsText(item, expected))
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).some(item => containsText(item, expected))
+  }
+  return false
+}
+
 async function startModelGate() {
   const requests = []
   let bootstrapResponse = null
@@ -121,7 +130,6 @@ async function startModelGate() {
     request.on('end', () => {
       let parsed = null
       try { parsed = JSON.parse(body) } catch { parsed = null }
-      const serialized = parsed === null ? '' : JSON.stringify(parsed.messages ?? [])
       const summary = parsed === null
         ? { parseError: true, model: null, messageCount: 0, expected: {}, forbidden: {}, messagesSha256: null }
         : summarizeModelRequest(parsed, [EC09_LENS_SELECTION, EC09_LENS_SECTION], [EC09_LENS_NEWER_GLOBAL])
@@ -129,7 +137,7 @@ async function startModelGate() {
         method: request.method ?? null,
         path: request.url ?? null,
         ...summary,
-        previewObserved: expectedPreview !== null && serialized.includes(expectedPreview),
+        previewObserved: expectedPreview !== null && containsText(parsed?.messages, expectedPreview),
       }
       requests.push(observation)
       const target = observation.parseError !== true
@@ -562,10 +570,11 @@ export async function runEc09TauriLensDriver(env = process.env) {
     report.screenshots.push({ state: 'idle', path: 'idle.png' })
 
     await waitUntil(async () => await webdriver.execute(`const b=document.querySelector('.session-controls button.secondary'); return !!b && !b.disabled`), 'New session button')
+    const previousSessionId = await webdriver.execute(`return document.querySelector('.session-controls select')?.value || ''`)
     await webdriver.click('.session-controls button.secondary')
     const newSessionId = await waitUntil(async () => {
       const value = await webdriver.execute(`return document.querySelector('.session-controls select')?.value || ''`)
-      return typeof value === 'string' && value.length > 0 ? value : null
+      return typeof value === 'string' && value.length > 0 && value !== previousSessionId ? value : null
     }, 'new Lens session id')
 
     await webdriver.click('[data-testid="captured-context"] > summary')
@@ -606,7 +615,13 @@ export async function runEc09TauriLensDriver(env = process.env) {
     const materialFrozen = previewAfterGlobalChange === preview && !previewAfterGlobalChange.includes(EC09_LENS_NEWER_GLOBAL)
     if (!materialFrozen) throw new Error('authorized request material changed after an unrelated global selection update')
 
-    await webdriver.click('[data-testid="explain-action"]')
+    // The Explain control is intentionally visually hidden and exposed as an
+    // accessibility/test action. WebDriver's element click performs hit
+    // testing and therefore rejects this button because the Lens surface is
+    // the visible element at that point. Trigger the same DOM click handler
+    // through the WebView instead of treating the hidden control as a mouse
+    // target.
+    await webdriver.execute(`const button=document.querySelector('[data-testid="explain-action"]'); if (!button) throw new Error('Explain action is missing'); button.click(); return true`)
     const target = await Promise.race([gate.targetStarted, timeoutPromise(30_000, 'EC-09 Lens target model request')])
     if (target.forbidden?.[EC09_LENS_NEWER_GLOBAL] !== false) throw new Error('newer global selection leaked into model request')
     if (target.previewObserved !== true) throw new Error('model request did not contain the exact authorized material preview')

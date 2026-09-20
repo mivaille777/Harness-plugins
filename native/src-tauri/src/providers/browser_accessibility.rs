@@ -179,13 +179,10 @@ mod windows_impl {
         // keeps its visual/text selection, so recover that selection by scanning
         // top-level browser windows instead of requiring browser focus.
         match find_background_browser_selection(automation, &walker)? {
-            Some((browser_window, selected)) => build_snapshot(
-                &browser_window,
-                selected,
-                &walker,
-                context_chars,
-            )
-            .map(ProviderCapture::Captured),
+            Some((browser_window, selected)) => {
+                build_snapshot(&browser_window, selected, &walker, context_chars)
+                    .map(ProviderCapture::Captured)
+            }
             None if has_browser_window(automation, &walker)? => Ok(ProviderCapture::NoSelection),
             None => Ok(ProviderCapture::NotApplicable),
         }
@@ -337,10 +334,7 @@ mod windows_impl {
         Ok(false)
     }
 
-    fn find_selected_range(
-        focused: &UIElement,
-        walker: &UITreeWalker,
-    ) -> Option<SelectedRange> {
+    fn find_selected_range(focused: &UIElement, walker: &UITreeWalker) -> Option<SelectedRange> {
         let mut current = focused.clone();
         for _ in 0..MAX_ANCESTOR_DEPTH {
             if let Some(found) = selected_range_from_element(&current) {
