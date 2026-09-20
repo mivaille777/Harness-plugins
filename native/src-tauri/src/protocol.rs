@@ -169,13 +169,13 @@ pub enum SelectionContextCompleteness {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExpandedSelectionContext {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section_text: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_text: Option<String>,
 }
 
@@ -187,11 +187,11 @@ pub struct SelectionSnapshot {
     pub captured_at: u64,
     pub selection: SelectionValue,
     pub source: SelectionSource,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document: Option<SelectionDocument>,
     pub context: SelectionContext,
     pub capabilities: SelectionCapabilities,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<SelectionGeometry>,
     pub provider: String,
     pub confidence: f64,
@@ -201,7 +201,7 @@ pub struct SelectionSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct SelectionValue {
     pub text: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
 }
 
@@ -209,11 +209,11 @@ pub struct SelectionValue {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionSource {
     pub kind: SelectionSourceKind,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_title: Option<String>,
 }
 
@@ -229,28 +229,28 @@ pub enum SelectionSourceKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionDocument {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionContext {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section_text: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_text: Option<String>,
     pub page_available: bool,
 }
@@ -267,7 +267,7 @@ pub struct SelectionCapabilities {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionGeometry {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monitor_id: Option<String>,
     pub x: f64,
     pub y: f64,
@@ -385,7 +385,7 @@ pub struct SelectionMaterial {
     pub captured_at: u64,
     pub selection: SelectionValue,
     pub source: SelectionSource,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document: Option<SelectionDocument>,
     pub authorized_scope: SelectionMaterialScope,
     pub actual_scope: SelectionMaterialScope,
