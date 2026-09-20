@@ -102,6 +102,7 @@
     "native:host:unregister": "powershell -ExecutionPolicy Bypass -File scripts/unregister-native-host.ps1",
     "debug:selection": "pnpm build && node scripts/debug-selection.mjs",
     "debug:uia": "cargo run --manifest-path native/src-tauri/Cargo.toml --bin uia_probe",
+    "debug:pipeline": "cargo run --manifest-path native/src-tauri/Cargo.toml --bin pipeline_probe",
     "demo:selection": "pnpm build && node scripts/demo-selection.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:bundle",
