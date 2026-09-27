@@ -239,8 +239,6 @@ blockquote {
 .empty-source-row div { display: grid; gap: 2px; min-width: 0; }
 .empty-source-row strong { font-size: 12px; font-weight: 650; }
 .empty-source-row div span { overflow: hidden; color: #8291a6; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.capture-diagnostic { margin: 8px 0 0 18px; color: var(--danger); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
-
 .session-bar { position: relative; margin-top: 10px; padding: 11px 12px; border-radius: 15px; }
 .session-heading { min-height: 20px; }
 .session-title { font-size: 13px; font-weight: 690; }
@@ -355,6 +353,48 @@ footer { min-height: 32px; margin-top: auto; padding: 7px 3px 0; }
 .status-control { gap: 7px; padding: 4px 0; color: #8997aa; font-size: 9px; }
 .main-chat-link { margin-left: auto; padding: 4px 0; color: #769cff; font-size: 9px; font-weight: 540; }
 .main-chat-link:hover:not(:disabled) { color: #9ab8ff; }
+.diagnostics-link { padding: 4px 0; background: transparent; color: #8997aa; font-size: 9px; }
+.diagnostics-link:hover:not(:disabled) { color: #c5d5f6; }
+
+.diagnostics-page {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  flex-direction: column;
+  gap: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid rgba(137, 164, 207, .3);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 86% 3%, rgba(88, 126, 214, .16), transparent 26%),
+    linear-gradient(155deg, rgba(21,31,46,.985), rgba(8,15,25,.995) 68%, rgba(12,21,33,.99));
+  box-shadow: var(--shadow);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(119,144,179,.34) transparent;
+}
+.diagnostics-header { display: grid; grid-template-columns: minmax(0,1fr); gap: 5px; }
+.diagnostics-header h1 { margin: 3px 0 0; font-size: 17px; font-weight: 720; letter-spacing: -.02em; }
+.diagnostics-header p, .diagnostics-meta { margin: 3px 0 0; color: #8998ad; font-size: 9px; line-height: 1.45; }
+.diagnostics-header .text-button { justify-self: start; }
+.diagnostics-actions { display: flex; min-height: 30px; align-items: center; gap: 6px; }
+.diagnostics-actions .diagnostics-health { margin-right: auto; }
+.diagnostics-health { color: #aab4c4; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.diagnostics-health.healthy { color: #59d9a0; }
+.diagnostics-health.unhealthy { color: #ff9999; }
+.diagnostics-health.disconnected { color: #e6b85f; }
+.diagnostics-health.unknown { color: #8998ad; }
+.diagnostics-feedback { margin: 0; color: #8fe0b7; font-size: 9px; }
+.diagnostics-grid { display: grid; gap: 8px; }
+.diagnostics-card { min-width: 0; padding: 10px 11px; border: 1px solid rgba(145,165,195,.14); border-radius: 12px; background: rgba(18,27,40,.72); }
+.diagnostics-card h2 { margin: 0 0 7px; color: #dbe4f2; font-size: 11px; font-weight: 700; }
+.diagnostics-card dl { display: grid; gap: 5px; margin: 0; }
+.diagnostic-row { display: grid; grid-template-columns: minmax(105px, .8fr) minmax(0, 1.2fr); gap: 7px; align-items: baseline; font-size: 9px; line-height: 1.4; }
+.diagnostic-row dt { color: #8291a6; }
+.diagnostic-row dd { min-width: 0; margin: 0; color: #d0d9e6; overflow-wrap: anywhere; }
+.diagnostics-host-note { padding-bottom: 3px; }
 
 .phase-live, .sr-only, .sr-only-action {
   position: absolute !important;
@@ -377,4 +417,8 @@ footer { min-height: 32px; margin-top: auto; padding: 7px 3px 0; }
   .ask-hero { min-height: 74px; }
   .context-controls { grid-template-columns: minmax(0,1fr); }
   .context-controls label { display: none; }
+  .diagnostics-page { padding: 14px; border-radius: 22px; }
+  .diagnostics-actions { flex-wrap: wrap; }
+  .diagnostics-actions .diagnostics-health { flex-basis: 100%; }
+  .diagnostic-row { grid-template-columns: minmax(90px, .75fr) minmax(0, 1.25fr); }
 }

@@ -10,6 +10,7 @@ export interface BridgeStatus {
   readonly serverVersion: string | null
   readonly lastError: string | null
   readonly lastLatencyMs: number | null
+  readonly reconnectCount: number
 }
 
 export interface CaptureMetrics {
@@ -154,6 +155,10 @@ export function disconnectBridge(): Promise<BridgeStatus> {
 
 export function getCaptureStatus(): Promise<CaptureStatus> {
   return invoke<CaptureStatus>('capture_status')
+}
+
+export function getInteractionGuardStatus(): Promise<InteractionStatus> {
+  return invoke<InteractionStatus>('interaction_guard_status')
 }
 
 export function pauseCapture(): Promise<CaptureStatus> {

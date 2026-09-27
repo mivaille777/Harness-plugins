@@ -53,6 +53,7 @@ import {
   type LensEvent,
 } from './lens/store'
 import { positionCurrentWindowNearSelection } from './lens/windowPlacement'
+import DiagnosticsPage from './DiagnosticsPage'
 
 const emptyCapture: CaptureStatus = {
   paused: false,
@@ -192,6 +193,9 @@ export default function App({ initiallyOpen = true }: AppProps) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
   const [projection, setProjection] = useState<RequestProjection>(initialRequestProjection)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [lastEventSequence, setLastEventSequence] = useState<number | null>(null)
+  const [subscriptionState, setSubscriptionState] = useState('idle')
   const busy = ['submitting', 'queued', 'streaming', 'cancelling', 'submission-unknown'].includes(projection.phase)
   const lensStateRef = useRef(initialLensState)
   const active = useRef<ActiveSession>({ sessionId: null, requestId: null, subscriptionId: null })
@@ -445,6 +449,8 @@ export default function App({ initiallyOpen = true }: AppProps) {
     }
     pendingSubmission.current = null
     active.current = { sessionId: null, requestId: null, subscriptionId: null }
+    setSubscriptionState('connecting')
+    setLastEventSequence(null)
     await releaseSubscription(previous)
     if (generation !== sessionGeneration.current || !viewActive.current) return
 
@@ -460,6 +466,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
       rememberSessionId(nextSessionId)
       setHistory(loaded.entries)
       cursors.current.set(nextSessionId, loaded.capturedThroughCursor)
+      setLastEventSequence(loaded.capturedThroughCursor)
       const subscriptionId = `lens-${crypto.randomUUID()}`
       active.current = { sessionId: nextSessionId, requestId: null, subscriptionId }
       await listenerReady.current
@@ -469,10 +476,12 @@ export default function App({ initiallyOpen = true }: AppProps) {
         await unsubscribeSession(nextSessionId, subscriptionId).catch(() => undefined)
         return
       }
+      setSubscriptionState('active')
       setNotice(null)
     } catch (error) {
       if (generation === sessionGeneration.current && viewActive.current) {
         active.current = { sessionId: null, requestId: null, subscriptionId: null }
+        setSubscriptionState('error')
         setHistoryError(String(error))
         setNotice(copy.historyLoadFailed)
       }
@@ -500,6 +509,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
       })
     }
     active.current = { sessionId: null, requestId: null, subscriptionId: null }
+    setSubscriptionState('connecting')
     await releaseSubscription(previous)
     if (!viewActive.current || generation !== sessionGeneration.current) return
 
@@ -520,7 +530,9 @@ export default function App({ initiallyOpen = true }: AppProps) {
         if (generation !== sessionGeneration.current || !viewActive.current) return
         setHistory(loaded.entries)
         cursors.current.set(result.sessionId, loaded.capturedThroughCursor)
+        setLastEventSequence(loaded.capturedThroughCursor)
       }
+      setLastEventSequence(cursors.current.get(result.sessionId) ?? null)
       await listenerReady.current
       if (!viewActive.current || generation !== sessionGeneration.current) return
       await subscribeSession(result.sessionId, subscriptionId, cursors.current.get(result.sessionId))
@@ -528,6 +540,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
         await unsubscribeSession(result.sessionId, subscriptionId).catch(() => undefined)
         return
       }
+      setSubscriptionState('active')
       setProjection(previousProjection => previousProjection.phase === 'submitting' || previousProjection.phase === 'submission-unknown'
         ? { ...previousProjection, phase: 'queued' }
         : previousProjection)
@@ -536,6 +549,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
     } catch (error) {
       if (generation !== sessionGeneration.current || !viewActive.current) return
       active.current = { sessionId: result.sessionId, requestId: result.requestId, subscriptionId: null }
+      setSubscriptionState('error')
       setProjection(previousProjection => ({ ...previousProjection, phase: 'connection-lost', error: String(error) }))
     }
   }, [dispatchLensEvent, refreshSessions, releaseSubscription])
@@ -579,12 +593,15 @@ export default function App({ initiallyOpen = true }: AppProps) {
       if (current.sessionId === null || current.subscriptionId === null) return
       if (payload.sessionId !== current.sessionId || payload.subscriptionId !== current.subscriptionId) return
       if (payload.error !== undefined) {
+        setSubscriptionState('error')
         setProjection(previous => ({ ...previous, phase: 'connection-lost', error: payload.error as string }))
         return
       }
       if (payload.event?.data.persistent) {
         const cursor = payload.event.data.cursor
-        cursors.current.set(current.sessionId, Math.max(cursors.current.get(current.sessionId) ?? 0, cursor))
+        const nextCursor = Math.max(cursors.current.get(current.sessionId) ?? 0, cursor)
+        cursors.current.set(current.sessionId, nextCursor)
+        setLastEventSequence(nextCursor)
       }
       if (payload.history !== undefined) {
         setHistory(previous => mergeSessionHistory(previous, [payload.history as SessionHistoryEntry]))
@@ -866,6 +883,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
     ? `${selectedTextCharacters.slice(0, SELECTION_PREVIEW_LIMIT).join('')}…`
     : selectedText
   const sourceInitial = sourceApp.trim().slice(0, 1).toUpperCase() || '•'
+  const diagnosticsLabel = copy.locale === 'zh-CN' ? '运行诊断' : 'Diagnostics'
   const captureStatusLabel = capture.paused
     ? ui.paused
     : capture.lastError !== null || capture.phase === 'error'
@@ -876,6 +894,17 @@ export default function App({ initiallyOpen = true }: AppProps) {
   const hasPendingSelection = lensState.binding !== null
     && lensState.latestSelection !== null
     && !sameLensSelection(lensState.binding, lensState.latestSelection)
+
+  if (diagnosticsOpen) return <DiagnosticsPage
+    locale={copy.locale}
+    lens={lensState}
+    pinnedSnapshot={snapshot}
+    sessionId={sessionId}
+    requestId={requestId}
+    lastEventSequence={lastEventSequence}
+    subscriptionState={subscriptionState}
+    onBack={() => setDiagnosticsOpen(false)}
+  />
 
   return <main className="lens" data-testid="selection-lens" data-phase={projection.phase} lang={copy.locale}>
     <header className="lens-header" data-tauri-drag-region>
@@ -894,7 +923,6 @@ export default function App({ initiallyOpen = true }: AppProps) {
         <div><strong>{copy.emptyTitle}</strong><span>{ui.selectFirst}</span></div>
         <button type="button" className="secondary compact-button" onClick={() => void refresh()}>{copy.refreshSelection}</button>
       </div>
-      {capture.lastError ? <p className="capture-diagnostic" role="alert">{capture.lastError}</p> : null}
     </section> : <section className="material" aria-label={copy.materialAriaLabel}>
       <div className="selection-source-row">
         <div className="selection-source">
@@ -1032,6 +1060,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
         <span>{captureStatusLabel}</span>
       </button>
       <span className="phase-live" aria-live="polite">{action === null ? copy.phaseLabels.idle : phaseLabel}</span>
+      <button type="button" className="diagnostics-link" onClick={() => setDiagnosticsOpen(true)}>{diagnosticsLabel}</button>
       <button type="button" className="main-chat-link" onClick={() => setNotice(copy.navigationUnavailable)}>{ui.openMainChat} <span aria-hidden="true">↗</span></button>
     </footer>
   </main>

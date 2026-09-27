@@ -54,6 +54,7 @@ pub struct BridgeStatus {
     pub server_version: Option<String>,
     pub last_error: Option<String>,
     pub last_latency_ms: Option<u64>,
+    pub reconnect_count: u64,
 }
 
 pub struct BridgeRuntime {
@@ -71,6 +72,8 @@ struct BridgeInner {
     server_version: Option<String>,
     last_error: Option<String>,
     last_latency_ms: Option<u64>,
+    has_connected: bool,
+    reconnect_count: u64,
     #[cfg(windows)]
     client: Option<Arc<NamedPipeConnection>>,
     #[cfg(windows)]
@@ -134,6 +137,8 @@ impl BridgeRuntime {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                has_connected: false,
+                reconnect_count: 0,
                 #[cfg(windows)]
                 client: None,
                 #[cfg(windows)]
@@ -170,6 +175,7 @@ impl BridgeRuntime {
             server_version: inner.server_version.clone(),
             last_error: inner.last_error.clone(),
             last_latency_ms: inner.last_latency_ms,
+            reconnect_count: inner.reconnect_count,
         }
     }
 
@@ -314,6 +320,11 @@ impl BridgeRuntime {
         inner.connected = true;
         inner.server_version = Some(hello_result.server.version);
         inner.last_error = None;
+        if inner.has_connected {
+            inner.reconnect_count = inner.reconnect_count.saturating_add(1);
+        } else {
+            inner.has_connected = true;
+        }
         inner.client = Some(connection);
         Ok(())
     }
@@ -1764,6 +1775,8 @@ mod tests {
                 server_version: Some("test".to_owned()),
                 last_error: None,
                 last_latency_ms: None,
+                has_connected: true,
+                reconnect_count: 0,
                 client: Some(connection),
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -1886,6 +1899,8 @@ mod tests {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                has_connected: false,
+                reconnect_count: 0,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -2064,6 +2079,8 @@ mod tests {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                has_connected: false,
+                reconnect_count: 0,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -2086,6 +2103,7 @@ mod tests {
         let status = runtime.status().await;
         assert!(status.connected);
         assert!(status.last_error.is_none());
+        assert_eq!(status.reconnect_count, 1);
         let _ = finish_server_tx.send(());
         let _ = server_task.await.unwrap();
     }
@@ -2100,6 +2118,7 @@ mod tests {
         assert!(!status.connected);
         assert_eq!(status.protocol, IPC_PROTOCOL_VERSION);
         assert!(status.server_version.is_none());
+        assert_eq!(status.reconnect_count, 0);
     }
 
     #[test]

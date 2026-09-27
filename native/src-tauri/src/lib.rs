@@ -64,6 +64,7 @@ pub fn run() {
             capture::capture_resume,
             interaction_guard::interaction_guard_begin,
             interaction_guard::interaction_guard_end,
+            interaction_guard::interaction_guard_status,
             focus::restore_source_focus,
         ])
         .run(tauri::generate_context!())

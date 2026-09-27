@@ -149,6 +149,11 @@ impl InteractionGuard {
         }
     }
 
+    pub fn snapshot_status(&self) -> InteractionStatus {
+        let state = self.state.lock().expect("interaction guard poisoned");
+        status(&state)
+    }
+
     pub fn set_user_capture_paused(&self, paused: bool) {
         let mut state = self.state.lock().expect("interaction guard poisoned");
         if state.user_capture_paused != paused {
@@ -337,6 +342,16 @@ fn hide_overlays(app: &AppHandle, labels: &[String]) -> Result<(), String> {
         hidden.push(label.clone());
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn interaction_guard_status(
+    app: AppHandle,
+    guard: State<'_, InteractionGuard>,
+) -> InteractionStatus {
+    let (_, effects) = guard.expire_due();
+    restore_overlays(&app, effects.restore_windows);
+    guard.snapshot_status()
 }
 
 #[tauri::command]
