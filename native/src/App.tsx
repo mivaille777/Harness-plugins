@@ -3,8 +3,10 @@ import { emit, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   cancelSession,
+  beginInteractionGuard,
   createSession,
   expandSelection,
+  endInteractionGuard,
   getCaptureStatus,
   getCurrentSelection,
   listSessions,
@@ -62,6 +64,7 @@ const emptyCapture: CaptureStatus = {
     published: 0,
     deduplicated: 0,
     pausedDrops: 0,
+    guardDrops: 0,
     coalesced: 0,
     noSelection: 0,
     notApplicable: 0,
@@ -288,6 +291,63 @@ export default function App({ initiallyOpen = true }: AppProps) {
       void getCaptureStatus().then(setCapture).catch(error => setNotice(String(error)))
     }
   }, [initiallyOpen, refresh])
+  useEffect(() => {
+    const currentWindow = getCurrentWindow()
+    let disposed = false
+    let focused = false
+    let focusEvents = 0
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let transition = Promise.resolve()
+
+    const enqueue = (operation: () => Promise<unknown>) => {
+      transition = transition.then(async () => {
+        try {
+          await operation()
+        } catch (error) {
+          if (!disposed) setNotice(`Capture guard could not be updated: ${String(error)}`)
+        }
+      })
+    }
+    const engage = () => enqueue(() => beginInteractionGuard('lensInteraction', 'lens-main-window-focus'))
+    const disengage = () => enqueue(() => endInteractionGuard('lensInteraction', 'lens-main-window-focus'))
+    const updateFocus = (nextFocused: boolean) => {
+      if (disposed || focused === nextFocused) return
+      focused = nextFocused
+      focusEvents += 1
+      if (focused) {
+        engage()
+        heartbeat = setInterval(engage, 10_000)
+      } else {
+        if (heartbeat !== undefined) clearInterval(heartbeat)
+        heartbeat = undefined
+        disengage()
+      }
+    }
+
+    let unlisten: (() => void) | undefined
+    void currentWindow.onFocusChanged(event => updateFocus(event.payload)).then(dispose => {
+      if (disposed) dispose()
+      else unlisten = dispose
+    }).catch(error => {
+      if (!disposed) setNotice(`Lens focus tracking could not start: ${String(error)}`)
+    })
+    const initialFocusRevision = focusEvents
+    void currentWindow.isFocused().then(value => {
+      if (focusEvents === initialFocusRevision) updateFocus(value)
+    }).catch(error => {
+      if (!disposed) setNotice(`Lens focus state could not be read: ${String(error)}`)
+    })
+
+    return () => {
+      disposed = true
+      if (heartbeat !== undefined) clearInterval(heartbeat)
+      unlisten?.()
+      if (focused) {
+        focused = false
+        disengage()
+      }
+    }
+  }, [])
   useEffect(() => {
     const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
     snapshotIdentityRef.current = identity

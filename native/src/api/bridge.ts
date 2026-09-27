@@ -17,6 +17,7 @@ export interface CaptureMetrics {
   readonly published: number
   readonly deduplicated: number
   readonly pausedDrops: number
+  readonly guardDrops: number
   readonly coalesced: number
   readonly noSelection: number
   readonly notApplicable: number
@@ -32,6 +33,16 @@ export interface CaptureStatus {
   readonly lastTransitionAt: number
   readonly lastError: string | null
   readonly metrics: CaptureMetrics
+}
+
+export type InteractionMode = 'agentInput' | 'screenCapture' | 'lensInteraction' | 'capturePaused' | 'shutdown'
+
+export interface InteractionStatus {
+  readonly captureSuppressed: boolean
+  readonly shuttingDown: boolean
+  readonly generation: number
+  readonly activeRequests: number
+  readonly activeModes: readonly InteractionMode[]
 }
 
 export interface SessionSubmission {
@@ -131,6 +142,23 @@ export function pauseCapture(): Promise<CaptureStatus> {
 
 export function resumeCapture(): Promise<CaptureStatus> {
   return invoke<CaptureStatus>('capture_resume')
+}
+
+/** Starts or refreshes a bounded capture-suppression guard for one operation. */
+export function beginInteractionGuard(
+  mode: InteractionMode,
+  requestId: string,
+  timeoutMs = 30_000,
+): Promise<InteractionStatus> {
+  return invoke<InteractionStatus>('interaction_guard_begin', { mode, requestId, timeoutMs })
+}
+
+/** Ends exactly the matching capture-suppression guard. */
+export function endInteractionGuard(
+  mode: InteractionMode,
+  requestId: string,
+): Promise<InteractionStatus> {
+  return invoke<InteractionStatus>('interaction_guard_end', { mode, requestId })
 }
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {

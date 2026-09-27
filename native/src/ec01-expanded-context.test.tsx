@@ -36,7 +36,7 @@ const eventApi = vi.hoisted(() => ({
 const hide = vi.hoisted(() => vi.fn())
 
 vi.mock('./api/bridge', () => api)
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide }) }))
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide, isFocused: async () => false, onFocusChanged: async () => () => undefined }) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: eventApi.listen }))
 
 function deepFreeze<T>(value: T): T {
@@ -57,6 +57,7 @@ const capture = {
     published: 1,
     deduplicated: 0,
     pausedDrops: 0,
+    guardDrops: 0,
     coalesced: 0,
     noSelection: 0,
     notApplicable: 0,

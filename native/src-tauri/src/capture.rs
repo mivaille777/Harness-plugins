@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::bridge::BridgeRuntime;
+use crate::interaction_guard::{CaptureGate, InteractionGuard};
 use crate::protocol::SelectionSnapshot;
 use crate::providers::registry::ProviderRegistry;
 use crate::providers::types::CaptureTrigger;
@@ -166,6 +167,7 @@ struct CaptureMetrics {
     published: u64,
     deduplicated: u64,
     paused_drops: u64,
+    guard_drops: u64,
     coalesced: u64,
     no_selection: u64,
     not_applicable: u64,
@@ -216,6 +218,16 @@ struct LatestValue<T> {
     value: Mutex<Option<T>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SelectionTrigger {
+    generation: u64,
+}
+
+struct PendingSelection {
+    snapshot: SelectionSnapshot,
+    generation: u64,
+}
+
 impl<T> LatestValue<T> {
     fn new() -> Self {
         Self {
@@ -259,17 +271,19 @@ impl<T> LatestValue<T> {
 pub struct CaptureRuntime {
     stop: Arc<AtomicBool>,
     state: Arc<Mutex<CaptureState>>,
-    latest: Arc<LatestValue<SelectionSnapshot>>,
+    latest: Arc<LatestValue<PendingSelection>>,
+    guard: InteractionGuard,
     threads: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl CaptureRuntime {
-    pub fn start(app: AppHandle) -> Result<Self, String> {
+    pub fn start(app: AppHandle, guard: InteractionGuard) -> Result<Self, String> {
         let config = CaptureConfig::from_environment()?;
         let runtime = Self {
             stop: Arc::new(AtomicBool::new(false)),
             state: Arc::new(Mutex::new(CaptureState::new())),
             latest: Arc::new(LatestValue::new()),
+            guard,
             threads: Mutex::new(Vec::new()),
         };
 
@@ -277,7 +291,7 @@ impl CaptureRuntime {
         runtime.start_windows_capture(app, config)?;
 
         #[cfg(not(windows))]
-        let _ = (app, config);
+        let _ = (app, config, runtime.guard.clone());
 
         Ok(runtime)
     }
@@ -295,6 +309,7 @@ impl CaptureRuntime {
     }
 
     fn pause(&self) {
+        self.guard.set_user_capture_paused(true);
         self.latest.clear();
         let mut state = self.state.lock().expect("capture state poisoned");
         state.paused = true;
@@ -302,6 +317,7 @@ impl CaptureRuntime {
     }
 
     fn resume(&self) {
+        self.guard.set_user_capture_paused(false);
         let mut state = self.state.lock().expect("capture state poisoned");
         state.paused = false;
         state.transition(CapturePhase::Running, None);
@@ -310,15 +326,17 @@ impl CaptureRuntime {
     #[cfg(windows)]
     fn start_windows_capture(&self, app: AppHandle, config: CaptureConfig) -> Result<(), String> {
         // Capacity one intentionally coalesces bursts of UIA events for one gesture.
-        let (trigger_tx, trigger_rx) = mpsc::sync_channel::<()>(1);
+        let (trigger_tx, trigger_rx) = mpsc::sync_channel::<SelectionTrigger>(1);
         let (ready_tx, mut ready_rx) = tokio_mpsc::channel::<()>(1);
 
         let event_stop = self.stop.clone();
         let event_state = self.state.clone();
+        let event_guard = self.guard.clone();
         let event_thread = thread::Builder::new()
             .name("dsh-selection-uia-events".to_owned())
             .spawn(move || {
-                if let Err(error) = run_selection_event_source(trigger_tx, event_stop) {
+                if let Err(error) = run_selection_event_source(trigger_tx, event_stop, event_guard)
+                {
                     record_error(
                         &event_state,
                         format!("UIA selection event source stopped: {error}"),
@@ -330,6 +348,7 @@ impl CaptureRuntime {
         let worker_stop = self.stop.clone();
         let worker_state = self.state.clone();
         let worker_latest = self.latest.clone();
+        let worker_guard = self.guard.clone();
         let worker_thread = thread::Builder::new()
             .name("dsh-selection-capture-worker".to_owned())
             .spawn(move || {
@@ -349,9 +368,13 @@ impl CaptureRuntime {
 
                 while !worker_stop.load(Ordering::Acquire) {
                     match trigger_rx.recv_timeout(WORKER_POLL) {
-                        Ok(()) => {
+                        Ok(trigger) => {
                             if is_paused(&worker_state) {
                                 increment(&worker_state, |metrics| metrics.paused_drops += 1);
+                                continue;
+                            }
+                            if !gate_allows(&worker_guard, trigger.generation) {
+                                increment(&worker_state, |metrics| metrics.guard_drops += 1);
                                 continue;
                             }
                             thread::sleep(config.settle_delay);
@@ -359,9 +382,18 @@ impl CaptureRuntime {
                                 increment(&worker_state, |metrics| metrics.paused_drops += 1);
                                 continue;
                             }
+                            if !gate_allows(&worker_guard, trigger.generation) {
+                                increment(&worker_state, |metrics| metrics.guard_drops += 1);
+                                continue;
+                            }
 
                             let started = Instant::now();
-                            match registry.capture(CaptureTrigger::UiaEvent) {
+                            let result = registry.capture(CaptureTrigger::UiaEvent);
+                            if !gate_allows(&worker_guard, trigger.generation) {
+                                increment(&worker_state, |metrics| metrics.guard_drops += 1);
+                                continue;
+                            }
+                            match result {
                                 Ok(ProviderCapture::Captured(snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
@@ -389,7 +421,10 @@ impl CaptureRuntime {
                                         continue;
                                     }
                                     last_capture = Some((signature, now));
-                                    let replaced = worker_latest.replace(snapshot);
+                                    let replaced = worker_latest.replace(PendingSelection {
+                                        snapshot,
+                                        generation: trigger.generation,
+                                    });
                                     let _ = ready_tx.try_send(());
                                     transition(&worker_state, CapturePhase::Publishing, None);
                                     increment(&worker_state, |metrics| {
@@ -415,12 +450,24 @@ impl CaptureRuntime {
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
-                            if Instant::now() < next_fallback_poll || is_paused(&worker_state) {
+                            if Instant::now() < next_fallback_poll
+                                || is_paused(&worker_state)
+                                || worker_guard.capture_gate().suppressed
+                            {
+                                continue;
+                            }
+                            let gate = worker_guard.capture_gate();
+                            if gate.suppressed {
                                 continue;
                             }
                             next_fallback_poll = Instant::now() + FALLBACK_SELECTION_POLL;
                             let started = Instant::now();
-                            match registry.capture(CaptureTrigger::FallbackPoll) {
+                            let result = registry.capture(CaptureTrigger::FallbackPoll);
+                            if !gate_allows(&worker_guard, gate.generation) {
+                                increment(&worker_state, |metrics| metrics.guard_drops += 1);
+                                continue;
+                            }
+                            match result {
                                 Ok(ProviderCapture::Captured(snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
@@ -449,7 +496,10 @@ impl CaptureRuntime {
                                         continue;
                                     }
 
-                                    let replaced = worker_latest.replace(snapshot);
+                                    let replaced = worker_latest.replace(PendingSelection {
+                                        snapshot,
+                                        generation: gate.generation,
+                                    });
                                     let _ = ready_tx.try_send(());
                                     last_capture = Some((signature, Instant::now()));
                                     transition(&worker_state, CapturePhase::Publishing, None);
@@ -502,22 +552,32 @@ impl CaptureRuntime {
         let publisher_stop = self.stop.clone();
         let publisher_state = self.state.clone();
         let publisher_latest = self.latest.clone();
+        let publisher_guard = self.guard.clone();
         tauri::async_runtime::spawn(async move {
             while ready_rx.recv().await.is_some() {
                 if publisher_stop.load(Ordering::Acquire) || is_paused(&publisher_state) {
                     publisher_latest.clear();
                     continue;
                 }
-                let Some(snapshot) = publisher_latest.take() else {
+                let Some(pending) = publisher_latest.take() else {
                     continue;
                 };
+                if !gate_allows(&publisher_guard, pending.generation) {
+                    increment(&publisher_state, |metrics| metrics.guard_drops += 1);
+                    continue;
+                }
+                let snapshot = pending.snapshot;
                 let bridge = app.state::<BridgeRuntime>();
                 let published_snapshot_id = snapshot.id.clone();
                 let published_revision = snapshot.revision;
                 match bridge.submit_selection(snapshot).await {
                     Ok(()) => {
-                        transition(&publisher_state, CapturePhase::Running, None);
                         increment(&publisher_state, |metrics| metrics.published += 1);
+                        if !gate_allows(&publisher_guard, pending.generation) {
+                            increment(&publisher_state, |metrics| metrics.guard_drops += 1);
+                            continue;
+                        }
+                        transition(&publisher_state, CapturePhase::Running, None);
                         // The UI receives identity only and reads the canonical snapshot back from
                         // Harness. Selection text never travels in this local notification.
                         let _ = app.emit(
@@ -546,6 +606,7 @@ impl CaptureRuntime {
 
 impl Drop for CaptureRuntime {
     fn drop(&mut self) {
+        self.guard.shutdown();
         self.stop.store(true, Ordering::Release);
         for thread in self
             .threads
@@ -560,6 +621,11 @@ impl Drop for CaptureRuntime {
 
 fn is_paused(state: &Mutex<CaptureState>) -> bool {
     state.lock().expect("capture state poisoned").paused
+}
+
+fn gate_allows(guard: &InteractionGuard, generation: u64) -> bool {
+    let gate: CaptureGate = guard.capture_gate();
+    !gate.suppressed && gate.generation == generation
 }
 
 fn increment(state: &Mutex<CaptureState>, update: impl FnOnce(&mut CaptureMetrics)) {
@@ -598,8 +664,9 @@ pub fn capture_resume(state: State<'_, CaptureRuntime>) -> Result<CaptureStatus,
 
 #[cfg(windows)]
 fn run_selection_event_source(
-    trigger_tx: mpsc::SyncSender<()>,
+    trigger_tx: mpsc::SyncSender<SelectionTrigger>,
     stop: Arc<AtomicBool>,
+    guard: InteractionGuard,
 ) -> Result<(), String> {
     use uiautomation::events::{CustomEventHandlerFn, UIEventHandler, UIEventType};
     use uiautomation::types::TreeScope;
@@ -611,7 +678,12 @@ fn run_selection_event_source(
         .map_err(|error| error.to_string())?;
 
     let callback: Box<CustomEventHandlerFn> = Box::new(move |_sender, _event| {
-        let _ = trigger_tx.try_send(());
+        let gate = guard.capture_gate();
+        if !gate.suppressed {
+            let _ = trigger_tx.try_send(SelectionTrigger {
+                generation: gate.generation,
+            });
+        }
         Ok(())
     });
     let handler = UIEventHandler::from(callback);
@@ -730,9 +802,13 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             state: Arc::new(Mutex::new(CaptureState::new())),
             latest: Arc::new(LatestValue::new()),
+            guard: InteractionGuard::default(),
             threads: Mutex::new(Vec::new()),
         };
-        runtime.latest.replace(snapshot("pending"));
+        runtime.latest.replace(PendingSelection {
+            snapshot: snapshot("pending"),
+            generation: runtime.guard.capture_gate().generation,
+        });
         runtime.pause();
         let status = runtime.status();
         assert!(status.paused);
@@ -767,6 +843,19 @@ mod tests {
             captured_at + Duration::from_millis(200),
             Duration::from_millis(120),
         ));
+    }
+
+    #[test]
+    fn stale_capture_generation_is_rejected_after_a_guard_or_pause_cycle() {
+        let guard = InteractionGuard::default();
+        let initial_generation = guard.capture_gate().generation;
+        guard.set_user_capture_paused(true);
+        guard.set_user_capture_paused(false);
+
+        let current_generation = guard.capture_gate().generation;
+        assert!(current_generation > initial_generation);
+        assert!(!gate_allows(&guard, initial_generation));
+        assert!(gate_allows(&guard, current_generation));
     }
 
     #[test]

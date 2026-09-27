@@ -25,7 +25,7 @@ const api = vi.hoisted(() => {
 
 const events = vi.hoisted(() => ({ listen: vi.fn(), unlisten: vi.fn() }))
 vi.mock('./api/bridge', () => api)
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide: vi.fn() }) }))
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide: vi.fn(), isFocused: async () => false, onFocusChanged: async () => () => undefined }) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: events.listen }))
 
 const capture = {
@@ -39,6 +39,7 @@ const capture = {
     published: 1,
     deduplicated: 0,
     pausedDrops: 0,
+    guardDrops: 0,
     coalesced: 0,
     noSelection: 0,
     notApplicable: 0,

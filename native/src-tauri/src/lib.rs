@@ -1,5 +1,6 @@
 pub mod bridge;
 pub mod capture;
+pub mod interaction_guard;
 pub mod native_messaging;
 pub mod protocol;
 pub mod providers;
@@ -12,8 +13,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(bridge::BridgeRuntime::from_environment().expect("invalid bridge configuration"))
         .setup(|app| {
-            let capture = capture::CaptureRuntime::start(app.handle().clone())?;
+            let guard = interaction_guard::InteractionGuard::default();
+            let capture = capture::CaptureRuntime::start(app.handle().clone(), guard.clone())?;
+            app.manage(guard.clone());
             app.manage(capture);
+            guard.start_reaper(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +37,8 @@ pub fn run() {
             capture::capture_status,
             capture::capture_pause,
             capture::capture_resume,
+            interaction_guard::interaction_guard_begin,
+            interaction_guard::interaction_guard_end,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dsh-selection-companion native shell");

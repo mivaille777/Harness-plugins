@@ -15,6 +15,8 @@ const api = vi.hoisted(() => {
     readSessionHistory: vi.fn(),
     pauseCapture: vi.fn(),
     resumeCapture: vi.fn(),
+    beginInteractionGuard: vi.fn(),
+    endInteractionGuard: vi.fn(),
     submitSessionPrompt: vi.fn(),
     subscribeSession: vi.fn(),
     unsubscribeSession: vi.fn(),
@@ -25,6 +27,12 @@ const api = vi.hoisted(() => {
 const hide = vi.hoisted(() => vi.fn())
 const show = vi.hoisted(() => vi.fn())
 const setFocus = vi.hoisted(() => vi.fn())
+const windowApi = vi.hoisted(() => ({
+  focusHandler: null as null | ((event: { payload: boolean }) => void),
+  isFocused: vi.fn(),
+  onFocusChanged: vi.fn(),
+  unlistenFocus: vi.fn(),
+}))
 const placement = vi.hoisted(() => ({ positionCurrentWindowNearSelection: vi.fn() }))
 const eventApi = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: unknown }) => void),
@@ -35,7 +43,13 @@ const eventApi = vi.hoisted(() => ({
   unlisten: vi.fn(),
 }))
 vi.mock('./api/bridge', () => api)
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide, show, setFocus }) }))
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({
+  hide,
+  show,
+  setFocus,
+  isFocused: windowApi.isFocused,
+  onFocusChanged: windowApi.onFocusChanged,
+}) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: eventApi.listen, emit: eventApi.emit }))
 vi.mock('./lens/windowPlacement', () => placement)
 function deepFreeze<T>(value: T): T {
@@ -44,7 +58,7 @@ function deepFreeze<T>(value: T): T {
   Object.freeze(value)
   return value
 }
-const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
+const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, guardDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
 const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { before: 'Before context', after: 'After context', sectionText: 'Section context', pageAvailable: false }, capabilities: { localContext: true, sectionContext: true, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {
@@ -54,6 +68,7 @@ describe('selection lens', () => {
     eventApi.handler = null
     eventApi.selectionHandler = null
     eventApi.lensOpenHandler = null
+    windowApi.focusHandler = null
     eventApi.listen.mockImplementation(async (name: string, handler: (event: { payload: unknown }) => void) => {
       if (name === 'selection-captured') eventApi.selectionHandler = handler
       else if (name === 'lens-open-request') eventApi.lensOpenHandler = handler
@@ -68,6 +83,13 @@ describe('selection lens', () => {
     api.readSessionHistory.mockResolvedValue({ sessionId: 'session-1', capturedThroughCursor: 0, entries: [] })
     api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' })
     api.resumeCapture.mockResolvedValue(capture)
+    api.beginInteractionGuard.mockResolvedValue({ captureSuppressed: true, shuttingDown: false, generation: 1, activeRequests: 1, activeModes: ['lensInteraction'] })
+    api.endInteractionGuard.mockResolvedValue({ captureSuppressed: false, shuttingDown: false, generation: 2, activeRequests: 0, activeModes: [] })
+    windowApi.isFocused.mockResolvedValue(false)
+    windowApi.onFocusChanged.mockImplementation(async (handler: (event: { payload: boolean }) => void) => {
+      windowApi.focusHandler = handler
+      return windowApi.unlistenFocus
+    })
     show.mockResolvedValue(undefined)
     setFocus.mockResolvedValue(undefined)
     placement.positionCurrentWindowNearSelection.mockResolvedValue(undefined)
@@ -90,6 +112,15 @@ describe('selection lens', () => {
     expect(await screen.findByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
     await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
     expect(setFocus).toHaveBeenCalledTimes(1)
+  })
+  it('suppresses native selection capture while the Lens window is focused', async () => {
+    render(<App initiallyOpen={false} />)
+    await waitFor(() => expect(windowApi.focusHandler).not.toBeNull())
+
+    windowApi.focusHandler?.({ payload: true })
+    await waitFor(() => expect(api.beginInteractionGuard).toHaveBeenCalledWith('lensInteraction', 'lens-main-window-focus'))
+    windowApi.focusHandler?.({ payload: false })
+    await waitFor(() => expect(api.endInteractionGuard).toHaveBeenCalledWith('lensInteraction', 'lens-main-window-focus'))
   })
   it('reopens on the in-flight request material after Esc without cancelling it', async () => {
     render(<App />)
