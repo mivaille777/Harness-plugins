@@ -105,11 +105,8 @@ describe('session bridge commands', () => {
     expect(tauri.invoke).toHaveBeenCalledWith('bridge_list_sessions')
   })
 
-  it('creates a session with an optional working directory', async () => {
+  it('creates a session without accepting a caller-supplied working directory', async () => {
     tauri.invoke.mockResolvedValue('session-created')
-    await expect(createSession('D:/fixture')).resolves.toBe('session-created')
-    expect(tauri.invoke).toHaveBeenCalledWith('bridge_create_session', { cwd: 'D:/fixture' })
-    tauri.invoke.mockClear()
     await expect(createSession()).resolves.toBe('session-created')
     expect(tauri.invoke).toHaveBeenCalledWith('bridge_create_session')
   })

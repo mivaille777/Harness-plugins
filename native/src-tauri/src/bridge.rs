@@ -1174,20 +1174,14 @@ impl BridgeRuntime {
     }
 
     #[cfg(windows)]
-    async fn create_session(&self, cwd: Option<String>) -> Result<String, String> {
-        if cwd.as_deref().is_some_and(|value| value.trim().is_empty()) {
-            return Err("session cwd must not be empty".to_owned());
-        }
+    async fn create_session(&self) -> Result<String, String> {
         self.connect().await?;
         let request_id = request_id("session-create");
         let message = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
             id: request_id.clone(),
             type_name: "session.create".to_owned(),
-            payload: match cwd {
-                Some(cwd) => serde_json::json!({ "cwd": cwd }),
-                None => serde_json::json!({}),
-            },
+            payload: serde_json::json!({}),
         };
         let response = match self.request_message(&message).await {
             Ok(response) => response,
@@ -1231,7 +1225,7 @@ impl BridgeRuntime {
     }
 
     #[cfg(not(windows))]
-    async fn create_session(&self, _cwd: Option<String>) -> Result<String, String> {
+    async fn create_session(&self) -> Result<String, String> {
         self.connect().await?;
         unreachable!()
     }
@@ -1427,11 +1421,8 @@ pub async fn bridge_list_sessions(
 }
 
 #[tauri::command]
-pub async fn bridge_create_session(
-    state: State<'_, BridgeRuntime>,
-    cwd: Option<String>,
-) -> Result<String, String> {
-    state.create_session(cwd).await
+pub async fn bridge_create_session(state: State<'_, BridgeRuntime>) -> Result<String, String> {
+    state.create_session().await
 }
 
 #[tauri::command]

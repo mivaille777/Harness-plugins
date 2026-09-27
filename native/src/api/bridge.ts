@@ -3,6 +3,36 @@ import type { AgentEventKind, ContextScope, SelectionExpandedPayload } from '../
 import type { SelectionSnapshot } from '../../../src/context/snapshot.js'
 import type { SelectionMaterial } from '../../../src/session/material.js'
 
+const nativeCommands = [
+  'bridge_status',
+  'bridge_connect',
+  'bridge_ping',
+  'bridge_disconnect',
+  'bridge_current_selection',
+  'bridge_expand_selection',
+  'bridge_submit_prompt',
+  'bridge_list_sessions',
+  'bridge_create_session',
+  'bridge_read_session_history',
+  'bridge_subscribe_session',
+  'bridge_unsubscribe_session',
+  'bridge_cancel_session',
+  'capture_status',
+  'capture_pause',
+  'capture_resume',
+  'interaction_guard_begin',
+  'interaction_guard_end',
+  'interaction_guard_status',
+  'restore_source_focus',
+] as const
+
+type NativeCommand = typeof nativeCommands[number]
+
+/** Keep Tauri IPC behind the typed command allowlist and these domain wrappers. */
+function invokeNative<T>(command: NativeCommand, args?: Record<string, unknown>): Promise<T> {
+  return args === undefined ? invoke<T>(command) : invoke<T>(command, args)
+}
+
 export interface BridgeStatus {
   readonly connected: boolean
   readonly endpoint: string
@@ -138,35 +168,35 @@ export interface SessionAgentEvent {
 }
 
 export function getBridgeStatus(): Promise<BridgeStatus> {
-  return invoke<BridgeStatus>('bridge_status')
+  return invokeNative<BridgeStatus>('bridge_status')
 }
 
 export function connectBridge(): Promise<BridgeStatus> {
-  return invoke<BridgeStatus>('bridge_connect')
+  return invokeNative<BridgeStatus>('bridge_connect')
 }
 
 export function pingBridge(): Promise<BridgeStatus> {
-  return invoke<BridgeStatus>('bridge_ping')
+  return invokeNative<BridgeStatus>('bridge_ping')
 }
 
 export function disconnectBridge(): Promise<BridgeStatus> {
-  return invoke<BridgeStatus>('bridge_disconnect')
+  return invokeNative<BridgeStatus>('bridge_disconnect')
 }
 
 export function getCaptureStatus(): Promise<CaptureStatus> {
-  return invoke<CaptureStatus>('capture_status')
+  return invokeNative<CaptureStatus>('capture_status')
 }
 
 export function getInteractionGuardStatus(): Promise<InteractionStatus> {
-  return invoke<InteractionStatus>('interaction_guard_status')
+  return invokeNative<InteractionStatus>('interaction_guard_status')
 }
 
 export function pauseCapture(): Promise<CaptureStatus> {
-  return invoke<CaptureStatus>('capture_pause')
+  return invokeNative<CaptureStatus>('capture_pause')
 }
 
 export function resumeCapture(): Promise<CaptureStatus> {
-  return invoke<CaptureStatus>('capture_resume')
+  return invokeNative<CaptureStatus>('capture_resume')
 }
 
 /** Starts or refreshes a bounded capture-suppression guard for one operation. */
@@ -175,7 +205,7 @@ export function beginInteractionGuard(
   requestId: string,
   timeoutMs = 30_000,
 ): Promise<InteractionStatus> {
-  return invoke<InteractionStatus>('interaction_guard_begin', { mode, requestId, timeoutMs })
+  return invokeNative<InteractionStatus>('interaction_guard_begin', { mode, requestId, timeoutMs })
 }
 
 /** Ends exactly the matching capture-suppression guard. */
@@ -183,33 +213,31 @@ export function endInteractionGuard(
   mode: InteractionMode,
   requestId: string,
 ): Promise<InteractionStatus> {
-  return invoke<InteractionStatus>('interaction_guard_end', { mode, requestId })
+  return invokeNative<InteractionStatus>('interaction_guard_end', { mode, requestId })
 }
 
 /** Requests a safety-checked focus restore for a native-captured source snapshot. */
 export function restoreSourceFocus(snapshotId: string, revision: number): Promise<FocusRestoreResult> {
-  return invoke<FocusRestoreResult>('restore_source_focus', { snapshotId, revision })
+  return invokeNative<FocusRestoreResult>('restore_source_focus', { snapshotId, revision })
 }
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
-  return invoke<SelectionSnapshot | null>('bridge_current_selection')
+  return invokeNative<SelectionSnapshot | null>('bridge_current_selection')
 }
 
 /** Requests bounded context already captured for the selected snapshot. */
 export function expandSelection(snapshotId: string, scope: ContextScope): Promise<SelectionExpansion> {
-  return invoke<SelectionExpansion>('bridge_expand_selection', { snapshotId, scope })
+  return invokeNative<SelectionExpansion>('bridge_expand_selection', { snapshotId, scope })
 }
 
 /** Lists live and persisted Harness sessions exposed by the bridge. */
 export function listSessions(): Promise<readonly SessionSummary[]> {
-  return invoke<readonly SessionSummary[]>('bridge_list_sessions')
+  return invokeNative<readonly SessionSummary[]>('bridge_list_sessions')
 }
 
-/** Creates one Harness session through the bridge and returns its identity. */
-export function createSession(cwd?: string): Promise<string> {
-  return cwd === undefined
-    ? invoke<string>('bridge_create_session')
-    : invoke<string>('bridge_create_session', { cwd })
+/** Creates one Harness session in the host's configured working directory. */
+export function createSession(): Promise<string> {
+  return invokeNative<string>('bridge_create_session')
 }
 
 /** Reads one bounded durable history page; callers follow nextCursor to load more. */
@@ -218,7 +246,7 @@ export function readSessionHistory(
   afterCursor?: number,
   limit?: number,
 ): Promise<SessionHistoryPage> {
-  return invoke<SessionHistoryPage>('bridge_read_session_history', {
+  return invokeNative<SessionHistoryPage>('bridge_read_session_history', {
     sessionId,
     ...(afterCursor === undefined ? {} : { afterCursor }),
     ...(limit === undefined ? {} : { limit }),
@@ -239,7 +267,7 @@ export async function submitSessionPrompt(
 ): Promise<SessionSubmission> {
   const material = authorizedMaterial ?? materialSnapshot
   try {
-    return await invoke<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId, material })
+    return await invokeNative<SessionSubmission>('bridge_submit_prompt', { sessionId, content, requestId, material })
   } catch (error) {
     const message = String(error)
     const match = /^SUBMISSION_UNKNOWN\|([^|]+)\|([^|]+)\|(.*)$/s.exec(message)
@@ -250,15 +278,15 @@ export async function submitSessionPrompt(
 
 /** Opens a pipe owned solely by the event stream for one Harness session. */
 export function subscribeSession(sessionId: string, subscriptionId: string, cursor?: number): Promise<void> {
-  return invoke<void>('bridge_subscribe_session', { sessionId, subscriptionId, cursor })
+  return invokeNative<void>('bridge_subscribe_session', { sessionId, subscriptionId, cursor })
 }
 
 /** Releases exactly one dedicated session subscription pipe. */
 export function unsubscribeSession(sessionId: string, subscriptionId: string): Promise<SessionUnsubscription> {
-  return invoke<SessionUnsubscription>('bridge_unsubscribe_session', { sessionId, subscriptionId })
+  return invokeNative<SessionUnsubscription>('bridge_unsubscribe_session', { sessionId, subscriptionId })
 }
 
 /** Requests the Harness cancellation operation for the selected session only. */
 export function cancelSession(sessionId: string): Promise<boolean> {
-  return invoke<boolean>('bridge_cancel_session', { sessionId })
+  return invokeNative<boolean>('bridge_cancel_session', { sessionId })
 }
