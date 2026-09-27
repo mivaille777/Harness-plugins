@@ -43,6 +43,9 @@ export interface BridgeStatus {
   readonly serverVersion: string | null
   readonly lastError: string | null
   readonly lastLatencyMs: number | null
+  readonly latencyP50Ms: number | null
+  readonly latencyP95Ms: number | null
+  readonly latencySampleCount: number
   readonly reconnectCount: number
   readonly requestTimeoutCount: number
 }

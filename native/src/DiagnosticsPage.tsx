@@ -126,6 +126,9 @@ export default function DiagnosticsPage({
     protocol: '协议版本',
     pipe: '管道',
     latency: '最近延迟',
+    bridgeLatencyP50: 'Ping 延迟 P50',
+    bridgeLatencyP95: 'Ping 延迟 P95',
+    bridgeLatencySamples: 'Ping 样本数',
     reconnects: '重连次数',
     requestTimeouts: '请求超时数',
     memoryScope: '采样进程',
@@ -207,6 +210,9 @@ export default function DiagnosticsPage({
     protocol: 'Protocol',
     pipe: 'Pipe',
     latency: 'Recent latency',
+    bridgeLatencyP50: 'Ping latency P50',
+    bridgeLatencyP95: 'Ping latency P95',
+    bridgeLatencySamples: 'Ping samples',
     reconnects: 'Reconnect count',
     requestTimeouts: 'Request timeouts',
     memoryScope: 'Sampled process',
@@ -392,6 +398,9 @@ export default function DiagnosticsPage({
           {row(labels.protocol, diagnostics?.bridge.protocol)}
           {row(labels.pipe, diagnostics?.bridge.pipe)}
           {row(labels.latency, diagnostics?.bridge.latencyMs === null || diagnostics?.bridge.latencyMs === undefined ? null : `${diagnostics.bridge.latencyMs} ms`)}
+          {row(labels.bridgeLatencyP50, diagnostics?.bridge.latencyP50Ms === null || diagnostics?.bridge.latencyP50Ms === undefined ? null : `${diagnostics.bridge.latencyP50Ms} ms`)}
+          {row(labels.bridgeLatencyP95, diagnostics?.bridge.latencyP95Ms === null || diagnostics?.bridge.latencyP95Ms === undefined ? null : `${diagnostics.bridge.latencyP95Ms} ms`)}
+          {row(labels.bridgeLatencySamples, diagnostics?.bridge.latencySampleCount)}
           {row(labels.reconnects, diagnostics?.bridge.reconnectCount)}
           {row(labels.requestTimeouts, diagnostics?.bridge.requestTimeoutCount)}
           {errorRow(labels.lastError, diagnostics?.bridge.lastError ?? pageState?.input.bridgeError ?? null)}

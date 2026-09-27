@@ -3,6 +3,7 @@ use crate::pipe_connection::NamedPipeConnection;
 use serde::Serialize;
 #[cfg(windows)]
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::env;
 #[cfg(windows)]
 use std::sync::{
@@ -18,6 +19,7 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
+const BRIDGE_LATENCY_SAMPLE_WINDOW: usize = 256;
 
 use crate::protocol::{
     BridgeHelloResultPayload, IpcMessage, SelectionCacheStatusResultPayload,
@@ -62,6 +64,9 @@ pub struct BridgeStatus {
     pub server_version: Option<String>,
     pub last_error: Option<String>,
     pub last_latency_ms: Option<u64>,
+    pub latency_p50_ms: Option<u64>,
+    pub latency_p95_ms: Option<u64>,
+    pub latency_sample_count: u64,
     pub reconnect_count: u64,
     pub request_timeout_count: u64,
 }
@@ -81,6 +86,9 @@ struct BridgeInner {
     server_version: Option<String>,
     last_error: Option<String>,
     last_latency_ms: Option<u64>,
+    bridge_latency_samples_ms: VecDeque<u64>,
+    bridge_latency_p50_ms: Option<u64>,
+    bridge_latency_p95_ms: Option<u64>,
     has_connected: bool,
     reconnect_count: u64,
     request_timeout_count: u64,
@@ -148,6 +156,9 @@ impl BridgeRuntime {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -188,6 +199,9 @@ impl BridgeRuntime {
             server_version: inner.server_version.clone(),
             last_error: inner.last_error.clone(),
             last_latency_ms: inner.last_latency_ms,
+            latency_p50_ms: inner.bridge_latency_p50_ms,
+            latency_p95_ms: inner.bridge_latency_p95_ms,
+            latency_sample_count: inner.bridge_latency_samples_ms.len() as u64,
             reconnect_count: inner.reconnect_count,
             request_timeout_count: inner.request_timeout_count,
         }
@@ -789,7 +803,12 @@ impl BridgeRuntime {
                     return Err(message);
                 }
                 let mut inner = self.inner.lock().await;
-                inner.last_latency_ms = Some(started.elapsed().as_millis() as u64);
+                let latency_ms = started.elapsed().as_millis() as u64;
+                inner.last_latency_ms = Some(latency_ms);
+                let (p50, p95) =
+                    push_bridge_latency_sample(&mut inner.bridge_latency_samples_ms, latency_ms);
+                inner.bridge_latency_p50_ms = p50;
+                inner.bridge_latency_p95_ms = p95;
                 inner.last_error = None;
                 Ok(())
             }
@@ -1752,11 +1771,96 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
+fn push_bridge_latency_sample(
+    samples: &mut VecDeque<u64>,
+    latency_ms: u64,
+) -> (Option<u64>, Option<u64>) {
+    samples.push_back(latency_ms);
+    if samples.len() > BRIDGE_LATENCY_SAMPLE_WINDOW {
+        samples.pop_front();
+    }
+    let mut sorted = samples.iter().copied().collect::<Vec<_>>();
+    sorted.sort_unstable();
+    (
+        nearest_rank_percentile(&sorted, 50),
+        nearest_rank_percentile(&sorted, 95),
+    )
+}
+
+fn nearest_rank_percentile(sorted_samples: &[u64], percentile: usize) -> Option<u64> {
+    if sorted_samples.is_empty() || percentile == 0 || percentile > 100 {
+        return None;
+    }
+    let rank = sorted_samples
+        .len()
+        .saturating_mul(percentile)
+        .div_ceil(100);
+    sorted_samples.get(rank.saturating_sub(1)).copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn bridge_latency_percentiles_use_nearest_rank() {
+        let mut samples = VecDeque::new();
+        assert_eq!(
+            push_bridge_latency_sample(&mut samples, 30),
+            (Some(30), Some(30))
+        );
+        assert_eq!(
+            push_bridge_latency_sample(&mut samples, 10),
+            (Some(10), Some(30))
+        );
+        assert_eq!(
+            push_bridge_latency_sample(&mut samples, 20),
+            (Some(20), Some(30))
+        );
+        assert_eq!(
+            push_bridge_latency_sample(&mut samples, 40),
+            (Some(20), Some(40))
+        );
+    }
+
+    #[test]
+    fn bridge_latency_percentiles_use_only_the_latest_256_samples() {
+        let mut samples = VecDeque::new();
+        let mut percentile = (None, None);
+        for latency_ms in 0..=256 {
+            percentile = push_bridge_latency_sample(&mut samples, latency_ms);
+        }
+
+        assert_eq!(samples.len(), BRIDGE_LATENCY_SAMPLE_WINDOW);
+        assert_eq!(samples.front(), Some(&1));
+        assert_eq!(percentile, (Some(128), Some(244)));
+    }
+
+    #[test]
+    fn bridge_status_serializes_latency_metrics_with_frontend_field_names() {
+        let status = BridgeStatus {
+            connected: true,
+            endpoint: "test-pipe".to_owned(),
+            protocol: IPC_PROTOCOL_VERSION,
+            server_version: Some("0.1.0".to_owned()),
+            last_error: None,
+            last_latency_ms: Some(40),
+            latency_p50_ms: Some(20),
+            latency_p95_ms: Some(40),
+            latency_sample_count: 4,
+            reconnect_count: 0,
+            request_timeout_count: 0,
+        };
+
+        let serialized = serde_json::to_value(status).unwrap();
+
+        assert_eq!(serialized["lastLatencyMs"], 40);
+        assert_eq!(serialized["latencyP50Ms"], 20);
+        assert_eq!(serialized["latencyP95Ms"], 40);
+        assert_eq!(serialized["latencySampleCount"], 4);
+    }
 
     fn material_snapshot() -> SelectionSnapshot {
         serde_json::from_value(serde_json::json!({
@@ -1847,6 +1951,9 @@ mod tests {
                 server_version: Some("test".to_owned()),
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -1932,6 +2039,9 @@ mod tests {
                 server_version: Some("test".to_owned()),
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -1970,6 +2080,9 @@ mod tests {
                 server_version: Some("old-server".to_owned()),
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -2019,6 +2132,9 @@ mod tests {
                 server_version: Some("new-server".to_owned()),
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -2111,6 +2227,9 @@ mod tests {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,
@@ -2293,6 +2412,9 @@ mod tests {
                 server_version: None,
                 last_error: None,
                 last_latency_ms: None,
+                bridge_latency_samples_ms: VecDeque::new(),
+                bridge_latency_p50_ms: None,
+                bridge_latency_p95_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,

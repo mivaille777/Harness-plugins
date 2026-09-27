@@ -28,6 +28,9 @@ describe('DiagnosticsPage', () => {
       serverVersion: '0.1.0',
       lastError: null,
       lastLatencyMs: 5,
+      latencyP50Ms: 4,
+      latencyP95Ms: 9,
+      latencySampleCount: 6,
       reconnectCount: 1,
       requestTimeoutCount: 3,
     }
@@ -102,6 +105,9 @@ describe('DiagnosticsPage', () => {
     await waitFor(() => expect(bridgeMocks.getCurrentSelection).toHaveBeenCalledOnce())
     expect(screen.getAllByText('unhealthy').length).toBeGreaterThan(0)
     expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByText('Ping latency P50').parentElement).toHaveTextContent('4 ms')
+    expect(screen.getByText('Ping latency P95').parentElement).toHaveTextContent('9 ms')
+    expect(screen.getByText('Ping samples').parentElement).toHaveTextContent('6')
     expect(screen.getByText('Request timeouts')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Runtime' })).toBeInTheDocument()

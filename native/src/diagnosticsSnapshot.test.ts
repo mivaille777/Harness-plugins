@@ -11,6 +11,9 @@ const baseInput = (): DiagnosticsInput => ({
     serverVersion: '0.1.0',
     lastError: null,
     lastLatencyMs: 4,
+    latencyP50Ms: 5,
+    latencyP95Ms: 9,
+    latencySampleCount: 8,
     reconnectCount: 2,
     requestTimeoutCount: 3,
   },
@@ -133,6 +136,10 @@ describe('runtime diagnostics snapshot', () => {
     const serialized = JSON.stringify(snapshot)
 
     expect(snapshot.bridge.health).toBe('healthy')
+    expect(snapshot.bridge.latencyMs).toBe(4)
+    expect(snapshot.bridge.latencyP50Ms).toBe(5)
+    expect(snapshot.bridge.latencyP95Ms).toBe(9)
+    expect(snapshot.bridge.latencySampleCount).toBe(8)
     expect(snapshot.bridge.reconnectCount).toBe(2)
     expect(snapshot.bridge.requestTimeoutCount).toBe(3)
     expect(snapshot.capture.droppedTriggerCount).toBe(10)
