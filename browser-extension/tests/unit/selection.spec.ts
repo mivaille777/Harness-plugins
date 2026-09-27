@@ -29,6 +29,10 @@ describe('captureBrowserSelection', () => {
     const text = paragraph.firstChild as Text
     const start = text.data.indexOf('exploitation')
     selectText(text, start, start + 'exploitation'.length)
+    const selectedRange = window.getSelection()!.getRangeAt(0)
+    Object.defineProperty(selectedRange, 'getBoundingClientRect', {
+      value: () => new DOMRect(100, 120, 80, 20),
+    })
 
     const capture = captureBrowserSelection(document, window)
 
@@ -39,6 +43,7 @@ describe('captureBrowserSelection', () => {
     expect(capture?.sectionText).not.toContain('Safe Bayesian Optimization')
     expect(capture?.sectionText).toContain('Acquisition Function')
     expect(capture?.language).toBe('en')
+    expect(capture?.geometry).toMatchObject({ precision: 'exact-range', anchorType: 'selection' })
   })
 
   it('captures input selections without touching the clipboard', () => {
@@ -54,6 +59,7 @@ describe('captureBrowserSelection', () => {
     expect(capture?.text).toBe('beta')
     expect(capture?.before).toBe('alpha')
     expect(capture?.after).toBe('gamma')
+    expect(capture?.geometry).toMatchObject({ precision: 'element', anchorType: 'element' })
   })
 
   it('ignores collapsed and whitespace-only selections', () => {

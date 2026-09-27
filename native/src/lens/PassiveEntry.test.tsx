@@ -30,7 +30,14 @@ vi.mock('./windowPlacement', () => placement)
 const snapshot = {
   id: 'entry-s1',
   revision: 7,
-  geometry: { x: 300, y: 240, width: 120, height: 22 },
+  geometry: {
+    x: 300,
+    y: 240,
+    width: 120,
+    height: 22,
+    precision: 'element',
+    anchorType: 'element',
+  },
 } as unknown as SelectionSnapshot
 
 describe('PassiveEntry', () => {

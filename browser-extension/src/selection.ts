@@ -71,7 +71,7 @@ function captureActiveInput(doc: Document, win: Window): BrowserSelectionCapture
     title: doc.title,
     topLevel,
     capturedAt: Date.now(),
-    ...(topLevel ? optionalGeometry(rectToScreenGeometry(input.getBoundingClientRect(), win)) : {}),
+    ...(topLevel ? optionalGeometry(rectToScreenGeometry(input.getBoundingClientRect(), win, 'element', 'element')) : {}),
   }
 }
 
@@ -165,13 +165,18 @@ function normalizeContext(value: string): string {
 
 function rangeGeometry(range: Range, win: Window): BrowserSelectionCapture['geometry'] | undefined {
   try {
-    return rectToScreenGeometry(range.getBoundingClientRect(), win)
+    return rectToScreenGeometry(range.getBoundingClientRect(), win, 'exact-range', 'selection')
   } catch {
     return undefined
   }
 }
 
-function rectToScreenGeometry(rect: DOMRect, win: Window): BrowserSelectionCapture['geometry'] | undefined {
+function rectToScreenGeometry(
+  rect: DOMRect,
+  win: Window,
+  precision: NonNullable<BrowserSelectionCapture['geometry']>['precision'],
+  anchorType: NonNullable<BrowserSelectionCapture['geometry']>['anchorType'],
+): BrowserSelectionCapture['geometry'] | undefined {
   if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite)) return undefined
   if (rect.width < 0 || rect.height < 0) return undefined
 
@@ -182,6 +187,8 @@ function rectToScreenGeometry(rect: DOMRect, win: Window): BrowserSelectionCaptu
     y: safeNumber(win.screenY) + verticalInset + rect.top,
     width: rect.width,
     height: rect.height,
+    precision,
+    anchorType,
   }
 }
 

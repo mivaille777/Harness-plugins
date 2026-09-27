@@ -12,6 +12,19 @@ export interface SourceWindowIdentity {
   readonly focusEpoch: number
 }
 
+export type SelectionGeometryPrecision = 'exact-range' | 'pointer-anchor' | 'element' | 'window'
+export type SelectionGeometryAnchorType = 'selection' | 'pointer' | 'element'
+
+export interface SelectionGeometry {
+  readonly monitorId?: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly precision: SelectionGeometryPrecision
+  readonly anchorType: SelectionGeometryAnchorType
+}
+
 export interface SelectionSnapshot {
   readonly id: string
   readonly revision: number
@@ -54,13 +67,7 @@ export interface SelectionSnapshot {
     readonly screenshot: boolean
   }
 
-  readonly geometry?: {
-    readonly monitorId?: string
-    readonly x: number
-    readonly y: number
-    readonly width: number
-    readonly height: number
-  }
+  readonly geometry?: SelectionGeometry
 
   readonly provider: string
   readonly confidence: number
@@ -181,13 +188,36 @@ function parseGeometry(value: unknown): NonNullable<SelectionSnapshot['geometry'
   const height = requireFiniteNumber(geometry.height, 'geometry.height')
   if (width < 0 || height < 0) fail('geometry width and height must be non-negative')
 
+  const precision = requireGeometryPrecision(geometry.precision)
+  const anchorType = requireGeometryAnchorType(geometry.anchorType)
+  const matchingAnchor = (
+    (precision === 'exact-range' && anchorType === 'selection')
+    || (precision === 'pointer-anchor' && anchorType === 'pointer')
+    || ((precision === 'element' || precision === 'window') && anchorType === 'element')
+  )
+  if (!matchingAnchor) fail('geometry precision and anchorType must describe the same anchor')
+
   return {
     ...optionalStringProperty(geometry.monitorId, 'geometry.monitorId', 'monitorId'),
     x: requireFiniteNumber(geometry.x, 'geometry.x'),
     y: requireFiniteNumber(geometry.y, 'geometry.y'),
     width,
     height,
+    precision,
+    anchorType,
   }
+}
+
+function requireGeometryPrecision(value: unknown): SelectionGeometryPrecision {
+  if (value === 'exact-range' || value === 'pointer-anchor' || value === 'element' || value === 'window') {
+    return value
+  }
+  fail('geometry.precision must be exact-range, pointer-anchor, element, or window')
+}
+
+function requireGeometryAnchorType(value: unknown): SelectionGeometryAnchorType {
+  if (value === 'selection' || value === 'pointer' || value === 'element') return value
+  fail('geometry.anchorType must be selection, pointer, or element')
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {

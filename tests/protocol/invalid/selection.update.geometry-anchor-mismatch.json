@@ -1,0 +1,31 @@
+{
+  "protocol": 4,
+  "id": "selection-invalid-geometry-1",
+  "type": "selection.update",
+  "payload": {
+    "snapshot": {
+      "id": "selection-geometry-invalid",
+      "revision": 1,
+      "capturedAt": 1000,
+      "selection": { "text": "Selected text" },
+      "source": { "kind": "browser" },
+      "context": { "pageAvailable": false },
+      "capabilities": {
+        "localContext": false,
+        "sectionContext": false,
+        "pageContext": false,
+        "screenshot": false
+      },
+      "geometry": {
+        "x": -1440,
+        "y": -320,
+        "width": 0,
+        "height": 0,
+        "precision": "pointer-anchor",
+        "anchorType": "selection"
+      },
+      "provider": "browser-accessibility",
+      "confidence": 0.5
+    }
+  }
+}

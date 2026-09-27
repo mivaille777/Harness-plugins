@@ -1,3 +1,15 @@
+export type BrowserGeometryPrecision = 'exact-range' | 'element'
+export type BrowserGeometryAnchorType = 'selection' | 'element'
+
+export interface BrowserSelectionGeometry {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly precision: BrowserGeometryPrecision
+  readonly anchorType: BrowserGeometryAnchorType
+}
+
 export interface BrowserSelectionCapture {
   readonly text: string
   readonly language?: string
@@ -11,12 +23,7 @@ export interface BrowserSelectionCapture {
   readonly title: string
   readonly topLevel: boolean
   readonly capturedAt: number
-  readonly geometry?: {
-    readonly x: number
-    readonly y: number
-    readonly width: number
-    readonly height: number
-  }
+  readonly geometry?: BrowserSelectionGeometry
 }
 
 export interface BrowserSenderMeta {
@@ -56,12 +63,7 @@ export interface BrowserSelectionSnapshot {
     readonly pageContext: boolean
     readonly screenshot: boolean
   }
-  readonly geometry?: {
-    readonly x: number
-    readonly y: number
-    readonly width: number
-    readonly height: number
-  }
+  readonly geometry?: BrowserSelectionGeometry
   readonly provider: 'browser-dom'
   readonly confidence: number
 }

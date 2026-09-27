@@ -749,10 +749,13 @@ fn snapshot_signature(snapshot: &SelectionSnapshot) -> u64 {
         .and_then(|document| document.url.as_ref())
         .hash(&mut hasher);
     if let Some(geometry) = &snapshot.geometry {
+        geometry.monitor_id.hash(&mut hasher);
         geometry.x.to_bits().hash(&mut hasher);
         geometry.y.to_bits().hash(&mut hasher);
         geometry.width.to_bits().hash(&mut hasher);
         geometry.height.to_bits().hash(&mut hasher);
+        geometry.precision.hash(&mut hasher);
+        geometry.anchor_type.hash(&mut hasher);
     }
     hasher.finish()
 }

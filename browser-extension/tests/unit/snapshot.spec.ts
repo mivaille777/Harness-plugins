@@ -12,7 +12,14 @@ const capture = {
   title: 'Frame title',
   topLevel: true,
   capturedAt: 1234,
-  geometry: { x: 100, y: 200, width: 80, height: 20 },
+  geometry: {
+    x: 100,
+    y: 200,
+    width: 80,
+    height: 20,
+    precision: 'exact-range',
+    anchorType: 'selection',
+  },
 } as const
 
 describe('buildBrowserSnapshot', () => {

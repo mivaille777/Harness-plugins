@@ -289,6 +289,61 @@ pub struct SelectionGeometry {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    pub precision: SelectionGeometryPrecision,
+    pub anchor_type: SelectionGeometryAnchorType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum SelectionGeometryPrecision {
+    ExactRange,
+    PointerAnchor,
+    Element,
+    Window,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum SelectionGeometryAnchorType {
+    Selection,
+    Pointer,
+    Element,
+}
+
+impl SelectionGeometry {
+    fn validate(&self) -> Result<(), ProtocolError> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.width < 0.0
+            || self.height < 0.0
+        {
+            return Err(ProtocolError::InvalidMessage(
+                "invalid selection geometry coordinates".into(),
+            ));
+        }
+
+        let matching_anchor = matches!(
+            (self.precision, self.anchor_type),
+            (
+                SelectionGeometryPrecision::ExactRange,
+                SelectionGeometryAnchorType::Selection
+            ) | (
+                SelectionGeometryPrecision::PointerAnchor,
+                SelectionGeometryAnchorType::Pointer
+            ) | (
+                SelectionGeometryPrecision::Element | SelectionGeometryPrecision::Window,
+                SelectionGeometryAnchorType::Element
+            )
+        );
+        if !matching_anchor {
+            return Err(ProtocolError::InvalidMessage(
+                "selection geometry precision and anchorType do not match".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -840,17 +895,7 @@ impl SelectionSnapshot {
             ));
         }
         if let Some(geometry) = &self.geometry {
-            if !geometry.x.is_finite()
-                || !geometry.y.is_finite()
-                || !geometry.width.is_finite()
-                || !geometry.height.is_finite()
-                || geometry.width < 0.0
-                || geometry.height < 0.0
-            {
-                return Err(ProtocolError::InvalidMessage(
-                    "invalid selection geometry".into(),
-                ));
-            }
+            geometry.validate()?;
         }
         Ok(())
     }
@@ -1219,6 +1264,9 @@ mod tests {
         include_str!("../../../tests/protocol/invalid/bridge.ping.unknown-field.json"),
         include_str!("../../../tests/protocol/invalid/selection.expand.missing-scope.json"),
         include_str!("../../../tests/protocol/invalid/selection.update.unknown-field.json"),
+        include_str!(
+            "../../../tests/protocol/invalid/selection.update.geometry-anchor-mismatch.json"
+        ),
         include_str!("../../../tests/protocol/invalid/session.subscribe.negative-cursor.json"),
         include_str!("../../../tests/protocol/invalid/session.history.negative-cursor.json"),
         include_str!("../../../tests/protocol/invalid/session.history.limit-too-large.json"),
@@ -1450,6 +1498,8 @@ mod tests {
                 y: 2.0,
                 width: 3.0,
                 height: 4.0,
+                precision: SelectionGeometryPrecision::PointerAnchor,
+                anchor_type: SelectionGeometryAnchorType::Pointer,
             }),
             provider: "browser-accessibility".into(),
             confidence: 0.8,
@@ -1469,10 +1519,42 @@ mod tests {
         assert!(value.pointer("/geometry/monitorId").is_none());
         assert_eq!(
             value
+                .pointer("/geometry/precision")
+                .and_then(serde_json::Value::as_str),
+            Some("pointer-anchor")
+        );
+        assert_eq!(
+            value
+                .pointer("/geometry/anchorType")
+                .and_then(serde_json::Value::as_str),
+            Some("pointer")
+        );
+        assert_eq!(
+            value
                 .pointer("/context/after")
                 .and_then(serde_json::Value::as_str),
             Some("after")
         );
+    }
+
+    #[test]
+    fn selection_geometry_requires_matching_precision_and_anchor() {
+        let pointer = SelectionGeometry {
+            monitor_id: None,
+            x: -1440.0,
+            y: -320.0,
+            width: 0.0,
+            height: 0.0,
+            precision: SelectionGeometryPrecision::PointerAnchor,
+            anchor_type: SelectionGeometryAnchorType::Pointer,
+        };
+        pointer.validate().unwrap();
+
+        let mismatched = SelectionGeometry {
+            anchor_type: SelectionGeometryAnchorType::Selection,
+            ..pointer
+        };
+        assert!(mismatched.validate().is_err());
     }
 
     #[test]

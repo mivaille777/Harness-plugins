@@ -301,7 +301,18 @@ const selectionSnapshotWireSchema = z.object({
     y: z.number().finite(),
     width: z.number().finite(),
     height: z.number().finite(),
-  }).strict().optional(),
+    precision: z.enum(['exact-range', 'pointer-anchor', 'element', 'window']),
+    anchorType: z.enum(['selection', 'pointer', 'element']),
+  }).strict().superRefine((geometry, context) => {
+    const matchingAnchor = (
+      (geometry.precision === 'exact-range' && geometry.anchorType === 'selection')
+      || (geometry.precision === 'pointer-anchor' && geometry.anchorType === 'pointer')
+      || ((geometry.precision === 'element' || geometry.precision === 'window') && geometry.anchorType === 'element')
+    )
+    if (!matchingAnchor) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'geometry precision and anchorType must describe the same anchor' })
+    }
+  }).optional(),
   provider: nonEmptyString,
   confidence: z.number().finite(),
 }).strict()

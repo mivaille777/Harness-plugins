@@ -128,7 +128,7 @@ The provider:
 - searches nearby accessibility headings without depending on localized labels
 - reads browser title / document title where available
 - searches the browser chrome for a URL-bearing Edit + ValuePattern
-- emits a conservative screen-space geometry anchor from the enclosing accessibility element
+- emits screen geometry tagged as exact-range, pointer-anchor, element, or window precision
 - dynamically calculates capabilities and confidence
 - detects obvious `.pdf` browser documents as `source.kind = "pdf"`
 
@@ -202,9 +202,9 @@ The Browser provider owns one UI Automation session for the lifetime of its capt
 
 ### Geometry note
 
-`uiautomation 0.16.1` does not currently wrap `IUIAutomationTextRange::GetBoundingRectangles`, so Task 5 uses the enclosing accessibility element rectangle as a conservative anchor.
+`uiautomation 0.16.1` does not currently wrap `IUIAutomationTextRange::GetBoundingRectangles`. Native capture therefore prefers a physical pointer point, then the enclosing UIA element rectangle, then the browser window rectangle. Each geometry includes `precision` and `anchorType`; the current pointer uses `pointer-anchor` and a zero-sized rectangle. Exact TextRange bounds remain unimplemented.
 
-Task 6 can refine exact range geometry for the near-selection Lens without changing `SelectionSnapshot` or the provider abstraction.
+The Lens placement logic clamps the selected anchor to the monitor work area, including negative-origin monitors. Real DPI and multi-monitor verification remains a desktop acceptance task.
 
 ## Provider seam
 

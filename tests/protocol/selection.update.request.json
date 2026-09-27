@@ -37,7 +37,9 @@
         "x": 100,
         "y": 200,
         "width": 320,
-        "height": 28
+        "height": 28,
+        "precision": "exact-range",
+        "anchorType": "selection"
       },
       "provider": "browser-dom",
       "confidence": 0.99

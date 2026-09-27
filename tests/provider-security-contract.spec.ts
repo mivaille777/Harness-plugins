@@ -45,6 +45,8 @@ function snapshot(id: string, text: string, revision = 1): SelectionSnapshot {
       y: 34,
       width: 56,
       height: 78,
+      precision: 'element',
+      anchorType: 'element',
     },
     provider: 'word-com',
     confidence: 0.99,

@@ -46,6 +46,8 @@ function makeSnapshot(overrides: Partial<SelectionSnapshot> = {}): SelectionSnap
       y: 200,
       width: 300,
       height: 40,
+      precision: 'element',
+      anchorType: 'element',
     },
     provider: 'browser-dom',
     confidence: 0.99,
@@ -80,8 +82,28 @@ describe('SelectionSnapshot validation', () => {
       .toThrow('confidence must be a finite number between 0 and 1')
 
     expect(() => normalizeSelectionSnapshot(makeSnapshot({
-      geometry: { x: 0, y: 0, width: -1, height: 20 },
+      geometry: {
+        x: 0,
+        y: 0,
+        width: -1,
+        height: 20,
+        precision: 'element',
+        anchorType: 'element',
+      },
     }))).toThrow('geometry width and height must be non-negative')
+  })
+
+  it('rejects geometry whose precision and anchor type disagree', () => {
+    expect(() => normalizeSelectionSnapshot(makeSnapshot({
+      geometry: {
+        x: -1400,
+        y: -900,
+        width: 0,
+        height: 0,
+        precision: 'pointer-anchor',
+        anchorType: 'selection',
+      },
+    }))).toThrow('geometry precision and anchorType must describe the same anchor')
   })
 
   it('returns a detached deeply frozen snapshot', () => {

@@ -2,9 +2,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{
     SelectionCapabilities, SelectionContext, SelectionDocument, SelectionGeometry,
-    SelectionSnapshot, SelectionSource, SelectionSourceKind, SelectionValue, SourceWindowIdentity,
+    SelectionGeometryAnchorType, SelectionGeometryPrecision, SelectionSnapshot, SelectionSource,
+    SelectionSourceKind, SelectionValue, SourceWindowIdentity,
 };
 use crate::providers::{ProviderCapture, SelectionProvider};
+
+#[cfg(windows)]
+use windows_sys::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetPhysicalCursorPos};
 
 const PROVIDER_ID: &str = "browser-accessibility";
 const DEFAULT_CONTEXT_CHARS: i32 = 900;
@@ -230,7 +234,15 @@ mod windows_impl {
         let document_title = find_document_title(&text_provider, walker)
             .or_else(|| document_title_from_window(&window_title));
         let url = find_address_bar_url(browser_window, walker);
-        let geometry = enclosing.as_ref().and_then(element_geometry);
+        // UIA rectangles and GetPhysicalCursorPos use physical virtual-desktop pixels. A
+        // point anchor follows the pointer used for mouse selection; the parent
+        // element and browser window remain explicit fallbacks.
+        let geometry = select_geometry(
+            None,
+            pointer_geometry(),
+            enclosing.as_ref().and_then(element_geometry),
+            window_geometry(browser_window),
+        );
 
         let (app, process_name) = browser_identity(&window_title);
         let process_id =
@@ -697,19 +709,66 @@ mod windows_impl {
 
     fn element_geometry(element: &UIElement) -> Option<SelectionGeometry> {
         let rect = element.get_bounding_rectangle().ok()?;
-        let width = rect.get_width();
-        let height = rect.get_height();
-        if width <= 0 || height <= 0 {
-            return None;
-        }
-        Some(SelectionGeometry {
-            monitor_id: None,
-            x: rect.get_left() as f64,
-            y: rect.get_top() as f64,
-            width: width as f64,
-            height: height as f64,
-        })
+        rect_geometry(&rect, SelectionGeometryPrecision::Element)
     }
+
+    fn window_geometry(window: &UIElement) -> Option<SelectionGeometry> {
+        let rect = window.get_bounding_rectangle().ok()?;
+        rect_geometry(&rect, SelectionGeometryPrecision::Window)
+    }
+}
+
+fn rect_geometry(
+    rect: &uiautomation::types::Rect,
+    precision: SelectionGeometryPrecision,
+) -> Option<SelectionGeometry> {
+    let width = rect.get_width();
+    let height = rect.get_height();
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some(SelectionGeometry {
+        monitor_id: None,
+        x: rect.get_left() as f64,
+        y: rect.get_top() as f64,
+        width: width as f64,
+        height: height as f64,
+        precision,
+        anchor_type: SelectionGeometryAnchorType::Element,
+    })
+}
+
+fn pointer_geometry() -> Option<SelectionGeometry> {
+    #[cfg(windows)]
+    {
+        let mut point = POINT { x: 0, y: 0 };
+        let succeeded = unsafe { GetPhysicalCursorPos(&mut point) };
+        if succeeded != 0 {
+            return Some(pointer_geometry_at(point.x, point.y));
+        }
+    }
+    None
+}
+
+fn pointer_geometry_at(x: i32, y: i32) -> SelectionGeometry {
+    SelectionGeometry {
+        monitor_id: None,
+        x: f64::from(x),
+        y: f64::from(y),
+        width: 0.0,
+        height: 0.0,
+        precision: SelectionGeometryPrecision::PointerAnchor,
+        anchor_type: SelectionGeometryAnchorType::Pointer,
+    }
+}
+
+fn select_geometry(
+    exact_range: Option<SelectionGeometry>,
+    pointer: Option<SelectionGeometry>,
+    element: Option<SelectionGeometry>,
+    window: Option<SelectionGeometry>,
+) -> Option<SelectionGeometry> {
+    exact_range.or(pointer).or(element).or(window)
 }
 
 #[cfg(test)]
@@ -729,6 +788,73 @@ mod tests {
             "Microsoft Edge"
         );
         assert_eq!(browser_identity("Paper - Brave").0, "Brave");
+    }
+
+    #[test]
+    fn pointer_anchor_keeps_negative_virtual_screen_coordinates_and_is_a_point() {
+        let geometry = pointer_geometry_at(-1440, -320);
+
+        assert_eq!(geometry.x, -1440.0);
+        assert_eq!(geometry.y, -320.0);
+        assert_eq!(geometry.width, 0.0);
+        assert_eq!(geometry.height, 0.0);
+        assert_eq!(
+            geometry.precision,
+            SelectionGeometryPrecision::PointerAnchor
+        );
+        assert_eq!(geometry.anchor_type, SelectionGeometryAnchorType::Pointer);
+    }
+
+    #[test]
+    fn geometry_resolution_uses_the_documented_precision_order() {
+        let exact = SelectionGeometry {
+            monitor_id: None,
+            x: 1.0,
+            y: 2.0,
+            width: 3.0,
+            height: 4.0,
+            precision: SelectionGeometryPrecision::ExactRange,
+            anchor_type: SelectionGeometryAnchorType::Selection,
+        };
+        let pointer = pointer_geometry_at(10, 20);
+        let element = SelectionGeometry {
+            precision: SelectionGeometryPrecision::Element,
+            anchor_type: SelectionGeometryAnchorType::Element,
+            ..exact.clone()
+        };
+        let window = SelectionGeometry {
+            precision: SelectionGeometryPrecision::Window,
+            anchor_type: SelectionGeometryAnchorType::Element,
+            ..exact.clone()
+        };
+
+        assert_eq!(
+            select_geometry(
+                Some(exact.clone()),
+                Some(pointer.clone()),
+                Some(element.clone()),
+                Some(window.clone())
+            ),
+            Some(exact)
+        );
+        assert_eq!(
+            select_geometry(
+                None,
+                Some(pointer.clone()),
+                Some(element.clone()),
+                Some(window.clone())
+            ),
+            Some(pointer)
+        );
+        assert_eq!(
+            select_geometry(None, None, Some(element.clone()), Some(window.clone())),
+            Some(element)
+        );
+        assert_eq!(
+            select_geometry(None, None, None, Some(window.clone())),
+            Some(window)
+        );
+        assert_eq!(select_geometry(None, None, None, None), None);
     }
 
     #[test]
