@@ -158,6 +158,7 @@ describe('EC-01 expanded context submission baseline', () => {
 
     await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
     eventApi.selectionHandler?.({ payload: { snapshotId: 'ec01-s2', revision: 3 } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Use latest selection' }))
 
     expect(await screen.findByText('EC01 newer selected text')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('EC01_LOCAL_BEFORE_SENTINEL')).not.toBeInTheDocument())

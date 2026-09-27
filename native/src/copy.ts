@@ -30,6 +30,9 @@ export interface AppCopy {
   readonly refreshSelection: string
   readonly currentSelection: string
   readonly selectionUpdated: string
+  readonly selectionAvailable: string
+  readonly latestSelectionChanged: string
+  readonly lensBindingUnavailable: string
   readonly materialAriaLabel: string
   readonly fixedMaterial: (revision: number) => string
   readonly contextLabel: string
@@ -99,6 +102,9 @@ const english: AppCopy = {
   refreshSelection: 'Refresh selection',
   currentSelection: 'Current selection',
   selectionUpdated: 'Latest browser selection is now shown.',
+  selectionAvailable: 'A new selection is available. This Lens stays pinned until you switch.',
+  latestSelectionChanged: 'The latest selection changed while it was loading. Select it again to switch.',
+  lensBindingUnavailable: 'The current Lens material is unavailable. Refresh the selection before submitting.',
   materialAriaLabel: 'Fixed source material',
   fixedMaterial: revision => `Fixed material · revision ${revision}`,
   contextLabel: 'Captured context',
@@ -180,6 +186,9 @@ const simplifiedChinese: AppCopy = {
   refreshSelection: '刷新选区',
   currentSelection: '当前选区',
   selectionUpdated: '已显示最新浏览器选区。',
+  selectionAvailable: '检测到新的选区；当前 Lens 仍固定在原材料，切换后才会更新。',
+  latestSelectionChanged: '加载期间最新选区又发生变化，请再次切换。',
+  lensBindingUnavailable: '当前 Lens 材料已不可用，请刷新选区后再提交。',
   materialAriaLabel: '固定来源材料',
   fixedMaterial: revision => `已固定材料 · 修订 ${revision}`,
   contextLabel: '已捕获上下文',

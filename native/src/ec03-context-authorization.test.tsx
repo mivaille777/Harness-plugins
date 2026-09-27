@@ -174,6 +174,7 @@ describe('EC-03 Lens context authorization', () => {
 
     await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
     eventApi.selectionHandler?.({ payload: { snapshotId: 'ec03-s2', revision: 3 } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Use latest selection' }))
 
     expect(await screen.findByText('EC03 new selected text')).toBeInTheDocument()
     await waitFor(() => {

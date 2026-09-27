@@ -65,7 +65,7 @@ describe('selection lens', () => {
     api.unsubscribeSession.mockResolvedValue({ sessionId: 'session-1', subscriptionId: 'subscription', released: true })
     api.cancelSession.mockResolvedValue(true)
   })
-  it('refreshes the visible selection after Native publishes a new snapshot', async () => {
+  it('keeps the visible selection pinned until the user switches to the latest one', async () => {
     const latest = deepFreeze({
       ...selection,
       id: 's2',
@@ -78,9 +78,26 @@ describe('selection lens', () => {
     await screen.findByTestId('selected-text')
     await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
     eventApi.selectionHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
+    const useLatest = await screen.findByRole('button', { name: 'Use latest selection' })
+    expect(screen.getByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
+    expect(screen.queryByText('A newer visible selection')).not.toBeInTheDocument()
+    expect(useLatest).toBeEnabled()
+    expect(api.getCurrentSelection).toHaveBeenCalledTimes(1)
+    fireEvent.click(useLatest)
     expect(await screen.findByText('A newer visible selection')).toBeInTheDocument()
-    expect(screen.getByText('Latest browser selection is now shown.')).toBeInTheDocument()
     expect(screen.getByText('Fixed material · revision 3')).toBeInTheDocument()
+  })
+  it('submits the pinned snapshot when a newer selection arrives', async () => {
+    render(<App />)
+    await screen.findByTestId('selected-text')
+    await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
+    eventApi.selectionHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
+    await screen.findByRole('button', { name: 'Use latest selection' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1))
+    expect(api.submitSessionPrompt.mock.calls[0]?.[3]).toBe(selection)
+    expect(api.submitSessionPrompt.mock.calls[0]?.[3]).toMatchObject({ id: 's1', revision: 2 })
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
   it('keeps captured context behind an explicit disclosure', async () => {

@@ -42,6 +42,13 @@ import {
   buildAuthorizedMaterialPrompt,
   renderAuthorizedMaterialReference,
 } from './requestMaterial'
+import {
+  initialLensState,
+  sameLensSelection,
+  transitionLens,
+  type LensBinding,
+  type LensEvent,
+} from './lens/store'
 
 const emptyCapture: CaptureStatus = {
   paused: false,
@@ -116,6 +123,28 @@ async function readCompleteHistory(sessionId: string): Promise<CompleteHistory> 
   }
 }
 
+function bindingForSelection(snapshot: SelectionSnapshot): LensBinding {
+  return { snapshotId: snapshot.id, revision: snapshot.revision, openedAt: Date.now() }
+}
+
+function textDeltaFromEvent(value: unknown): string | null {
+  if (value === null || typeof value !== 'object') return null
+  const delta = (value as Record<string, unknown>).value
+  if (delta === null || typeof delta !== 'object') return null
+  const message = delta as Record<string, unknown>
+  return message.type === 'text-delta' && typeof message.text === 'string' ? message.text : null
+}
+
+function streamOutcomeFromEvent(value: unknown): 'completed' | 'cancelled' | 'error' | null {
+  if (value === null || typeof value !== 'object') return null
+  const root = value as Record<string, unknown>
+  if (root.status !== 'turn-end' || root.reason === null || typeof root.reason !== 'object') return null
+  const reason = (root.reason as Record<string, unknown>).kind
+  if (reason === 'completed' || reason === 'max-tokens') return 'completed'
+  if (reason === 'aborted') return 'cancelled'
+  return 'error'
+}
+
 function sessionLabel(session: SessionSummary, index: number, copy: AppCopy): string {
   return session.title?.trim() || `${copy.untitledSession} ${index + 1}`
 }
@@ -133,6 +162,7 @@ export default function App() {
   const copy = getAppCopy()
   const [capture, setCapture] = useState<CaptureStatus>(emptyCapture)
   const [snapshot, setSnapshot] = useState<SelectionSnapshot | null>(null)
+  const [lensState, setLensState] = useState(initialLensState)
   const [contextScope, setContextScope] = useState<ExpandableContextScope>('local')
   const [expandedContext, setExpandedContext] = useState<SelectionExpansion | null>(null)
   const [authorizedMaterial, setAuthorizedMaterial] = useState<SelectionMaterial | null>(null)
@@ -150,8 +180,7 @@ export default function App() {
   const [requestId, setRequestId] = useState<string | null>(null)
   const [projection, setProjection] = useState<RequestProjection>(initialRequestProjection)
   const busy = ['submitting', 'queued', 'streaming', 'cancelling', 'submission-unknown'].includes(projection.phase)
-  const busyRef = useRef(busy)
-  const pendingSelectionRefresh = useRef(false)
+  const lensStateRef = useRef(initialLensState)
   const active = useRef<ActiveSession>({ sessionId: null, requestId: null, subscriptionId: null })
   const cursors = useRef(new Map<string, number>())
   const drafts = useRef(new Map<string, string>())
@@ -160,6 +189,7 @@ export default function App() {
   const pendingSubmission = useRef<{
     sessionId: string | null
     requestId: string
+    action: Exclude<Action, null>
     prompt: string
     material: SelectionSnapshot
     authorizedMaterial: SelectionMaterial
@@ -168,11 +198,64 @@ export default function App() {
   const viewActive = useRef(true)
   const snapshotIdentityRef = useRef<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  const dispatchLensEvent = useCallback((event: LensEvent) => {
+    const previous = lensStateRef.current
+    const next = transitionLens(previous, event)
+    if (next !== previous) {
+      lensStateRef.current = next
+      setLensState(next)
+    }
+    return next
+  }, [])
+
+  const refresh = useCallback(async (useLatest = false) => {
+    const stateAtStart = lensStateRef.current
+    const latestAtStart = stateAtStart.latestSelection
+    const hadPendingAtStart = stateAtStart.binding !== null
+      && stateAtStart.latestSelection !== null
+      && !sameLensSelection(stateAtStart.binding, stateAtStart.latestSelection)
     const [nextCapture, nextSnapshot] = await Promise.all([getCaptureStatus(), getCurrentSelection()])
     setCapture(nextCapture)
-    setSnapshot(nextSnapshot)
-  }, [])
+    if (nextSnapshot === null) {
+      if (lensStateRef.current.binding === null) {
+        setSnapshot(null)
+        dispatchLensEvent({ type: 'source_invalidated' })
+      } else if (useLatest) {
+        setNotice(copy.latestSelectionChanged)
+      }
+      return
+    }
+
+    const binding = bindingForSelection(nextSnapshot)
+    const stateAfterRead = lensStateRef.current
+    if (
+      !sameLensSelection(stateAfterRead.latestSelection, latestAtStart)
+      && !sameLensSelection(stateAfterRead.latestSelection, binding)
+    ) {
+      setNotice(copy.latestSelectionChanged)
+      return
+    }
+    if (useLatest && hadPendingAtStart && !sameLensSelection(latestAtStart, binding)) {
+      setNotice(copy.latestSelectionChanged)
+      return
+    }
+
+    dispatchLensEvent({ type: 'selection_detected', binding })
+    const current = lensStateRef.current
+    let next = current
+    if (current.binding === null) {
+      next = dispatchLensEvent({ type: 'lens_open' })
+    } else if (useLatest) {
+      next = dispatchLensEvent({ type: 'use_latest_selection' })
+    }
+
+    if (sameLensSelection(next.binding, binding)) {
+      setSnapshot(nextSnapshot)
+      if (stateAtStart.binding !== null && !sameLensSelection(stateAtStart.binding, binding)) setNotice(copy.selectionUpdated)
+    } else if (!sameLensSelection(current.binding, binding)) {
+      setNotice(copy.selectionAvailable)
+    }
+  }, [copy.latestSelectionChanged, copy.selectionAvailable, copy.selectionUpdated, dispatchLensEvent])
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true)
@@ -184,12 +267,6 @@ export default function App() {
   }, [])
 
   useEffect(() => { void refresh().catch(error => setNotice(String(error))) }, [refresh])
-  useEffect(() => { busyRef.current = busy }, [busy])
-  useEffect(() => {
-    if (busy || !pendingSelectionRefresh.current) return
-    pendingSelectionRefresh.current = false
-    void refresh().catch(error => setNotice(String(error)))
-  }, [busy, refresh])
   useEffect(() => {
     const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
     snapshotIdentityRef.current = identity
@@ -230,6 +307,9 @@ export default function App() {
     const previous = active.current
     const previousSessionId = previous.sessionId ?? sessionId
     if (previousSessionId !== null) drafts.current.set(previousSessionId, draftValue.current)
+    if (previousSessionId !== null && previousSessionId !== nextSessionId) {
+      dispatchLensEvent({ type: 'session_switch' })
+    }
     pendingSubmission.current = null
     active.current = { sessionId: null, requestId: null, subscriptionId: null }
     await releaseSubscription(previous)
@@ -266,7 +346,7 @@ export default function App() {
     } finally {
       if (generation === sessionGeneration.current) setHistoryLoading(false)
     }
-  }, [copy, releaseSubscription])
+  }, [copy, dispatchLensEvent, releaseSubscription])
 
   useEffect(() => {
     if (sessions.length === 0 || sessionId !== null) return
@@ -278,6 +358,14 @@ export default function App() {
   const acceptSubmission = useCallback(async (result: SessionSubmission) => {
     const generation = ++sessionGeneration.current
     const previous = active.current
+    const pending = pendingSubmission.current
+    if (pending !== null) {
+      dispatchLensEvent({
+        type: 'request_accepted',
+        submittedRequestId: pending.requestId,
+        requestId: result.requestId,
+      })
+    }
     active.current = { sessionId: null, requestId: null, subscriptionId: null }
     await releaseSubscription(previous)
     if (!viewActive.current || generation !== sessionGeneration.current) return
@@ -317,22 +405,31 @@ export default function App() {
       active.current = { sessionId: result.sessionId, requestId: result.requestId, subscriptionId: null }
       setProjection(previousProjection => ({ ...previousProjection, phase: 'connection-lost', error: String(error) }))
     }
-  }, [refreshSessions, releaseSubscription])
+  }, [dispatchLensEvent, refreshSessions, releaseSubscription])
 
   const submissionFailed = useCallback((error: unknown) => {
     if (error instanceof SubmissionUnknownError) {
       const pending = pendingSubmission.current
-      if (pending !== null) pendingSubmission.current = { ...pending, sessionId: error.sessionId, requestId: error.requestId }
+      if (pending !== null) {
+        dispatchLensEvent({
+          type: 'request_accepted',
+          submittedRequestId: pending.requestId,
+          requestId: error.requestId,
+        })
+        pendingSubmission.current = { ...pending, sessionId: error.sessionId, requestId: error.requestId }
+      }
       setSessionId(error.sessionId)
       setRequestId(error.requestId)
       setProjection(previous => ({ ...previous, phase: 'submission-unknown', error: null, notice: 'Harness may have accepted this request. Retry uses the same request identity.' }))
       setNotice(null)
       return
     }
+    const pending = pendingSubmission.current
+    if (pending !== null) dispatchLensEvent({ type: 'action_error', requestId: pending.requestId })
     pendingSubmission.current = null
     setProjection(previous => ({ ...previous, phase: 'error', error: String(error) }))
     setNotice(null)
-  }, [])
+  }, [dispatchLensEvent])
 
   useEffect(() => {
     active.current = { ...active.current, sessionId, requestId }
@@ -365,6 +462,24 @@ export default function App() {
         || payload.history?.requestId === current.requestId
       )) setNotice(null)
       if (current.requestId === null || payload.event === undefined) return
+      const matchesRequest = payload.requestId === current.requestId
+        || payload.requestIds?.includes(current.requestId) === true
+      if (matchesRequest) {
+        const value = payload.event.data.value
+        if (payload.event.kind === 'error') {
+          dispatchLensEvent({ type: 'action_error', requestId: current.requestId })
+        } else {
+          if (['assistant-delta', 'assistant-complete', 'tool-call', 'tool-result'].includes(payload.event.kind)) {
+            dispatchLensEvent({ type: 'stream_start', requestId: current.requestId })
+          }
+          if (payload.event.kind === 'assistant-delta') {
+            const delta = textDeltaFromEvent(value)
+            if (delta !== null) dispatchLensEvent({ type: 'stream_delta', requestId: current.requestId, delta })
+          }
+          const outcome = payload.event.kind === 'status' ? streamOutcomeFromEvent(value) : null
+          if (outcome !== null) dispatchLensEvent({ type: 'stream_end', requestId: current.requestId, outcome })
+        }
+      }
       setProjection(previous => projectSessionEvent(previous, {
         sessionId: current.sessionId as string,
         requestId: current.requestId as string,
@@ -384,24 +499,15 @@ export default function App() {
       active.current = { sessionId: null, requestId: null, subscriptionId: null }
       void releaseSubscription(current)
     }
-  }, [releaseSubscription])
+  }, [dispatchLensEvent, releaseSubscription])
 
   useEffect(() => {
     let disposed = false
     let unlisten: () => void = () => undefined
     void listen<SelectionCapturedEvent>('selection-captured', event => {
       if (disposed) return
-      if (busyRef.current) {
-        pendingSelectionRefresh.current = true
-        return
-      }
-      void refresh()
-        .then(() => {
-          if (!disposed) setNotice(copy.selectionUpdated)
-        })
-        .catch(error => {
-          if (!disposed) setNotice(String(error))
-        })
+      const binding = { snapshotId: event.payload.snapshotId, revision: event.payload.revision, openedAt: Date.now() }
+      dispatchLensEvent({ type: 'selection_detected', binding })
     }).then(dispose => {
       if (disposed) dispose()
       else unlisten = dispose
@@ -412,7 +518,7 @@ export default function App() {
       disposed = true
       unlisten()
     }
-  }, [copy.selectionUpdated, refresh])
+  }, [dispatchLensEvent])
 
   const createAndOpenSession = () => {
     if (sessionsLoading || historyLoading) return
@@ -429,6 +535,10 @@ export default function App() {
     if (busy) return
     if (next === 'ask' && draft.trim().length === 0) return
     if (snapshot === null) return
+    if (!sameLensSelection(lensStateRef.current.binding, bindingForSelection(snapshot))) {
+      setNotice(copy.lensBindingUnavailable)
+      return
+    }
     const instruction = next === 'explain'
       ? 'Explain the selected material clearly.'
       : draft.trim()
@@ -437,9 +547,11 @@ export default function App() {
       : defaultAuthorizedMaterial(snapshot)
     const prompt = buildAuthorizedMaterialPrompt(material, instruction)
     const logicalRequestId = `selection-${crypto.randomUUID()}`
+    dispatchLensEvent({ type: 'action_submit', action: next, requestId: logicalRequestId })
     pendingSubmission.current = {
       sessionId,
       requestId: logicalRequestId,
+      action: next,
       prompt,
       material: snapshot,
       authorizedMaterial: material,
@@ -474,12 +586,14 @@ export default function App() {
     setProjection(previous => ({ ...previous, phase: 'cancelling' }))
     void cancelSession(sessionId).then(cancelled => {
       if (!cancelled) {
+        dispatchLensEvent({ type: 'action_error', requestId })
         setProjection(previous => previous.phase === 'cancelling'
           ? { ...previous, phase: 'error', error: 'Harness session was no longer running.' }
           : previous)
       }
       setNotice(null)
     }).catch(error => {
+      dispatchLensEvent({ type: 'action_error', requestId })
       setProjection(previous => previous.phase === 'cancelling'
         ? { ...previous, phase: 'error', error: String(error) }
         : previous)
@@ -612,6 +726,9 @@ export default function App() {
       : snapshot === null
         ? ui.waiting
         : ui.ready
+  const hasPendingSelection = lensState.binding !== null
+    && lensState.latestSelection !== null
+    && !sameLensSelection(lensState.binding, lensState.latestSelection)
 
   return <main className="lens" data-testid="selection-lens" data-phase={projection.phase} lang={copy.locale}>
     <header className="lens-header" data-tauri-drag-region>
@@ -646,9 +763,13 @@ export default function App() {
       <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
       <div className="selection-meta-row">
         <span>{ui.selectionSummary(selectedLines, selectedChars)}</span>
-        <button type="button" className="secondary compact-button" onClick={() => void refresh()} disabled={busy}>⌗ <span>{ui.reselect}</span></button>
+        <button type="button" className="secondary compact-button" onClick={() => void refresh(true)} disabled={busy}>⌗ <span>{ui.reselect}</span></button>
       </div>
       <p className="material-note">{copy.fixedMaterial(snapshot.revision)}</p>
+      {hasPendingSelection ? <div className="selection-update" role="status">
+        <span>{copy.selectionAvailable}</span>
+        <button type="button" className="secondary compact-button" onClick={() => void refresh(true)} disabled={busy}>{copy.useLatest}</button>
+      </div> : null}
       <details className="context-panel" data-testid="captured-context">
         <summary>{copy.contextLabel}</summary>
         <div className="context-panel-body">
@@ -749,7 +870,10 @@ export default function App() {
         type="button"
         className="status-control"
         aria-label={capture.paused ? copy.resumeCapture : copy.pauseCapture}
-        onClick={() => void (capture.paused ? resumeCapture() : pauseCapture()).then(setCapture)}
+        onClick={() => void (capture.paused ? resumeCapture() : pauseCapture()).then(nextCapture => {
+          setCapture(nextCapture)
+          dispatchLensEvent({ type: nextCapture.paused ? 'capture_paused' : 'capture_resumed' })
+        })}
       >
         <span className={`status-dot ${capture.paused ? 'paused' : capture.lastError ? 'error' : snapshot === null ? 'waiting' : ''}`} aria-hidden="true" />
         <span>{captureStatusLabel}</span>
