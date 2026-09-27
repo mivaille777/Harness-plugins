@@ -3,24 +3,42 @@ pub mod capture;
 pub mod focus;
 pub mod interaction_guard;
 pub mod native_messaging;
+pub mod pipe_connection;
 pub mod protocol;
 pub mod providers;
 pub mod submission;
 pub mod submission_material;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
         .manage(bridge::BridgeRuntime::from_environment().expect("invalid bridge configuration"))
         .setup(|app| {
+            #[cfg(windows)]
+            {
+                let mut bridge_events = app.state::<bridge::BridgeRuntime>().subscribe_events();
+                let event_app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        match bridge_events.recv().await {
+                            Ok(event) => {
+                                let _ = event_app.emit("native-bridge-event", event);
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                eprintln!(
+                                    "[native-bridge] UI event listener skipped {skipped} events"
+                                );
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                });
+            }
             let guard = interaction_guard::InteractionGuard::default();
             let focus = focus::FocusRuntime::start()?;
-            let capture = capture::CaptureRuntime::start(
-                app.handle().clone(),
-                guard.clone(),
-                focus.clone(),
-            )?;
+            let capture =
+                capture::CaptureRuntime::start(app.handle().clone(), guard.clone(), focus.clone())?;
             app.manage(guard.clone());
             app.manage(focus);
             app.manage(capture);

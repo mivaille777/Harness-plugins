@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use crate::pipe_connection::NamedPipeConnection;
 use serde::Serialize;
 #[cfg(windows)]
 use std::collections::HashMap;
@@ -11,6 +13,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::State;
 #[cfg(windows)]
 use tauri::{AppHandle, Emitter, Manager};
+#[cfg(windows)]
+use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
@@ -56,6 +60,10 @@ pub struct BridgeRuntime {
     endpoint: String,
     request_timeout: std::time::Duration,
     inner: Mutex<BridgeInner>,
+    #[cfg(windows)]
+    connect_lock: Mutex<()>,
+    #[cfg(windows)]
+    events: broadcast::Sender<IpcMessage>,
 }
 
 struct BridgeInner {
@@ -64,7 +72,7 @@ struct BridgeInner {
     last_error: Option<String>,
     last_latency_ms: Option<u64>,
     #[cfg(windows)]
-    client: Option<tokio::net::windows::named_pipe::NamedPipeClient>,
+    client: Option<Arc<NamedPipeConnection>>,
     #[cfg(windows)]
     subscriptions: HashMap<String, SubscriptionSlot>,
     #[cfg(windows)]
@@ -116,6 +124,8 @@ impl BridgeRuntime {
                 "DSH_SELECTION_BRIDGE_TIMEOUT_MS must be an integer from 1 to 60000".to_owned(),
             );
         }
+        #[cfg(windows)]
+        let (events, _) = broadcast::channel(64);
         Ok(Self {
             endpoint,
             request_timeout: std::time::Duration::from_millis(request_timeout),
@@ -131,13 +141,30 @@ impl BridgeRuntime {
                 #[cfg(windows)]
                 subscription_epoch: 0,
             }),
+            #[cfg(windows)]
+            connect_lock: Mutex::new(()),
+            #[cfg(windows)]
+            events,
         })
+    }
+
+    #[cfg(windows)]
+    pub fn subscribe_events(&self) -> broadcast::Receiver<IpcMessage> {
+        self.events.subscribe()
     }
 
     async fn status(&self) -> BridgeStatus {
         let inner = self.inner.lock().await;
+        #[cfg(windows)]
+        let connected = inner.connected
+            && inner
+                .client
+                .as_ref()
+                .is_some_and(|connection| connection.is_alive());
+        #[cfg(not(windows))]
+        let connected = inner.connected;
         BridgeStatus {
-            connected: inner.connected,
+            connected,
             endpoint: self.endpoint.clone(),
             protocol: IPC_PROTOCOL_VERSION,
             server_version: inner.server_version.clone(),
@@ -151,9 +178,34 @@ impl BridgeRuntime {
         use tokio::net::windows::named_pipe::ClientOptions;
         use tokio::time::{sleep, Duration};
 
-        let mut inner = self.inner.lock().await;
-        if inner.connected && inner.client.is_some() {
-            return Ok(());
+        {
+            let inner = self.inner.lock().await;
+            if inner.connected
+                && inner
+                    .client
+                    .as_ref()
+                    .is_some_and(|connection| connection.is_alive())
+            {
+                return Ok(());
+            }
+        }
+        let _connect_guard = self.connect_lock.lock().await;
+        let stale = {
+            let mut inner = self.inner.lock().await;
+            if inner.connected
+                && inner
+                    .client
+                    .as_ref()
+                    .is_some_and(|connection| connection.is_alive())
+            {
+                return Ok(());
+            }
+            inner.connected = false;
+            inner.server_version = None;
+            inner.client.take()
+        };
+        if let Some(stale) = stale {
+            stale.close("named pipe connection replaced").await;
         }
 
         let mut last_error = None;
@@ -181,8 +233,7 @@ impl BridgeRuntime {
                 self.endpoint,
                 last_error.unwrap_or_else(|| "unknown error".to_owned())
             );
-            inner.connected = false;
-            inner.last_error = Some(message.clone());
+            self.record_error(message.clone()).await;
             return Err(message);
         };
 
@@ -201,46 +252,129 @@ impl BridgeRuntime {
             }),
         };
 
-        let response = exchange(&mut client, &hello, self.request_timeout)
-            .await
-            .map_err(|error| {
+        let response = match exchange(&mut client, &hello, self.request_timeout).await {
+            Ok(response) => response,
+            Err(error) => {
                 let message = format!("bridge hello failed: {error}");
-                inner.last_error = Some(message.clone());
-                message
-            })?;
-        ensure_response_id(&response, &request_id)?;
+                self.record_error(message.clone()).await;
+                return Err(message);
+            }
+        };
+        if let Err(error) = ensure_response_id(&response, &request_id) {
+            self.record_error(error.clone()).await;
+            return Err(error);
+        }
         if response.type_name == "error.response" {
             let message = format!("Harness rejected bridge hello: {}", response.payload);
-            inner.last_error = Some(message.clone());
+            self.record_error(message.clone()).await;
             return Err(message);
         }
         if response.type_name != "bridge.hello.result" {
             let message = format!("unexpected bridge hello response: {}", response.type_name);
-            inner.last_error = Some(message.clone());
+            self.record_error(message.clone()).await;
             return Err(message);
         }
 
-        let hello_result: BridgeHelloResultPayload = serde_json::from_value(response.payload)
-            .map_err(|error| format!("invalid bridge hello payload: {error}"))?;
+        let hello_result: BridgeHelloResultPayload = match serde_json::from_value(response.payload)
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                let message = format!("invalid bridge hello payload: {error}");
+                self.record_error(message.clone()).await;
+                return Err(message);
+            }
+        };
         if hello_result.protocol != IPC_PROTOCOL_VERSION {
             let message = format!(
                 "Harness selected protocol {}, expected {}",
                 hello_result.protocol, IPC_PROTOCOL_VERSION
             );
-            inner.last_error = Some(message.clone());
+            self.record_error(message.clone()).await;
             return Err(message);
         }
 
+        let (connection, mut connection_events) =
+            NamedPipeConnection::start_with_events(client, self.request_timeout);
+        let connection = Arc::new(connection);
+        let event_sender = self.events.clone();
+        tokio::spawn(async move {
+            loop {
+                match connection_events.recv().await {
+                    Ok(event) => {
+                        let _ = event_sender.send(event);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        eprintln!("[native-bridge] event dispatcher skipped {skipped} events");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        let mut inner = self.inner.lock().await;
         inner.connected = true;
         inner.server_version = Some(hello_result.server.version);
         inner.last_error = None;
-        inner.client = Some(client);
+        inner.client = Some(connection);
         Ok(())
+    }
+
+    #[cfg(windows)]
+    async fn request_message(&self, message: &IpcMessage) -> Result<IpcMessage, String> {
+        let connection = {
+            let inner = self.inner.lock().await;
+            inner
+                .client
+                .as_ref()
+                .filter(|connection| connection.is_alive())
+                .cloned()
+        };
+        let Some(connection) = connection else {
+            let error = "bridge is not connected".to_owned();
+            self.record_error(error.clone()).await;
+            return Err(error);
+        };
+
+        let result = connection.request(message, self.request_timeout).await;
+        let mut inner = self.inner.lock().await;
+        let is_current = inner
+            .client
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &connection));
+        if is_current {
+            match &result {
+                Ok(_) if connection.is_alive() => inner.last_error = None,
+                Ok(_) => {}
+                Err(error) => {
+                    inner.last_error = Some(error.clone());
+                    if !connection.is_alive() {
+                        inner.connected = false;
+                        inner.client = None;
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    async fn record_error(&self, message: String) {
+        let mut inner = self.inner.lock().await;
+        inner.last_error = Some(message);
+        #[cfg(windows)]
+        {
+            if inner
+                .client
+                .as_ref()
+                .is_some_and(|connection| !connection.is_alive())
+            {
+                inner.connected = false;
+            }
+        }
     }
 
     /// Starts a dedicated pipe reader for a session event stream.
     ///
-    /// The request/reply pipe remains exclusively owned by `BridgeInner::client`.
+    /// The request/reply pipe has its own reader/writer actor; this subscription
+    /// receives events on a separate connection so it cannot block requests.
     #[cfg(windows)]
     async fn subscribe_session(
         &self,
@@ -373,6 +507,7 @@ impl BridgeRuntime {
             let expected_session_id = session_id.clone();
             let expected_subscription_id = subscription_id.clone();
             let cleanup_app = app.clone();
+            let mut last_event_cursor = cursor;
             let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
             let task = tokio::spawn(async move {
                 if start_rx.await.is_err() {
@@ -393,6 +528,17 @@ impl BridgeRuntime {
                                         "sessionId": expected_session_id,
                                         "subscriptionId": expected_subscription_id,
                                         "error": "received event for a different session",
+                                    }),
+                                );
+                                break;
+                            }
+                            if let Err(error) = advance_event_cursor(&message.payload, &mut last_event_cursor) {
+                                let _ = app.emit(
+                                    "session-agent-event",
+                                    serde_json::json!({
+                                        "sessionId": expected_session_id,
+                                        "subscriptionId": expected_subscription_id,
+                                        "error": error,
                                     }),
                                 );
                                 break;
@@ -585,10 +731,9 @@ impl BridgeRuntime {
 
     #[cfg(windows)]
     async fn ping(&self) -> Result<(), String> {
-        let mut inner = self.inner.lock().await;
-        if !inner.connected || inner.client.is_none() {
+        if !self.status().await.connected {
             let message = "bridge is not connected".to_owned();
-            inner.last_error = Some(message.clone());
+            self.record_error(message.clone()).await;
             return Err(message);
         }
 
@@ -601,28 +746,24 @@ impl BridgeRuntime {
             payload: serde_json::json!({ "sentAt": sent_at }),
         };
         let started = Instant::now();
-        let result = {
-            let client = inner.client.as_mut().expect("connected client");
-            exchange(client, &ping, self.request_timeout).await
-        };
+        let response = self.request_message(&ping).await;
 
-        match result {
+        match response {
             Ok(response) => {
                 ensure_response_id(&response, &request_id)?;
                 if response.type_name != "bridge.pong" {
                     let message = format!("unexpected ping response: {}", response.type_name);
-                    inner.last_error = Some(message.clone());
+                    self.record_error(message.clone()).await;
                     return Err(message);
                 }
+                let mut inner = self.inner.lock().await;
                 inner.last_latency_ms = Some(started.elapsed().as_millis() as u64);
                 inner.last_error = None;
                 Ok(())
             }
             Err(error) => {
                 let message = format!("bridge ping failed: {error}");
-                inner.connected = false;
-                inner.client = None;
-                inner.last_error = Some(message.clone());
+                self.record_error(message.clone()).await;
                 Err(message)
             }
         }
@@ -638,33 +779,23 @@ impl BridgeRuntime {
         snapshot.validate().map_err(|error| error.to_string())?;
         self.connect().await?;
 
-        // Keep one immutable request identity across a transport retry. A stale
-        // named-pipe handle is expected after Harness' idle timeout or a Harness
-        // restart; retrying the exact same selection.update is safe and avoids
-        // silently replacing the user's captured snapshot.
-        let request_id = request_id("selection");
-        let message = IpcMessage {
+        // Each attempt keeps the same snapshot but gets a fresh transport id,
+        // so a late response to a timed-out attempt cannot resolve its retry.
+        let mut expected_id = request_id("selection");
+        let mut message = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
-            id: request_id.clone(),
+            id: expected_id.clone(),
             type_name: "selection.update".to_owned(),
             payload: serde_json::json!({ "snapshot": snapshot }),
         };
 
         let mut attempts = 0;
         let response = loop {
-            let mut inner = self.inner.lock().await;
-            let client = inner
-                .client
-                .as_mut()
-                .ok_or_else(|| "bridge is not connected".to_owned())?;
-            match exchange(client, &message, self.request_timeout).await {
+            match self.request_message(&message).await {
                 Ok(response) => break response,
                 Err(error) => {
                     let detail = format!("selection update failed: {error}");
-                    inner.connected = false;
-                    inner.client = None;
-                    inner.last_error = Some(detail.clone());
-                    drop(inner);
+                    self.record_error(detail.clone()).await;
 
                     attempts += 1;
                     if attempts >= 2 {
@@ -672,18 +803,19 @@ impl BridgeRuntime {
                     }
 
                     self.connect().await?;
+                    expected_id = request_id("selection-retry");
+                    message.id = expected_id.clone();
                 }
             }
         };
 
-        let mut inner = self.inner.lock().await;
-        if let Err(error) = ensure_response_id(&response, &request_id) {
-            inner.last_error = Some(error.clone());
+        if let Err(error) = ensure_response_id(&response, &expected_id) {
+            self.record_error(error.clone()).await;
             return Err(error);
         }
         if response.type_name == "error.response" {
             let error = format!("Harness rejected selection update: {}", response.payload);
-            inner.last_error = Some(error.clone());
+            self.record_error(error.clone()).await;
             return Err(error);
         }
         if response.type_name != "selection.updated" {
@@ -691,9 +823,10 @@ impl BridgeRuntime {
                 "unexpected selection update response: {}",
                 response.type_name
             );
-            inner.last_error = Some(error.clone());
+            self.record_error(error.clone()).await;
             return Err(error);
         }
+        let mut inner = self.inner.lock().await;
         inner.last_error = None;
         Ok(())
     }
@@ -713,12 +846,7 @@ impl BridgeRuntime {
             type_name: "selection.current".to_owned(),
             payload: serde_json::json!({}),
         };
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
-        let response = exchange(client, &message, self.request_timeout).await?;
+        let response = self.request_message(&message).await?;
         ensure_response_id(&response, &request_id)?;
         if response.type_name != "selection.current.result" {
             return Err(format!(
@@ -744,38 +872,32 @@ impl BridgeRuntime {
             return Err("scope must be selection, local, section, or page".to_owned());
         }
         self.connect().await?;
-        let request_id = request_id("selection-expand");
-        let message = IpcMessage {
+        let mut expected_id = request_id("selection-expand");
+        let mut message = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
-            id: request_id.clone(),
+            id: expected_id.clone(),
             type_name: "selection.expand".to_owned(),
             payload: serde_json::json!({ "snapshotId": snapshot_id, "scope": scope }),
         };
         let mut attempts = 0;
         let response = loop {
-            let mut inner = self.inner.lock().await;
-            let client = inner
-                .client
-                .as_mut()
-                .ok_or_else(|| "bridge is not connected".to_owned())?;
-            match exchange(client, &message, self.request_timeout).await {
+            match self.request_message(&message).await {
                 Ok(response) => break response,
                 Err(error) => {
                     let detail = format!("selection expansion failed: {error}");
-                    inner.connected = false;
-                    inner.client = None;
-                    inner.last_error = Some(detail.clone());
-                    drop(inner);
+                    self.record_error(detail.clone()).await;
                     attempts += 1;
                     if attempts < 2 {
                         self.connect().await?;
+                        expected_id = request_id("selection-expand-retry");
+                        message.id = expected_id.clone();
                         continue;
                     }
                     return Err(detail);
                 }
             }
         };
-        ensure_response_id(&response, &request_id)?;
+        ensure_response_id(&response, &expected_id)?;
         if response.type_name == "error.response" {
             return Err(format!(
                 "Harness rejected selection expansion: {}",
@@ -813,11 +935,6 @@ impl BridgeRuntime {
             .map_err(|error| error.to_string())?;
         let material = SelectionMaterial::from_snapshot(&material_snapshot);
         self.connect().await?;
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
         let session_id = match session_id {
             Some(id) => id,
             None => {
@@ -828,7 +945,7 @@ impl BridgeRuntime {
                     type_name: "session.create".to_owned(),
                     payload: serde_json::json!({}),
                 };
-                let response = exchange(client, &create, self.request_timeout).await?;
+                let response = self.request_message(&create).await?;
                 ensure_response_id(&response, &id)?;
                 if response.type_name == "error.response" {
                     return Err(format!(
@@ -864,9 +981,10 @@ impl BridgeRuntime {
                 "material": material
             }),
         };
-        let response = match exchange(client, &submit, self.request_timeout).await {
+        let response = match self.request_message(&submit).await {
             Ok(response) => response,
             Err(error) => {
+                let mut inner = self.inner.lock().await;
                 return Err(mark_submission_unknown(
                     &mut inner,
                     &session_id,
@@ -876,6 +994,7 @@ impl BridgeRuntime {
             }
         };
         if let Err(error) = ensure_response_id(&response, &transport_id) {
+            let mut inner = self.inner.lock().await;
             return Err(mark_submission_unknown(
                 &mut inner,
                 &session_id,
@@ -884,13 +1003,13 @@ impl BridgeRuntime {
             ));
         }
         if response.type_name == "error.response" {
-            return Err(format!(
-                "Harness rejected session submission: {}",
-                response.payload
-            ));
+            let error = format!("Harness rejected session submission: {}", response.payload);
+            self.record_error(error.clone()).await;
+            return Err(error);
         }
         if response.type_name != "session.submitted" {
             let error = format!("unexpected session.submit response: {}", response.type_name);
+            let mut inner = self.inner.lock().await;
             return Err(mark_submission_unknown(
                 &mut inner,
                 &session_id,
@@ -902,6 +1021,7 @@ impl BridgeRuntime {
             match serde_json::from_value(response.payload) {
                 Ok(submitted) => submitted,
                 Err(error) => {
+                    let mut inner = self.inner.lock().await;
                     return Err(mark_submission_unknown(
                         &mut inner,
                         &session_id,
@@ -911,6 +1031,7 @@ impl BridgeRuntime {
                 }
             };
         if submitted.request_id != logical_request_id {
+            let mut inner = self.inner.lock().await;
             return Err(mark_submission_unknown(
                 &mut inner,
                 &session_id,
@@ -943,12 +1064,7 @@ impl BridgeRuntime {
             type_name: "session.cancel".to_owned(),
             payload: serde_json::json!({ "sessionId": session_id }),
         };
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
-        let response = exchange(client, &message, self.request_timeout).await?;
+        let response = self.request_message(&message).await?;
         ensure_response_id(&response, &request_id)?;
         if response.type_name == "error.response" {
             return Err(format!(
@@ -1013,18 +1129,11 @@ impl BridgeRuntime {
             type_name: "session.list".to_owned(),
             payload: serde_json::json!({}),
         };
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
-        let response = match exchange(client, &message, self.request_timeout).await {
+        let response = match self.request_message(&message).await {
             Ok(response) => response,
             Err(error) => {
                 let message = format!("session list failed: {error}");
-                inner.connected = false;
-                inner.client = None;
-                inner.last_error = Some(message.clone());
+                self.record_error(message.clone()).await;
                 return Err(message);
             }
         };
@@ -1043,7 +1152,7 @@ impl BridgeRuntime {
         }
         let payload: SessionListResultPayload = serde_json::from_value(response.payload)
             .map_err(|error| format!("invalid session.list.result payload: {error}"))?;
-        inner.last_error = None;
+        self.inner.lock().await.last_error = None;
         Ok(payload.sessions)
     }
 
@@ -1069,19 +1178,16 @@ impl BridgeRuntime {
                 None => serde_json::json!({}),
             },
         };
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
-        let response = match exchange(client, &message, self.request_timeout).await {
+        let response = match self.request_message(&message).await {
             Ok(response) => response,
             Err(error) => {
+                let mut inner = self.inner.lock().await;
                 let message = mark_create_unknown(&mut inner, &request_id, error);
                 return Err(message);
             }
         };
         if let Err(error) = ensure_response_id(&response, &request_id) {
+            let mut inner = self.inner.lock().await;
             return Err(mark_create_unknown(&mut inner, &request_id, error));
         }
         if response.type_name == "error.response" {
@@ -1091,6 +1197,7 @@ impl BridgeRuntime {
             ));
         }
         if response.type_name != "session.created" {
+            let mut inner = self.inner.lock().await;
             return Err(mark_create_unknown(
                 &mut inner,
                 &request_id,
@@ -1100,6 +1207,7 @@ impl BridgeRuntime {
         let payload: SessionCreatedPayload = match serde_json::from_value(response.payload) {
             Ok(payload) => payload,
             Err(error) => {
+                let mut inner = self.inner.lock().await;
                 return Err(mark_create_unknown(
                     &mut inner,
                     &request_id,
@@ -1107,7 +1215,7 @@ impl BridgeRuntime {
                 ));
             }
         };
-        inner.last_error = None;
+        self.inner.lock().await.last_error = None;
         Ok(payload.session_id)
     }
 
@@ -1158,18 +1266,11 @@ impl BridgeRuntime {
             type_name: "session.history".to_owned(),
             payload: serde_json::Value::Object(payload),
         };
-        let mut inner = self.inner.lock().await;
-        let client = inner
-            .client
-            .as_mut()
-            .ok_or_else(|| "bridge is not connected".to_owned())?;
-        let response = match exchange(client, &message, self.request_timeout).await {
+        let response = match self.request_message(&message).await {
             Ok(response) => response,
             Err(error) => {
                 let message = format!("session history failed: {error}");
-                inner.connected = false;
-                inner.client = None;
-                inner.last_error = Some(message.clone());
+                self.record_error(message.clone()).await;
                 return Err(message);
             }
         };
@@ -1191,7 +1292,7 @@ impl BridgeRuntime {
         if payload.session_id.is_empty() || payload.session_id != expected_session_id {
             return Err("session.history.result response has a different sessionId".to_owned());
         }
-        inner.last_error = None;
+        self.inner.lock().await.last_error = None;
         Ok(payload)
     }
 
@@ -1208,19 +1309,26 @@ impl BridgeRuntime {
 
     async fn disconnect(&self) {
         #[cfg(windows)]
-        let subscriptions = {
+        let _connect_guard = self.connect_lock.lock().await;
+        #[cfg(windows)]
+        let (connection, subscriptions) = {
             let mut inner = self.inner.lock().await;
             inner.connected = false;
             inner.server_version = None;
             inner.last_error = None;
-            inner.client = None;
+            let connection = inner.client.take();
             inner.subscription_epoch = inner.subscription_epoch.wrapping_add(1);
-            inner
+            let subscriptions = inner
                 .subscriptions
                 .drain()
                 .map(|(_, slot)| slot)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (connection, subscriptions)
         };
+        #[cfg(windows)]
+        if let Some(connection) = connection {
+            connection.close("bridge disconnected by user").await;
+        }
         #[cfg(windows)]
         for subscription in subscriptions {
             stop_subscription(subscription).await;
@@ -1386,6 +1494,33 @@ async fn exchange(
     })?
 }
 
+fn advance_event_cursor(
+    payload: &serde_json::Value,
+    last_persistent_cursor: &mut Option<u64>,
+) -> Result<(), String> {
+    let persistent = payload
+        .pointer("/event/data/persistent")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "agent event has no persistent flag".to_owned())?;
+    if !persistent {
+        return Ok(());
+    }
+    let cursor = payload
+        .pointer("/event/data/cursor")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| "persistent agent event has no cursor".to_owned())?;
+    if let Some(previous) = *last_persistent_cursor {
+        let expected = previous.saturating_add(1);
+        if cursor != expected {
+            return Err(format!(
+                "agent event sequence gap: expected cursor {expected}, received {cursor}"
+            ));
+        }
+    }
+    *last_persistent_cursor = Some(cursor);
+    Ok(())
+}
+
 #[cfg(windows)]
 async fn read_message(
     client: &mut tokio::net::windows::named_pipe::NamedPipeClient,
@@ -1492,8 +1627,14 @@ fn mark_submission_unknown(
     error: impl std::fmt::Display,
 ) -> String {
     let detail = error.to_string();
-    inner.connected = false;
-    inner.client = None;
+    if inner
+        .client
+        .as_ref()
+        .is_some_and(|connection| !connection.is_alive())
+    {
+        inner.connected = false;
+        inner.client = None;
+    }
     inner.last_error = Some(detail.clone());
     format!("SUBMISSION_UNKNOWN|{session_id}|{logical_request_id}|{detail}")
 }
@@ -1504,8 +1645,14 @@ fn mark_create_unknown(
     request_id: &str,
     error: impl std::fmt::Display,
 ) -> String {
-    inner.connected = false;
-    inner.client = None;
+    if inner
+        .client
+        .as_ref()
+        .is_some_and(|connection| !connection.is_alive())
+    {
+        inner.connected = false;
+        inner.client = None;
+    }
     let message = format!("CREATE_UNKNOWN|{request_id}|{error}");
     inner.last_error = Some(message.clone());
     message
@@ -1557,6 +1704,127 @@ mod tests {
     #[test]
     fn request_ids_do_not_depend_on_clock_resolution() {
         assert_ne!(request_id("submit"), request_id("submit"));
+    }
+
+    #[test]
+    fn persistent_event_cursors_are_contiguous_and_status_events_do_not_advance_them() {
+        let status = serde_json::json!({
+            "event": {"data": {"persistent": false, "cursor": 3}}
+        });
+        let durable = |cursor| {
+            serde_json::json!({
+                "event": {"data": {"persistent": true, "cursor": cursor}}
+            })
+        };
+        let mut last = Some(3);
+
+        advance_event_cursor(&status, &mut last).unwrap();
+        assert_eq!(last, Some(3));
+        advance_event_cursor(&durable(4), &mut last).unwrap();
+        assert_eq!(last, Some(4));
+        assert!(advance_event_cursor(&durable(6), &mut last)
+            .unwrap_err()
+            .contains("expected cursor 5, received 6"));
+        assert_eq!(last, Some(4));
+    }
+
+    #[tokio::test]
+    async fn status_and_cancel_requests_remain_available_while_ping_is_pending() {
+        use tokio::io::{duplex, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+        async fn read_frame(reader: &mut (impl AsyncRead + Unpin)) -> IpcMessage {
+            let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+            reader.read_exact(&mut header).await.unwrap();
+            let declared = u32::from_be_bytes(header) as usize;
+            let mut payload = vec![0_u8; declared];
+            reader.read_exact(&mut payload).await.unwrap();
+            let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+            frame.extend_from_slice(&header);
+            frame.extend_from_slice(&payload);
+            crate::protocol::decode_frame(&frame).unwrap()
+        }
+
+        async fn write_frame(writer: &mut (impl AsyncWrite + Unpin), message: &IpcMessage) {
+            writer
+                .write_all(&crate::protocol::encode_frame(message).unwrap())
+                .await
+                .unwrap();
+        }
+
+        let (client, mut server) = duplex(4096);
+        let connection = Arc::new(NamedPipeConnection::start(
+            client,
+            std::time::Duration::from_secs(1),
+        ));
+        let runtime = Arc::new(BridgeRuntime {
+            endpoint: "duplex-test".to_owned(),
+            request_timeout: std::time::Duration::from_secs(1),
+            inner: Mutex::new(BridgeInner {
+                connected: true,
+                server_version: Some("test".to_owned()),
+                last_error: None,
+                last_latency_ms: None,
+                client: Some(connection),
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
+        });
+
+        let ping = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "pending-ping".to_owned(),
+            type_name: "bridge.ping".to_owned(),
+            payload: serde_json::json!({"sentAt": 1}),
+        };
+        let ping_runtime = runtime.clone();
+        let ping_task = tokio::spawn(async move { ping_runtime.request_message(&ping).await });
+        let first_request = read_frame(&mut server).await;
+        assert_eq!(first_request.id, "pending-ping");
+
+        let status = tokio::time::timeout(std::time::Duration::from_millis(50), runtime.status())
+            .await
+            .expect("status must not wait for the pipe response");
+        assert!(status.connected);
+
+        let cancel = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "parallel-cancel".to_owned(),
+            type_name: "session.cancel".to_owned(),
+            payload: serde_json::json!({"sessionId": "session-test"}),
+        };
+        let cancel_runtime = runtime.clone();
+        let cancel_task =
+            tokio::spawn(async move { cancel_runtime.request_message(&cancel).await });
+        let second_request = read_frame(&mut server).await;
+        assert_eq!(second_request.id, "parallel-cancel");
+        write_frame(
+            &mut server,
+            &IpcMessage {
+                protocol: IPC_PROTOCOL_VERSION,
+                id: "parallel-cancel".to_owned(),
+                type_name: "session.cancelled".to_owned(),
+                payload: serde_json::json!({"sessionId": "session-test", "cancelled": true}),
+            },
+        )
+        .await;
+        write_frame(
+            &mut server,
+            &IpcMessage {
+                protocol: IPC_PROTOCOL_VERSION,
+                id: "pending-ping".to_owned(),
+                type_name: "bridge.pong".to_owned(),
+                payload: serde_json::json!({"sentAt": 1, "receivedAt": 2}),
+            },
+        )
+        .await;
+
+        assert_eq!(
+            cancel_task.await.unwrap().unwrap().type_name,
+            "session.cancelled"
+        );
+        assert_eq!(ping_task.await.unwrap().unwrap().type_name, "bridge.pong");
     }
 
     #[cfg(windows)]
@@ -1622,6 +1890,8 @@ mod tests {
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
             }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
         };
 
         let failure = runtime
@@ -1717,6 +1987,8 @@ mod tests {
             .unwrap();
         let second_endpoint = endpoint.clone();
         let (second_ready_tx, second_ready_rx) = oneshot::channel();
+        let (finish_server_tx, finish_server_rx) = oneshot::channel();
+        let (update_tx, update_rx) = oneshot::channel();
 
         let server_task = tokio::spawn(async move {
             first_server.connect().await.unwrap();
@@ -1749,6 +2021,38 @@ mod tests {
                 },
             )
             .await;
+            let _ = update_tx.send(update.clone());
+
+            let current_request = read_frame(&mut second_server).await;
+            assert_eq!(current_request.type_name, "selection.current");
+            write_frame(
+                &mut second_server,
+                &IpcMessage {
+                    protocol: IPC_PROTOCOL_VERSION,
+                    id: current_request.id,
+                    type_name: "selection.current.result".to_owned(),
+                    payload: serde_json::json!({
+                        "snapshot": {
+                            "id": "snapshot-current",
+                            "revision": 1,
+                            "capturedAt": 1_000,
+                            "selection": { "text": "current selection" },
+                            "source": { "kind": "browser", "app": "Chrome" },
+                            "context": { "pageAvailable": false },
+                            "capabilities": {
+                                "localContext": false,
+                                "sectionContext": false,
+                                "pageContext": false,
+                                "screenshot": false
+                            },
+                            "provider": "test-provider",
+                            "confidence": 1.0
+                        }
+                    }),
+                },
+            )
+            .await;
+            let _ = finish_server_rx.await;
             update
         });
 
@@ -1764,19 +2068,26 @@ mod tests {
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
             }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
         };
 
         runtime.connect().await.unwrap();
         second_ready_rx.await.unwrap();
 
         runtime.submit_selection(material_snapshot()).await.unwrap();
-        let update = server_task.await.unwrap();
+        let update = update_rx.await.unwrap();
 
         assert_eq!(update.type_name, "selection.update");
         assert_eq!(update.payload["snapshot"]["id"], "snapshot-submit");
+        let current = runtime.current_selection().await.unwrap().unwrap();
+        assert_eq!(current.id, "snapshot-current");
+        assert_eq!(current.selection.text, "current selection");
         let status = runtime.status().await;
         assert!(status.connected);
         assert!(status.last_error.is_none());
+        let _ = finish_server_tx.send(());
+        let _ = server_task.await.unwrap();
     }
 
     #[tokio::test]
