@@ -61,11 +61,22 @@ describe('PassiveEntry', () => {
     await waitFor(() => expect(eventApi.handlers.get('selection-captured')).toBeDefined())
     expect(screen.queryByRole('button', { name: 'Open selection Lens' })).not.toBeInTheDocument()
 
-    eventApi.handlers.get('selection-captured')?.({ payload: { snapshotId: 'entry-s1', revision: 7 } })
+    eventApi.handlers.get('selection-captured')?.({ payload: {
+      snapshotId: 'entry-s1',
+      revision: 7,
+      readyAtMs: Date.now() - 200,
+    } })
     const button = await screen.findByRole('button', { name: 'Open selection Lens' })
 
     expect(placement.positionCurrentWindowNearSelection).toHaveBeenCalledWith(snapshot.geometry, { width: 44, height: 44 })
     expect(windowApi.show).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(eventApi.emitTo).toHaveBeenCalledWith(
+      'main',
+      'lens-performance-sample',
+      expect.objectContaining({ kind: 'passiveEntryVisible', durationMs: expect.any(Number) }),
+    ))
+    const sample = eventApi.emitTo.mock.calls.find(([, name]) => name === 'lens-performance-sample')?.[2] as { durationMs: number } | undefined
+    expect(sample?.durationMs).toBeGreaterThanOrEqual(200)
     expect(screen.getByTestId('passive-entry')).not.toHaveTextContent('selected text')
     expect(button).toBeEnabled()
   })
@@ -85,7 +96,7 @@ describe('PassiveEntry', () => {
     await waitFor(() => expect(placement.positionCurrentWindowNearSelection).toHaveBeenCalledTimes(1))
   })
 
-  it('sends only the selection identity to the main Lens when clicked', async () => {
+  it('sends the selection identity and click time to the main Lens when clicked', async () => {
     render(<PassiveEntry />)
     await waitFor(() => expect(eventApi.handlers.get('selection-captured')).toBeDefined())
     eventApi.handlers.get('selection-captured')?.({ payload: { snapshotId: 'entry-s1', revision: 7 } })
@@ -96,7 +107,7 @@ describe('PassiveEntry', () => {
     await waitFor(() => expect(eventApi.emitTo).toHaveBeenCalledWith(
       'main',
       'lens-open-request',
-      { snapshotId: 'entry-s1', revision: 7 },
+      expect.objectContaining({ snapshotId: 'entry-s1', revision: 7, requestedAtMs: expect.any(Number) }),
     ))
     expect(windowApi.hide).not.toHaveBeenCalled()
   })

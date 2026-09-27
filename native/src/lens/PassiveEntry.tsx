@@ -8,6 +8,7 @@ import { positionCurrentWindowNearSelection } from './windowPlacement'
 interface SelectionCapturedEvent {
   readonly snapshotId: string
   readonly revision: number
+  readonly readyAtMs?: number
 }
 
 interface LensOpenRequest extends SelectionCapturedEvent {}
@@ -47,6 +48,9 @@ export default function PassiveEntry() {
 
     void register<SelectionCapturedEvent>('selection-captured', event => {
       if (!validSelectionEvent(event)) return
+      const readyAtMs = typeof event.readyAtMs === 'number' && Number.isSafeInteger(event.readyAtMs)
+        ? event.readyAtMs
+        : Date.now()
       const nextBinding = { snapshotId: event.snapshotId, revision: event.revision }
       latest.current = nextBinding
       setBinding(null)
@@ -59,6 +63,12 @@ export default function PassiveEntry() {
         if (disposed || !sameBinding(latest.current, nextBinding)) return
         setBinding(nextBinding)
         await getCurrentWindow().show()
+        await new Promise<void>(resolve => window.setTimeout(resolve, 0))
+        if (disposed || !sameBinding(latest.current, nextBinding)) return
+        await emitTo('main', 'lens-performance-sample', {
+          kind: 'passiveEntryVisible',
+          durationMs: Math.max(0, Date.now() - readyAtMs),
+        })
       }).catch(() => undefined)
     }).catch(() => undefined)
 
@@ -79,7 +89,7 @@ export default function PassiveEntry() {
     if (binding === null || opening) return
     setOpening(true)
     try {
-      await emitTo('main', 'lens-open-request', binding)
+      await emitTo('main', 'lens-open-request', { ...binding, requestedAtMs: Date.now() })
     } catch {
       // The passive entry stays available if the main window cannot be opened.
     } finally {

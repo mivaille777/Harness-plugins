@@ -239,6 +239,7 @@ struct SelectionTrigger {
 struct PendingSelection {
     snapshot: SelectionSnapshot,
     generation: u64,
+    ready_at_ms: u64,
 }
 
 impl<T> LatestValue<T> {
@@ -457,6 +458,7 @@ impl CaptureRuntime {
                                     let replaced = worker_latest.replace(PendingSelection {
                                         snapshot,
                                         generation: trigger.generation,
+                                        ready_at_ms: now_millis(),
                                     });
                                     let _ = ready_tx.try_send(());
                                     transition(&worker_state, CapturePhase::Publishing, None);
@@ -543,6 +545,7 @@ impl CaptureRuntime {
                                     let replaced = worker_latest.replace(PendingSelection {
                                         snapshot,
                                         generation: gate.generation,
+                                        ready_at_ms: now_millis(),
                                     });
                                     let _ = ready_tx.try_send(());
                                     last_capture = Some((signature, Instant::now()));
@@ -611,6 +614,7 @@ impl CaptureRuntime {
                     continue;
                 }
                 let snapshot = pending.snapshot;
+                let ready_at_ms = pending.ready_at_ms;
                 let bridge = app.state::<BridgeRuntime>();
                 let published_snapshot_id = snapshot.id.clone();
                 let published_revision = snapshot.revision;
@@ -622,13 +626,14 @@ impl CaptureRuntime {
                             continue;
                         }
                         transition(&publisher_state, CapturePhase::Running, None);
-                        // The UI receives identity only and reads the canonical snapshot back from
-                        // Harness. Selection text never travels in this local notification.
+                        // The UI receives identity and timing metadata only, then reads the
+                        // canonical snapshot back from Harness. Selection text never travels here.
                         let _ = app.emit(
                             "selection-captured",
                             serde_json::json!({
                                 "snapshotId": published_snapshot_id,
                                 "revision": published_revision,
+                                "readyAtMs": ready_at_ms,
                             }),
                         );
                     }
@@ -955,6 +960,7 @@ mod tests {
         runtime.latest.replace(PendingSelection {
             snapshot: snapshot("pending"),
             generation: runtime.guard.capture_gate().generation,
+            ready_at_ms: now_millis(),
         });
         runtime.pause();
         let status = runtime.status();

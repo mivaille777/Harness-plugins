@@ -11,12 +11,14 @@ import {
   type InteractionStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
+import type { LensPerformanceState } from './lens/performance'
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
 import { buildDiagnosticsSnapshot, getBridgeHealth, type DiagnosticsInput } from './diagnosticsSnapshot'
 
 interface DiagnosticsPageProps {
   readonly locale: 'en-US' | 'zh-CN'
   readonly lens: LensState
+  readonly lensPerformance: LensPerformanceState
   readonly pinnedSnapshot: SelectionSnapshot | null
   readonly sessionId: string | null
   readonly requestId: string | null
@@ -71,6 +73,7 @@ function statusLabel(locale: 'en-US' | 'zh-CN', status: string): string {
 export default function DiagnosticsPage({
   locale,
   lens,
+  lensPerformance,
   pinnedSnapshot,
   sessionId,
   requestId,
@@ -137,6 +140,12 @@ export default function DiagnosticsPage({
     lensState: 'Lens 状态',
     pinned: '固定选区',
     focusEpoch: '焦点版本',
+    passiveEntryP50: '入口显示 P50',
+    passiveEntryP95: '入口显示 P95',
+    passiveEntrySamples: '入口显示样本数',
+    lensInteractiveP50: 'Lens 可交互 P50',
+    lensInteractiveP95: 'Lens 可交互 P95',
+    lensInteractiveSamples: 'Lens 打开样本数',
     interaction: '交互模式',
     suppressed: '采集抑制',
     boundSession: '绑定会话',
@@ -198,6 +207,12 @@ export default function DiagnosticsPage({
     lensState: 'Lens state',
     pinned: 'Pinned selection',
     focusEpoch: 'Focus epoch',
+    passiveEntryP50: 'Passive entry visible P50',
+    passiveEntryP95: 'Passive entry visible P95',
+    passiveEntrySamples: 'Passive entry samples',
+    lensInteractiveP50: 'Lens interactive P50',
+    lensInteractiveP95: 'Lens interactive P95',
+    lensInteractiveSamples: 'Lens open samples',
     interaction: 'Interaction mode',
     suppressed: 'Capture suppressed',
     boundSession: 'Bound session',
@@ -268,7 +283,7 @@ export default function DiagnosticsPage({
     return () => window.clearInterval(timer)
   }, [refresh])
 
-  const diagnostics = pageState === null ? null : buildDiagnosticsSnapshot(pageState.input)
+  const diagnostics = pageState === null ? null : buildDiagnosticsSnapshot(pageState.input, lensPerformance)
   const bridgeHealth = pageState === null
     ? 'unknown'
     : getBridgeHealth(pageState.input)
@@ -369,6 +384,12 @@ export default function DiagnosticsPage({
           {row(labels.lensState, diagnostics?.lens.state)}
           {row(labels.pinned, diagnostics?.lens.pinnedSnapshotId === null || diagnostics?.lens.pinnedSnapshotId === undefined ? null : `${diagnostics.lens.pinnedSnapshotId} · r${diagnostics.lens.pinnedRevision}`)}
           {row(labels.focusEpoch, diagnostics?.lens.focusEpoch)}
+          {row(labels.passiveEntryP50, diagnostics?.lens.passiveEntryVisibleLatencyP50Ms === null || diagnostics?.lens.passiveEntryVisibleLatencyP50Ms === undefined ? null : `${diagnostics.lens.passiveEntryVisibleLatencyP50Ms.toFixed(1)} ms`)}
+          {row(labels.passiveEntryP95, diagnostics?.lens.passiveEntryVisibleLatencyP95Ms === null || diagnostics?.lens.passiveEntryVisibleLatencyP95Ms === undefined ? null : `${diagnostics.lens.passiveEntryVisibleLatencyP95Ms.toFixed(1)} ms`)}
+          {row(labels.passiveEntrySamples, diagnostics?.lens.passiveEntryVisibleSampleCount)}
+          {row(labels.lensInteractiveP50, diagnostics?.lens.lensInteractiveLatencyP50Ms === null || diagnostics?.lens.lensInteractiveLatencyP50Ms === undefined ? null : `${diagnostics.lens.lensInteractiveLatencyP50Ms.toFixed(1)} ms`)}
+          {row(labels.lensInteractiveP95, diagnostics?.lens.lensInteractiveLatencyP95Ms === null || diagnostics?.lens.lensInteractiveLatencyP95Ms === undefined ? null : `${diagnostics.lens.lensInteractiveLatencyP95Ms.toFixed(1)} ms`)}
+          {row(labels.lensInteractiveSamples, diagnostics?.lens.lensInteractiveSampleCount)}
           {row(labels.interaction, diagnostics?.lens.interactionMode)}
           {row(labels.suppressed, diagnostics?.lens.captureSuppressed)}
           {errorRow(labels.lastError, diagnostics?.lens.interactionError ?? null)}

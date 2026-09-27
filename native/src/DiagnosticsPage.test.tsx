@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
 import { initialLensState } from './lens/store'
+import { emptyLensPerformanceState, recordLensLatency } from './lens/performance'
 import DiagnosticsPage from './DiagnosticsPage'
 
 const bridgeMocks = vi.hoisted(() => ({
@@ -75,6 +76,7 @@ describe('DiagnosticsPage', () => {
       <DiagnosticsPage
         locale="en-US"
         lens={initialLensState}
+        lensPerformance={emptyLensPerformanceState()}
         pinnedSnapshot={null}
         sessionId={null}
         requestId={null}
@@ -102,6 +104,11 @@ describe('DiagnosticsPage', () => {
       <DiagnosticsPage
         locale="en-US"
         lens={initialLensState}
+        lensPerformance={recordLensLatency(
+          recordLensLatency(emptyLensPerformanceState(), 'passiveEntryVisible', 23.5),
+          'lensInteractive',
+          90,
+        )}
         pinnedSnapshot={null}
         sessionId={null}
         requestId={null}
@@ -145,6 +152,7 @@ describe('DiagnosticsPage', () => {
       <DiagnosticsPage
         locale="en-US"
         lens={initialLensState}
+        lensPerformance={emptyLensPerformanceState()}
         pinnedSnapshot={null}
         sessionId="session-1"
         requestId="request-1"

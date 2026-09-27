@@ -52,6 +52,12 @@ import {
   type LensBinding,
   type LensEvent,
 } from './lens/store'
+import {
+  emptyLensPerformanceState,
+  recordLensLatency,
+  type LensLatencyMetric,
+  type LensPerformanceState,
+} from './lens/performance'
 import { positionCurrentWindowNearSelection } from './lens/windowPlacement'
 import DiagnosticsPage from './DiagnosticsPage'
 
@@ -103,6 +109,10 @@ interface CompleteHistory {
 interface SelectionCapturedEvent {
   readonly snapshotId: string
   readonly revision: number
+}
+
+interface LensOpenRequestEvent extends SelectionCapturedEvent {
+  readonly requestedAtMs?: number
 }
 
 const SESSION_PREFERENCE_KEY = 'dsh-selection-companion.session'
@@ -198,6 +208,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
   const [requestId, setRequestId] = useState<string | null>(null)
   const [projection, setProjection] = useState<RequestProjection>(initialRequestProjection)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [lensPerformance, setLensPerformance] = useState<LensPerformanceState>(emptyLensPerformanceState)
   const [lastEventSequence, setLastEventSequence] = useState<number | null>(null)
   const [subscriptionState, setSubscriptionState] = useState('idle')
   const busy = ['submitting', 'queued', 'streaming', 'cancelling', 'submission-unknown'].includes(projection.phase)
@@ -228,6 +239,10 @@ export default function App({ initiallyOpen = true }: AppProps) {
       setLensState(next)
     }
     return next
+  }, [])
+
+  const recordLensPerformance = useCallback((metric: LensLatencyMetric, durationMs: number) => {
+    setLensPerformance(previous => recordLensLatency(previous, metric, durationMs))
   }, [])
 
   const refresh = useCallback(async (useLatest = false, expectedBinding?: LensBinding): Promise<SelectionSnapshot | null> => {
@@ -377,10 +392,15 @@ export default function App({ initiallyOpen = true }: AppProps) {
   useEffect(() => {
     let disposed = false
     let unlisten: () => void = () => undefined
-    void listen<SelectionCapturedEvent>('lens-open-request', event => {
+    void listen<LensOpenRequestEvent>('lens-open-request', event => {
       if (disposed) return
       const { snapshotId, revision } = event.payload
       if (typeof snapshotId !== 'string' || !Number.isSafeInteger(revision) || revision < 0) return
+      const requestedAtMs = typeof event.payload.requestedAtMs === 'number'
+        && Number.isSafeInteger(event.payload.requestedAtMs)
+        && event.payload.requestedAtMs > 0
+        ? event.payload.requestedAtMs
+        : Date.now()
       const expectedBinding: LensBinding = { snapshotId, revision, openedAt: Date.now() }
       const current = lensStateRef.current
       const requestIsActive = current.request.phase === 'submitting' || current.request.phase === 'streaming'
@@ -399,6 +419,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
         if (disposed) return
         await getCurrentWindow().show()
         await getCurrentWindow().setFocus()
+        recordLensPerformance('lensInteractive', Math.max(0, Date.now() - requestedAtMs))
       }).catch(error => {
         if (!disposed) setNotice(String(error))
       })
@@ -412,7 +433,26 @@ export default function App({ initiallyOpen = true }: AppProps) {
       disposed = true
       unlisten()
     }
-  }, [dispatchLensEvent, refresh])
+  }, [dispatchLensEvent, recordLensPerformance, refresh])
+
+  useEffect(() => {
+    let disposed = false
+    let unlisten: () => void = () => undefined
+    void listen<{ readonly kind: unknown; readonly durationMs: unknown }>('lens-performance-sample', event => {
+      if (disposed || typeof event.payload.durationMs !== 'number') return
+      if (event.payload.kind !== 'passiveEntryVisible') return
+      recordLensPerformance('passiveEntryVisible', event.payload.durationMs)
+    }).then(dispose => {
+      if (disposed) dispose()
+      else unlisten = dispose
+    }).catch(error => {
+      if (!disposed) setNotice(String(error))
+    })
+    return () => {
+      disposed = true
+      unlisten()
+    }
+  }, [recordLensPerformance])
 
   const closeLens = useCallback(async () => {
     const pinned = snapshotRef.current
@@ -902,6 +942,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
   if (diagnosticsOpen) return <DiagnosticsPage
     locale={copy.locale}
     lens={lensState}
+    lensPerformance={lensPerformance}
     pinnedSnapshot={snapshot}
     sessionId={sessionId}
     requestId={requestId}

@@ -4,6 +4,7 @@ import type {
   InteractionStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
+import { emptyLensPerformanceState, type LensPerformanceState } from './lens/performance'
 import type { SelectionSnapshot } from '../../src/context/snapshot.js'
 
 export type BridgeHealth = 'healthy' | 'unhealthy' | 'disconnected' | 'unknown'
@@ -36,7 +37,10 @@ export function getBridgeHealth(input: Pick<DiagnosticsInput, 'bridge' | 'bridge
 }
 
 /** Build a copyable runtime snapshot without selected text, document titles, or URLs. */
-export function buildDiagnosticsSnapshot(input: DiagnosticsInput) {
+export function buildDiagnosticsSnapshot(
+  input: DiagnosticsInput,
+  lensPerformance: LensPerformanceState = emptyLensPerformanceState(),
+) {
   const selection = input.selection
   const capture = input.capture
   const bridgeHealth = getBridgeHealth(input)
@@ -117,6 +121,12 @@ export function buildDiagnosticsSnapshot(input: DiagnosticsInput) {
       interactionMode: input.interaction?.activeModes ?? null,
       captureSuppressed: input.interaction?.captureSuppressed ?? null,
       interactionError: input.interactionError,
+      passiveEntryVisibleSampleCount: lensPerformance.passiveEntryVisible.sampleCount,
+      passiveEntryVisibleLatencyP50Ms: lensPerformance.passiveEntryVisible.p50Ms,
+      passiveEntryVisibleLatencyP95Ms: lensPerformance.passiveEntryVisible.p95Ms,
+      lensInteractiveSampleCount: lensPerformance.lensInteractive.sampleCount,
+      lensInteractiveLatencyP50Ms: lensPerformance.lensInteractive.p50Ms,
+      lensInteractiveLatencyP95Ms: lensPerformance.lensInteractive.p95Ms,
     },
     session: {
       boundSessionId: input.sessionId,

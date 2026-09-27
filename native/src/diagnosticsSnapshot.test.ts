@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { initialLensState } from './lens/store'
+import { emptyLensPerformanceState, recordLensLatency } from './lens/performance'
 import { buildDiagnosticsSnapshot, getBridgeHealth, type DiagnosticsInput } from './diagnosticsSnapshot'
 
 const baseInput = (): DiagnosticsInput => ({
@@ -111,7 +112,12 @@ describe('runtime diagnostics snapshot', () => {
   })
 
   it('copies diagnostic identifiers and counters without selected or page text', () => {
-    const snapshot = buildDiagnosticsSnapshot(baseInput())
+    const lensPerformance = recordLensLatency(
+      recordLensLatency(emptyLensPerformanceState(), 'passiveEntryVisible', 23.5),
+      'lensInteractive',
+      90,
+    )
+    const snapshot = buildDiagnosticsSnapshot(baseInput(), lensPerformance)
     const serialized = JSON.stringify(snapshot)
 
     expect(snapshot.bridge.health).toBe('healthy')
@@ -119,6 +125,9 @@ describe('runtime diagnostics snapshot', () => {
     expect(snapshot.capture.droppedTriggerCount).toBe(10)
     expect(snapshot.capture.eventLatencyP50Ms).toBe(18)
     expect(snapshot.capture.eventLatencyP95Ms).toBe(42)
+    expect(snapshot.lens.passiveEntryVisibleLatencyP50Ms).toBe(23.5)
+    expect(snapshot.lens.lensInteractiveLatencyP95Ms).toBe(90)
+    expect(snapshot.lens.passiveEntryVisibleSampleCount).toBe(1)
     expect(snapshot.capture.fallbackLatencyP50Ms).toBe(7)
     expect(snapshot.capture.fallbackLatencyP95Ms).toBe(12)
     expect(snapshot.selection.cacheAgeMs).toBe(500)

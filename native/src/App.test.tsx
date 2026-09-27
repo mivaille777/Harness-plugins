@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -9,6 +9,9 @@ const api = vi.hoisted(() => {
   return {
     getCaptureStatus: vi.fn(),
     getCurrentSelection: vi.fn(),
+    getBridgeStatus: vi.fn(),
+    getInteractionGuardStatus: vi.fn(),
+    pingBridge: vi.fn(),
     listSessions: vi.fn(),
     createSession: vi.fn(),
     expandSelection: vi.fn(),
@@ -39,6 +42,7 @@ const eventApi = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: unknown }) => void),
   selectionHandler: null as null | ((event: { payload: unknown }) => void),
   lensOpenHandler: null as null | ((event: { payload: unknown }) => void),
+  performanceHandler: null as null | ((event: { payload: unknown }) => void),
   listen: vi.fn(),
   emit: vi.fn(),
   unlisten: vi.fn(),
@@ -69,15 +73,20 @@ describe('selection lens', () => {
     eventApi.handler = null
     eventApi.selectionHandler = null
     eventApi.lensOpenHandler = null
+    eventApi.performanceHandler = null
     windowApi.focusHandler = null
     eventApi.listen.mockImplementation(async (name: string, handler: (event: { payload: unknown }) => void) => {
       if (name === 'selection-captured') eventApi.selectionHandler = handler
       else if (name === 'lens-open-request') eventApi.lensOpenHandler = handler
+      else if (name === 'lens-performance-sample') eventApi.performanceHandler = handler
       else eventApi.handler = handler
       return eventApi.unlisten
     })
     api.getCaptureStatus.mockResolvedValue(capture)
     api.getCurrentSelection.mockResolvedValue(selection)
+    api.getBridgeStatus.mockResolvedValue({ connected: true, endpoint: 'test-pipe', protocol: 4, serverVersion: '0.1.0', lastError: null, lastLatencyMs: 3, reconnectCount: 0 })
+    api.getInteractionGuardStatus.mockResolvedValue({ captureSuppressed: false, shuttingDown: false, generation: 0, activeRequests: 0, activeModes: [] })
+    api.pingBridge.mockResolvedValue({ connected: true, endpoint: 'test-pipe', protocol: 4, serverVersion: '0.1.0', lastError: null, lastLatencyMs: 3, reconnectCount: 0 })
     api.listSessions.mockResolvedValue([])
     api.createSession.mockResolvedValue('session-new')
     api.expandSelection.mockResolvedValue({ snapshotId: 's1', scope: 'local', revision: 2, completeness: 'complete', truncated: false, context: { before: 'Loaded before', after: 'Loaded after' } })
@@ -114,6 +123,29 @@ describe('selection lens', () => {
     expect(await screen.findByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
     await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
     expect(setFocus).toHaveBeenCalledTimes(1)
+  })
+  it('shows passive-entry and Lens-open latency samples in diagnostics', async () => {
+    render(<App initiallyOpen={false} />)
+    await waitFor(() => expect(eventApi.lensOpenHandler).not.toBeNull())
+    await waitFor(() => expect(eventApi.performanceHandler).not.toBeNull())
+
+    await act(async () => {
+      eventApi.performanceHandler?.({ payload: { kind: 'passiveEntryVisible', durationMs: 23.5 } })
+    })
+    eventApi.lensOpenHandler?.({ payload: {
+      snapshotId: 's1',
+      revision: 2,
+      requestedAtMs: Date.now() - 100,
+    } })
+
+    await screen.findByTestId('selected-text')
+    await waitFor(() => expect(setFocus).toHaveBeenCalledOnce())
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnostics' }))
+
+    expect(await screen.findByText('Passive entry visible P50')).toBeInTheDocument()
+    expect(screen.getAllByText('23.5 ms').length).toBeGreaterThan(0)
+    const lensLatency = screen.getByText('Lens interactive P50').parentElement?.querySelector('dd')?.textContent
+    expect(Number.parseFloat(lensLatency ?? '')).toBeGreaterThanOrEqual(50)
   })
   it('suppresses native selection capture while the Lens window is focused', async () => {
     render(<App initiallyOpen={false} />)
