@@ -20,7 +20,7 @@ export interface LensState {
   readonly view: LensView
   /** The newest selection available to the passive entry. */
   readonly latestSelection: LensBinding | null
-  /** The immutable selection currently used by the open Lens. */
+  /** The immutable selection currently shown by the Lens or used by its active request. */
   readonly binding: LensBinding | null
   readonly request: LensRequestState
   readonly capturePaused: boolean
@@ -98,14 +98,32 @@ export function transitionLens(state: LensState, event: LensEvent): LensState {
     }
     case 'entry_open':
       if (state.view !== 'passive-entry' || state.latestSelection === null || state.capturePaused) return state
-      return { ...state, view: 'lens-open', binding: state.latestSelection }
+      return {
+        ...state,
+        view: 'lens-open',
+        binding: state.request.phase === 'submitting' || state.request.phase === 'streaming'
+          ? state.binding ?? state.latestSelection
+          : state.latestSelection,
+      }
     case 'lens_open':
       if (state.latestSelection === null || state.capturePaused) return state
       if (state.view === 'lens-open') return state
-      return { ...state, view: 'lens-open', binding: state.latestSelection }
+      return {
+        ...state,
+        view: 'lens-open',
+        binding: state.request.phase === 'submitting' || state.request.phase === 'streaming'
+          ? state.binding ?? state.latestSelection
+          : state.latestSelection,
+      }
     case 'lens_close':
       if (state.view === 'hidden' && state.binding === null) return state
-      return { ...state, view: 'hidden', binding: null }
+      return {
+        ...state,
+        view: 'hidden',
+        binding: state.request.phase === 'submitting' || state.request.phase === 'streaming'
+          ? state.binding
+          : null,
+      }
     case 'use_latest_selection':
       if (
         state.view !== 'lens-open'

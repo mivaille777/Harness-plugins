@@ -82,8 +82,14 @@ describe('Lens state model', () => {
     )
 
     expect(state.view).toBe('hidden')
-    expect(state.binding).toBeNull()
+    expect(state.binding).toEqual(first)
     expect(state.request).toMatchObject({ phase: 'streaming', requestId: 'request-1' })
+    const reopened = send(state,
+      { type: 'selection_detected', binding: second },
+      { type: 'lens_open' },
+    )
+    expect(reopened.binding).toEqual(first)
+    expect(reopened.latestSelection).toEqual(second)
   })
 
   it('invalidates only the matching source binding', () => {

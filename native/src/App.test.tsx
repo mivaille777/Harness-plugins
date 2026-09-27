@@ -23,15 +23,21 @@ const api = vi.hoisted(() => {
   }
 })
 const hide = vi.hoisted(() => vi.fn())
+const show = vi.hoisted(() => vi.fn())
+const setFocus = vi.hoisted(() => vi.fn())
+const placement = vi.hoisted(() => ({ positionCurrentWindowNearSelection: vi.fn() }))
 const eventApi = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: unknown }) => void),
   selectionHandler: null as null | ((event: { payload: unknown }) => void),
+  lensOpenHandler: null as null | ((event: { payload: unknown }) => void),
   listen: vi.fn(),
+  emit: vi.fn(),
   unlisten: vi.fn(),
 }))
 vi.mock('./api/bridge', () => api)
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide }) }))
-vi.mock('@tauri-apps/api/event', () => ({ listen: eventApi.listen }))
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ hide, show, setFocus }) }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: eventApi.listen, emit: eventApi.emit }))
+vi.mock('./lens/windowPlacement', () => placement)
 function deepFreeze<T>(value: T): T {
   if (typeof value !== 'object' || value === null) return value
   for (const child of Object.values(value)) deepFreeze(child)
@@ -47,8 +53,10 @@ describe('selection lens', () => {
     window.localStorage.clear()
     eventApi.handler = null
     eventApi.selectionHandler = null
+    eventApi.lensOpenHandler = null
     eventApi.listen.mockImplementation(async (name: string, handler: (event: { payload: unknown }) => void) => {
       if (name === 'selection-captured') eventApi.selectionHandler = handler
+      else if (name === 'lens-open-request') eventApi.lensOpenHandler = handler
       else eventApi.handler = handler
       return eventApi.unlisten
     })
@@ -60,10 +68,43 @@ describe('selection lens', () => {
     api.readSessionHistory.mockResolvedValue({ sessionId: 'session-1', capturedThroughCursor: 0, entries: [] })
     api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' })
     api.resumeCapture.mockResolvedValue(capture)
+    show.mockResolvedValue(undefined)
+    setFocus.mockResolvedValue(undefined)
+    placement.positionCurrentWindowNearSelection.mockResolvedValue(undefined)
+    eventApi.emit.mockResolvedValue(undefined)
     api.submitSessionPrompt.mockResolvedValue({ sessionId: 'session-1', requestId: 'request-1' })
     api.subscribeSession.mockResolvedValue(undefined)
     api.unsubscribeSession.mockResolvedValue({ sessionId: 'session-1', subscriptionId: 'subscription', released: true })
     api.cancelSession.mockResolvedValue(true)
+  })
+  it('keeps the main Lens hidden until a passive entry opens the matching selection', async () => {
+    render(<App initiallyOpen={false} />)
+    await waitFor(() => expect(eventApi.lensOpenHandler).not.toBeNull())
+    expect(api.getCurrentSelection).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('selected-text')).not.toBeInTheDocument()
+
+    eventApi.selectionHandler?.({ payload: { snapshotId: 's1', revision: 2 } })
+    expect(screen.queryByTestId('selected-text')).not.toBeInTheDocument()
+    eventApi.lensOpenHandler?.({ payload: { snapshotId: 's1', revision: 2 } })
+
+    expect(await screen.findByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
+    await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
+    expect(setFocus).toHaveBeenCalledTimes(1)
+  })
+  it('reopens on the in-flight request material after Esc without cancelling it', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledTimes(1))
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(hide).toHaveBeenCalledTimes(1)
+    eventApi.selectionHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
+    eventApi.lensOpenHandler?.({ payload: { snapshotId: 's2', revision: 3 } })
+
+    expect(await screen.findByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
+    await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
+    expect(api.cancelSession).not.toHaveBeenCalled()
+    expect(api.getCurrentSelection).toHaveBeenCalledTimes(1)
   })
   it('keeps the visible selection pinned until the user switches to the latest one', async () => {
     const latest = deepFreeze({
@@ -98,6 +139,21 @@ describe('selection lens', () => {
     await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1))
     expect(api.submitSessionPrompt.mock.calls[0]?.[3]).toBe(selection)
     expect(api.submitSessionPrompt.mock.calls[0]?.[3]).toMatchObject({ id: 's1', revision: 2 })
+  })
+  it('limits a long selection preview and expands it only on request', async () => {
+    const longText = 'Selection text. '.repeat(60)
+    api.getCurrentSelection.mockResolvedValueOnce(deepFreeze({
+      ...selection,
+      selection: { text: longText },
+    }))
+    render(<App />)
+    const preview = await screen.findByTestId('selected-text')
+
+    expect(preview.textContent).toHaveLength(421)
+    expect(preview.textContent).toMatch(/…$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Show full selection' }))
+    expect(preview.textContent).toBe(longText)
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
   })
   it('fixes and previews the selected material', async () => { render(<App />); expect(await screen.findByText('中文 selection 🚀')).toBeInTheDocument(); expect(screen.getByText('Fixed material · revision 2')).toBeInTheDocument() })
   it('keeps captured context behind an explicit disclosure', async () => {

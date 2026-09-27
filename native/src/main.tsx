@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import App from './App'
+import PassiveEntry from './lens/PassiveEntry'
 import './styles.css'
 
 function hasTauriRuntime(): boolean {
@@ -32,8 +34,14 @@ function BrowserPreview() {
   </main>
 }
 
+function NativeWindow() {
+  return getCurrentWindow().label === 'entry'
+    ? <PassiveEntry />
+    : <App initiallyOpen={false} />
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {hasTauriRuntime() ? <App /> : <BrowserPreview />}
+    {hasTauriRuntime() ? <NativeWindow /> : <BrowserPreview />}
   </StrictMode>,
 )

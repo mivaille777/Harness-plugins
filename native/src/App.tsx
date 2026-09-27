@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
+import { emit, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   cancelSession,
@@ -49,6 +49,7 @@ import {
   type LensBinding,
   type LensEvent,
 } from './lens/store'
+import { positionCurrentWindowNearSelection } from './lens/windowPlacement'
 
 const emptyCapture: CaptureStatus = {
   paused: false,
@@ -71,6 +72,11 @@ const emptyCapture: CaptureStatus = {
 }
 
 type Action = 'explain' | 'ask' | null
+const SELECTION_PREVIEW_LIMIT = 420
+
+interface AppProps {
+  readonly initiallyOpen?: boolean
+}
 type ExpandableContextScope = Exclude<ContextScope, 'selection'>
 
 interface ActiveSession {
@@ -158,10 +164,12 @@ function sessionStatusLabel(session: SessionSummary, copy: AppCopy): string {
   }
 }
 
-export default function App() {
+export default function App({ initiallyOpen = true }: AppProps) {
   const copy = getAppCopy()
   const [capture, setCapture] = useState<CaptureStatus>(emptyCapture)
   const [snapshot, setSnapshot] = useState<SelectionSnapshot | null>(null)
+  const snapshotRef = useRef<SelectionSnapshot | null>(null)
+  const [selectionExpanded, setSelectionExpanded] = useState(false)
   const [lensState, setLensState] = useState(initialLensState)
   const [contextScope, setContextScope] = useState<ExpandableContextScope>('local')
   const [expandedContext, setExpandedContext] = useState<SelectionExpansion | null>(null)
@@ -197,6 +205,7 @@ export default function App() {
   const listenerReady = useRef<Promise<void>>(Promise.resolve())
   const viewActive = useRef(true)
   const snapshotIdentityRef = useRef<string | null>(null)
+  snapshotRef.current = snapshot
 
   const dispatchLensEvent = useCallback((event: LensEvent) => {
     const previous = lensStateRef.current
@@ -208,7 +217,7 @@ export default function App() {
     return next
   }, [])
 
-  const refresh = useCallback(async (useLatest = false) => {
+  const refresh = useCallback(async (useLatest = false, expectedBinding?: LensBinding): Promise<SelectionSnapshot | null> => {
     const stateAtStart = lensStateRef.current
     const latestAtStart = stateAtStart.latestSelection
     const hadPendingAtStart = stateAtStart.binding !== null
@@ -223,21 +232,25 @@ export default function App() {
       } else if (useLatest) {
         setNotice(copy.latestSelectionChanged)
       }
-      return
+      return null
     }
 
     const binding = bindingForSelection(nextSnapshot)
+    if (expectedBinding !== undefined && !sameLensSelection(expectedBinding, binding)) {
+      setNotice(copy.latestSelectionChanged)
+      return null
+    }
     const stateAfterRead = lensStateRef.current
     if (
       !sameLensSelection(stateAfterRead.latestSelection, latestAtStart)
       && !sameLensSelection(stateAfterRead.latestSelection, binding)
     ) {
       setNotice(copy.latestSelectionChanged)
-      return
+      return null
     }
     if (useLatest && hadPendingAtStart && !sameLensSelection(latestAtStart, binding)) {
       setNotice(copy.latestSelectionChanged)
-      return
+      return null
     }
 
     dispatchLensEvent({ type: 'selection_detected', binding })
@@ -252,9 +265,11 @@ export default function App() {
     if (sameLensSelection(next.binding, binding)) {
       setSnapshot(nextSnapshot)
       if (stateAtStart.binding !== null && !sameLensSelection(stateAtStart.binding, binding)) setNotice(copy.selectionUpdated)
+      return nextSnapshot
     } else if (!sameLensSelection(current.binding, binding)) {
       setNotice(copy.selectionAvailable)
     }
+    return null
   }, [copy.latestSelectionChanged, copy.selectionAvailable, copy.selectionUpdated, dispatchLensEvent])
 
   const refreshSessions = useCallback(async () => {
@@ -266,11 +281,18 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => { void refresh().catch(error => setNotice(String(error))) }, [refresh])
+  useEffect(() => {
+    if (initiallyOpen) {
+      void refresh().catch(error => setNotice(String(error)))
+    } else {
+      void getCaptureStatus().then(setCapture).catch(error => setNotice(String(error)))
+    }
+  }, [initiallyOpen, refresh])
   useEffect(() => {
     const identity = snapshot === null ? null : `${snapshot.id}:${snapshot.revision}`
     snapshotIdentityRef.current = identity
     setExpandedContext(null)
+    setSelectionExpanded(false)
     setAuthorizedMaterial(snapshot === null ? null : defaultAuthorizedMaterial(snapshot))
     setContextError(null)
     if (snapshot?.capabilities.localContext) setContextScope('local')
@@ -283,15 +305,60 @@ export default function App() {
     void refreshSessions().catch(error => setNotice(`Unable to load Harness sessions: ${String(error)}`))
   }, [refreshSessions])
   useEffect(() => {
+    let disposed = false
+    let unlisten: () => void = () => undefined
+    void listen<SelectionCapturedEvent>('lens-open-request', event => {
+      if (disposed) return
+      const { snapshotId, revision } = event.payload
+      if (typeof snapshotId !== 'string' || !Number.isSafeInteger(revision) || revision < 0) return
+      const expectedBinding: LensBinding = { snapshotId, revision, openedAt: Date.now() }
+      const current = lensStateRef.current
+      const requestIsActive = current.request.phase === 'submitting' || current.request.phase === 'streaming'
+      const pinnedSnapshot = snapshotRef.current
+      const reopenPinnedRequest = requestIsActive
+        && current.binding !== null
+        && pinnedSnapshot !== null
+        && sameLensSelection(current.binding, bindingForSelection(pinnedSnapshot))
+      if (reopenPinnedRequest) dispatchLensEvent({ type: 'lens_open' })
+      const selectedPromise = reopenPinnedRequest
+        ? Promise.resolve(pinnedSnapshot)
+        : refresh(true, expectedBinding)
+      void selectedPromise.then(async selected => {
+        if (disposed || selected === null) return
+        await positionCurrentWindowNearSelection(selected.geometry, { width: 420, height: 580 })
+        if (disposed) return
+        await getCurrentWindow().show()
+        await getCurrentWindow().setFocus()
+      }).catch(error => {
+        if (!disposed) setNotice(String(error))
+      })
+    }).then(dispose => {
+      if (disposed) dispose()
+      else unlisten = dispose
+    }).catch(error => {
+      if (!disposed) setNotice(String(error))
+    })
+    return () => {
+      disposed = true
+      unlisten()
+    }
+  }, [dispatchLensEvent, refresh])
+
+  const closeLens = useCallback(async () => {
+    dispatchLensEvent({ type: 'lens_close' })
+    await getCurrentWindow().hide()
+  }, [dispatchLensEvent])
+
+  useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        void getCurrentWindow().hide()
+        void closeLens()
       }
     }
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
-  }, [])
+  }, [closeLens])
 
   const releaseSubscription = useCallback(async (session: ActiveSession): Promise<void> => {
     if (session.sessionId === null || session.subscriptionId === null) return
@@ -716,8 +783,13 @@ export default function App() {
   const sourceApp = snapshot?.source.app ?? snapshot?.source.process ?? snapshot?.provider ?? ''
   const sourceKind = snapshot?.source.kind ?? ''
   const selectedText = snapshot?.selection.text ?? ''
+  const selectedTextCharacters = Array.from(selectedText)
   const selectedLines = selectedText === '' ? 0 : selectedText.split(/\r?\n/).length
-  const selectedChars = Array.from(selectedText).length
+  const selectedChars = selectedTextCharacters.length
+  const selectionPreviewTruncated = !selectionExpanded && selectedChars > SELECTION_PREVIEW_LIMIT
+  const displayedSelectedText = selectionPreviewTruncated
+    ? `${selectedTextCharacters.slice(0, SELECTION_PREVIEW_LIMIT).join('')}…`
+    : selectedText
   const sourceInitial = sourceApp.trim().slice(0, 1).toUpperCase() || '•'
   const captureStatusLabel = capture.paused
     ? ui.paused
@@ -738,7 +810,7 @@ export default function App() {
         <span className="brand-divider" aria-hidden="true" />
         <span className="brand-tagline" data-tauri-drag-region>{copy.brandTagline}</span>
       </div>
-      <button className="icon-button" type="button" onClick={() => void getCurrentWindow().hide()} aria-label={copy.close}>×</button>
+      <button className="icon-button" type="button" onClick={() => void closeLens()} aria-label={copy.close}>×</button>
     </header>
 
     {snapshot === null ? <section className="empty-state" aria-live="polite">
@@ -760,7 +832,12 @@ export default function App() {
         <span className="source-chevron" aria-hidden="true">⌄</span>
       </div>
       <p className="selection-caption">{ui.selectedText}</p>
-      <blockquote data-testid="selected-text">{snapshot.selection.text}</blockquote>
+      <blockquote data-testid="selected-text">{displayedSelectedText}</blockquote>
+      {selectedChars > SELECTION_PREVIEW_LIMIT ? <button
+        type="button"
+        className="text-button selection-expand-button"
+        onClick={() => setSelectionExpanded(expanded => !expanded)}
+      >{selectionExpanded ? copy.showLessSelection : copy.showFullSelection}</button> : null}
       <div className="selection-meta-row">
         <span>{ui.selectionSummary(selectedLines, selectedChars)}</span>
         <button type="button" className="secondary compact-button" onClick={() => void refresh(true)} disabled={busy}>⌗ <span>{ui.reselect}</span></button>
@@ -873,6 +950,7 @@ export default function App() {
         onClick={() => void (capture.paused ? resumeCapture() : pauseCapture()).then(nextCapture => {
           setCapture(nextCapture)
           dispatchLensEvent({ type: nextCapture.paused ? 'capture_paused' : 'capture_resumed' })
+          void emit('capture-state-changed', nextCapture)
         })}
       >
         <span className={`status-dot ${capture.paused ? 'paused' : capture.lastError ? 'error' : snapshot === null ? 'waiting' : ''}`} aria-hidden="true" />
