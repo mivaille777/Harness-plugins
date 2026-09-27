@@ -59,7 +59,7 @@ function deepFreeze<T>(value: T): T {
   Object.freeze(value)
   return value
 }
-const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, guardDrops: 0, focusDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
+const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, guardDrops: 0, focusDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1, eventCaptureLatencyP50Ms: null, eventCaptureLatencyP95Ms: null, fallbackCaptureLatencyP50Ms: null, fallbackCaptureLatencyP95Ms: null } }
 const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { before: 'Before context', after: 'After context', sectionText: 'Section context', pageAvailable: false }, capabilities: { localContext: true, sectionContext: true, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {

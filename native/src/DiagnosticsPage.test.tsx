@@ -47,6 +47,10 @@ describe('DiagnosticsPage', () => {
         excluded: 0,
         errors: 0,
         lastCaptureLatencyMs: 6,
+        eventCaptureLatencyP50Ms: 18,
+        eventCaptureLatencyP95Ms: 42,
+        fallbackCaptureLatencyP50Ms: 7,
+        fallbackCaptureLatencyP95Ms: 12,
       },
     })
     bridgeMocks.getInteractionGuardStatus.mockResolvedValue({
@@ -91,6 +95,30 @@ describe('DiagnosticsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Back to Lens/ }))
     expect(onBack).toHaveBeenCalledOnce()
+  })
+
+  it('shows event and fallback capture latency percentiles separately', async () => {
+    render(
+      <DiagnosticsPage
+        locale="en-US"
+        lens={initialLensState}
+        pinnedSnapshot={null}
+        sessionId={null}
+        requestId={null}
+        lastEventSequence={null}
+        subscriptionState="idle"
+        onBack={() => undefined}
+      />,
+    )
+
+    expect(await screen.findByText('UIA event to snapshot P50')).toBeInTheDocument()
+    expect(screen.getByText('18 ms')).toBeInTheDocument()
+    expect(screen.getByText('UIA event to snapshot P95')).toBeInTheDocument()
+    expect(screen.getByText('42 ms')).toBeInTheDocument()
+    expect(screen.getByText('Fallback provider P50')).toBeInTheDocument()
+    expect(screen.getByText('7 ms')).toBeInTheDocument()
+    expect(screen.getByText('Fallback provider P95')).toBeInTheDocument()
+    expect(screen.getByText('12 ms')).toBeInTheDocument()
   })
 
   it('copies a useful snapshot without selection text or document details', async () => {

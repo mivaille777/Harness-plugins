@@ -121,7 +121,11 @@ export default function DiagnosticsPage({
     provider: 'Provider',
     captureState: '采集状态',
     lastEvent: '最近事件时间',
-    captureLatency: '采集耗时',
+    captureLatency: '最近 Provider 读取耗时',
+    eventLatencyP50: 'UIA 事件到快照 P50',
+    eventLatencyP95: 'UIA 事件到快照 P95',
+    fallbackLatencyP50: '回退 Provider 耗时 P50',
+    fallbackLatencyP95: '回退 Provider 耗时 P95',
     deduplicated: '去重次数',
     dropped: '丢弃或合并触发',
     snapshotId: 'Snapshot ID',
@@ -178,7 +182,11 @@ export default function DiagnosticsPage({
     provider: 'Provider',
     captureState: 'Capture state',
     lastEvent: 'Last event',
-    captureLatency: 'Capture latency',
+    captureLatency: 'Last provider read',
+    eventLatencyP50: 'UIA event to snapshot P50',
+    eventLatencyP95: 'UIA event to snapshot P95',
+    fallbackLatencyP50: 'Fallback provider P50',
+    fallbackLatencyP95: 'Fallback provider P95',
     deduplicated: 'Deduplicated',
     dropped: 'Dropped or coalesced triggers',
     snapshotId: 'Snapshot ID',
@@ -334,6 +342,10 @@ export default function DiagnosticsPage({
           {row(labels.captureState, diagnostics?.capture.state === null || diagnostics?.capture.state === undefined ? null : statusLabel(locale, diagnostics.capture.state))}
           {row(labels.lastEvent, diagnostics?.capture.lastEventAt === null || diagnostics?.capture.lastEventAt === undefined ? null : new Date(diagnostics.capture.lastEventAt).toLocaleTimeString(locale))}
           {row(labels.captureLatency, diagnostics?.capture.latencyMs === null || diagnostics?.capture.latencyMs === undefined ? null : `${diagnostics.capture.latencyMs} ms`)}
+          {row(labels.eventLatencyP50, diagnostics?.capture.eventLatencyP50Ms === null || diagnostics?.capture.eventLatencyP50Ms === undefined ? null : `${diagnostics.capture.eventLatencyP50Ms} ms`)}
+          {row(labels.eventLatencyP95, diagnostics?.capture.eventLatencyP95Ms === null || diagnostics?.capture.eventLatencyP95Ms === undefined ? null : `${diagnostics.capture.eventLatencyP95Ms} ms`)}
+          {row(labels.fallbackLatencyP50, diagnostics?.capture.fallbackLatencyP50Ms === null || diagnostics?.capture.fallbackLatencyP50Ms === undefined ? null : `${diagnostics.capture.fallbackLatencyP50Ms} ms`)}
+          {row(labels.fallbackLatencyP95, diagnostics?.capture.fallbackLatencyP95Ms === null || diagnostics?.capture.fallbackLatencyP95Ms === undefined ? null : `${diagnostics.capture.fallbackLatencyP95Ms} ms`)}
           {row(labels.deduplicated, diagnostics?.capture.deduplicatedCount)}
           {row(labels.dropped, diagnostics?.capture.droppedTriggerCount)}
           {errorRow(labels.lastError, diagnostics?.capture.error ?? pageState?.input.captureError ?? null)}

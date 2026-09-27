@@ -74,6 +74,10 @@ const emptyCapture: CaptureStatus = {
     excluded: 0,
     errors: 0,
     lastCaptureLatencyMs: null,
+    eventCaptureLatencyP50Ms: null,
+    eventCaptureLatencyP95Ms: null,
+    fallbackCaptureLatencyP50Ms: null,
+    fallbackCaptureLatencyP95Ms: null,
   },
 }
 

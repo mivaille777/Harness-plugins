@@ -1,4 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
+use std::collections::VecDeque;
 use std::env;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +26,7 @@ const WORKER_POLL: Duration = Duration::from_millis(250);
 // Chromium does not reliably raise Text_TextSelectionChanged on every page. This
 // bounded foreground read is a fallback, not a second capture transport.
 const FALLBACK_SELECTION_POLL: Duration = Duration::from_millis(500);
+const CAPTURE_LATENCY_SAMPLE_WINDOW: usize = 256;
 
 #[derive(Debug, Clone)]
 struct CaptureConfig {
@@ -176,6 +178,10 @@ struct CaptureMetrics {
     excluded: u64,
     errors: u64,
     last_capture_latency_ms: Option<u64>,
+    event_capture_latency_p50_ms: Option<u64>,
+    event_capture_latency_p95_ms: Option<u64>,
+    fallback_capture_latency_p50_ms: Option<u64>,
+    fallback_capture_latency_p95_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -195,6 +201,8 @@ struct CaptureState {
     last_transition_at: u64,
     last_error: Option<String>,
     metrics: CaptureMetrics,
+    recent_event_capture_latencies_ms: VecDeque<u64>,
+    recent_fallback_capture_latencies_ms: VecDeque<u64>,
 }
 
 impl CaptureState {
@@ -205,6 +213,8 @@ impl CaptureState {
             last_transition_at: now_millis(),
             last_error: None,
             metrics: CaptureMetrics::default(),
+            recent_event_capture_latencies_ms: VecDeque::new(),
+            recent_fallback_capture_latencies_ms: VecDeque::new(),
         }
     }
 
@@ -223,6 +233,7 @@ struct LatestValue<T> {
 #[derive(Debug, Clone, Copy)]
 struct SelectionTrigger {
     generation: u64,
+    started_at: Instant,
 }
 
 struct PendingSelection {
@@ -339,12 +350,17 @@ impl CaptureRuntime {
 
         let event_stop = self.stop.clone();
         let event_state = self.state.clone();
+        let event_capture_state = event_state.clone();
         let event_guard = self.guard.clone();
         let event_thread = thread::Builder::new()
             .name("dsh-selection-uia-events".to_owned())
             .spawn(move || {
-                if let Err(error) = run_selection_event_source(trigger_tx, event_stop, event_guard)
-                {
+                if let Err(error) = run_selection_event_source(
+                    trigger_tx,
+                    event_stop,
+                    event_guard,
+                    event_capture_state,
+                ) {
                     record_error(
                         &event_state,
                         format!("UIA selection event source stopped: {error}"),
@@ -404,7 +420,9 @@ impl CaptureRuntime {
                             }
                             match result {
                                 Ok(ProviderCapture::Captured(mut snapshot)) => {
-                                    let latency = started.elapsed().as_millis() as u64;
+                                    let provider_latency = started.elapsed().as_millis() as u64;
+                                    let event_latency =
+                                        trigger.started_at.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
                                         increment(&worker_state, |metrics| {
                                             metrics.paused_drops += 1
@@ -442,9 +460,13 @@ impl CaptureRuntime {
                                     });
                                     let _ = ready_tx.try_send(());
                                     transition(&worker_state, CapturePhase::Publishing, None);
+                                    record_capture_latency(
+                                        &worker_state,
+                                        provider_latency,
+                                        Some(event_latency),
+                                    );
                                     increment(&worker_state, |metrics| {
                                         metrics.captured += 1;
-                                        metrics.last_capture_latency_ms = Some(latency);
                                         if replaced {
                                             metrics.coalesced += 1;
                                         }
@@ -525,9 +547,9 @@ impl CaptureRuntime {
                                     let _ = ready_tx.try_send(());
                                     last_capture = Some((signature, Instant::now()));
                                     transition(&worker_state, CapturePhase::Publishing, None);
+                                    record_capture_latency(&worker_state, latency, None);
                                     increment(&worker_state, |metrics| {
                                         metrics.captured += 1;
-                                        metrics.last_capture_latency_ms = Some(latency);
                                         if replaced {
                                             metrics.coalesced += 1;
                                         }
@@ -655,6 +677,57 @@ fn increment(state: &Mutex<CaptureState>, update: impl FnOnce(&mut CaptureMetric
     update(&mut state.lock().expect("capture state poisoned").metrics);
 }
 
+fn record_capture_latency(
+    state: &Mutex<CaptureState>,
+    provider_latency_ms: u64,
+    event_latency_ms: Option<u64>,
+) {
+    let mut state = state.lock().expect("capture state poisoned");
+    state.metrics.last_capture_latency_ms = Some(provider_latency_ms);
+
+    let (samples, p50, p95) = if let Some(event_latency_ms) = event_latency_ms {
+        let samples = &mut state.recent_event_capture_latencies_ms;
+        let (p50, p95) = push_latency_sample(samples, event_latency_ms);
+        (true, p50, p95)
+    } else {
+        let samples = &mut state.recent_fallback_capture_latencies_ms;
+        let (p50, p95) = push_latency_sample(samples, provider_latency_ms);
+        (false, p50, p95)
+    };
+
+    if samples {
+        state.metrics.event_capture_latency_p50_ms = p50;
+        state.metrics.event_capture_latency_p95_ms = p95;
+    } else {
+        state.metrics.fallback_capture_latency_p50_ms = p50;
+        state.metrics.fallback_capture_latency_p95_ms = p95;
+    }
+}
+
+fn push_latency_sample(samples: &mut VecDeque<u64>, latency_ms: u64) -> (Option<u64>, Option<u64>) {
+    samples.push_back(latency_ms);
+    if samples.len() > CAPTURE_LATENCY_SAMPLE_WINDOW {
+        samples.pop_front();
+    }
+    let mut sorted = samples.iter().copied().collect::<Vec<_>>();
+    sorted.sort_unstable();
+    (
+        nearest_rank_percentile(&sorted, 50),
+        nearest_rank_percentile(&sorted, 95),
+    )
+}
+
+fn nearest_rank_percentile(sorted_samples: &[u64], percentile: usize) -> Option<u64> {
+    if sorted_samples.is_empty() || percentile == 0 || percentile > 100 {
+        return None;
+    }
+    let rank = sorted_samples
+        .len()
+        .saturating_mul(percentile)
+        .div_ceil(100);
+    sorted_samples.get(rank.saturating_sub(1)).copied()
+}
+
 fn transition(state: &Mutex<CaptureState>, phase: CapturePhase, error: Option<String>) {
     state
         .lock()
@@ -690,6 +763,7 @@ fn run_selection_event_source(
     trigger_tx: mpsc::SyncSender<SelectionTrigger>,
     stop: Arc<AtomicBool>,
     guard: InteractionGuard,
+    state: Arc<Mutex<CaptureState>>,
 ) -> Result<(), String> {
     use uiautomation::events::{CustomEventHandlerFn, UIEventHandler, UIEventType};
     use uiautomation::types::TreeScope;
@@ -700,12 +774,19 @@ fn run_selection_event_source(
         .get_root_element()
         .map_err(|error| error.to_string())?;
 
+    let callback_state = state.clone();
     let callback: Box<CustomEventHandlerFn> = Box::new(move |_sender, _event| {
         let gate = guard.capture_gate();
         if !gate.suppressed {
-            let _ = trigger_tx.try_send(SelectionTrigger {
+            match trigger_tx.try_send(SelectionTrigger {
                 generation: gate.generation,
-            });
+                started_at: Instant::now(),
+            }) {
+                Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+                Err(mpsc::TrySendError::Full(_)) => {
+                    increment(&callback_state, |metrics| metrics.coalesced += 1);
+                }
+            }
         }
         Ok(())
     });
@@ -811,6 +892,44 @@ mod tests {
             provider: "browser-accessibility".to_owned(),
             confidence: 0.4,
         }
+    }
+
+    #[test]
+    fn event_latency_percentiles_use_nearest_rank() {
+        let mut samples = VecDeque::new();
+        let mut percentiles = (None, None);
+        for latency in [40, 10, 30, 20] {
+            percentiles = push_latency_sample(&mut samples, latency);
+        }
+
+        assert_eq!(percentiles, (Some(20), Some(40)));
+    }
+
+    #[test]
+    fn event_and_fallback_latency_metrics_are_recorded_separately() {
+        let state = Mutex::new(CaptureState::new());
+        record_capture_latency(&state, 4, Some(12));
+        record_capture_latency(&state, 8, Some(18));
+        record_capture_latency(&state, 3, None);
+
+        let state = state.lock().expect("capture state poisoned");
+        assert_eq!(state.metrics.event_capture_latency_p50_ms, Some(12));
+        assert_eq!(state.metrics.event_capture_latency_p95_ms, Some(18));
+        assert_eq!(state.metrics.fallback_capture_latency_p50_ms, Some(3));
+        assert_eq!(state.metrics.fallback_capture_latency_p95_ms, Some(3));
+        assert_eq!(state.metrics.last_capture_latency_ms, Some(3));
+    }
+
+    #[test]
+    fn capture_latency_samples_keep_only_the_latest_bounded_window() {
+        let mut samples = VecDeque::new();
+        let mut percentiles = (None, None);
+        for latency in 0..=CAPTURE_LATENCY_SAMPLE_WINDOW as u64 {
+            percentiles = push_latency_sample(&mut samples, latency);
+        }
+
+        assert_eq!(samples.len(), CAPTURE_LATENCY_SAMPLE_WINDOW);
+        assert_eq!(percentiles, (Some(128), Some(244)));
     }
 
     #[test]

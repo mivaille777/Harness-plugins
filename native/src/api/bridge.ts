@@ -56,6 +56,10 @@ export interface CaptureMetrics {
   readonly excluded: number
   readonly errors: number
   readonly lastCaptureLatencyMs: number | null
+  readonly eventCaptureLatencyP50Ms: number | null
+  readonly eventCaptureLatencyP95Ms: number | null
+  readonly fallbackCaptureLatencyP50Ms: number | null
+  readonly fallbackCaptureLatencyP95Ms: number | null
 }
 
 export interface CaptureStatus {

@@ -32,6 +32,10 @@ const baseInput = (): DiagnosticsInput => ({
       excluded: 0,
       errors: 0,
       lastCaptureLatencyMs: 8,
+      eventCaptureLatencyP50Ms: 18,
+      eventCaptureLatencyP95Ms: 42,
+      fallbackCaptureLatencyP50Ms: 7,
+      fallbackCaptureLatencyP95Ms: 12,
     },
   },
   captureError: null,
@@ -113,6 +117,10 @@ describe('runtime diagnostics snapshot', () => {
     expect(snapshot.bridge.health).toBe('healthy')
     expect(snapshot.bridge.reconnectCount).toBe(2)
     expect(snapshot.capture.droppedTriggerCount).toBe(10)
+    expect(snapshot.capture.eventLatencyP50Ms).toBe(18)
+    expect(snapshot.capture.eventLatencyP95Ms).toBe(42)
+    expect(snapshot.capture.fallbackLatencyP50Ms).toBe(7)
+    expect(snapshot.capture.fallbackLatencyP95Ms).toBe(12)
     expect(snapshot.selection.cacheAgeMs).toBe(500)
     expect(snapshot.session.lastEventSequence).toBe(12)
     expect(serialized).not.toContain('PRIVATE SELECTED TEXT')
