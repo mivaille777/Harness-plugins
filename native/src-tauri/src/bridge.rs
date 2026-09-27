@@ -55,6 +55,7 @@ pub struct BridgeStatus {
     pub last_error: Option<String>,
     pub last_latency_ms: Option<u64>,
     pub reconnect_count: u64,
+    pub request_timeout_count: u64,
 }
 
 pub struct BridgeRuntime {
@@ -74,6 +75,7 @@ struct BridgeInner {
     last_latency_ms: Option<u64>,
     has_connected: bool,
     reconnect_count: u64,
+    request_timeout_count: u64,
     #[cfg(windows)]
     client: Option<Arc<NamedPipeConnection>>,
     #[cfg(windows)]
@@ -139,6 +141,7 @@ impl BridgeRuntime {
                 last_latency_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
+                request_timeout_count: 0,
                 #[cfg(windows)]
                 client: None,
                 #[cfg(windows)]
@@ -176,6 +179,7 @@ impl BridgeRuntime {
             last_error: inner.last_error.clone(),
             last_latency_ms: inner.last_latency_ms,
             reconnect_count: inner.reconnect_count,
+            request_timeout_count: inner.request_timeout_count,
         }
     }
 
@@ -347,6 +351,9 @@ impl BridgeRuntime {
 
         let result = connection.request(message, self.request_timeout).await;
         let mut inner = self.inner.lock().await;
+        if matches!(&result, Err(error) if error.contains("timed out")) {
+            inner.request_timeout_count = inner.request_timeout_count.saturating_add(1);
+        }
         let is_current = inner
             .client
             .as_ref()
@@ -1768,6 +1775,7 @@ mod tests {
                 last_latency_ms: None,
                 has_connected: true,
                 reconnect_count: 0,
+                request_timeout_count: 0,
                 client: Some(connection),
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -1833,6 +1841,50 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
+    async fn counts_connected_pipe_request_timeouts() {
+        use tokio::io::duplex;
+
+        let (client, _server) = duplex(4096);
+        let connection = Arc::new(NamedPipeConnection::start(
+            client,
+            std::time::Duration::from_secs(1),
+        ));
+        let runtime = BridgeRuntime {
+            endpoint: "duplex-timeout-test".to_owned(),
+            request_timeout: std::time::Duration::from_millis(50),
+            inner: Mutex::new(BridgeInner {
+                connected: true,
+                server_version: Some("test".to_owned()),
+                last_error: None,
+                last_latency_ms: None,
+                has_connected: true,
+                reconnect_count: 0,
+                request_timeout_count: 0,
+                client: Some(connection),
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
+        };
+        let request = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: "timeout-probe".to_owned(),
+            type_name: "bridge.ping".to_owned(),
+            payload: serde_json::json!({"sentAt": 1}),
+        };
+
+        let error = runtime.request_message(&request).await.unwrap_err();
+
+        assert!(
+            error.contains("timed out"),
+            "unexpected request error: {error}"
+        );
+        assert_eq!(runtime.status().await.request_timeout_count, 1);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
     async fn reports_unknown_after_submit_frame_is_written_and_reply_disconnects() {
         use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
         use tokio::net::windows::named_pipe::ServerOptions;
@@ -1892,6 +1944,7 @@ mod tests {
                 last_latency_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
+                request_timeout_count: 0,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -2072,6 +2125,7 @@ mod tests {
                 last_latency_ms: None,
                 has_connected: false,
                 reconnect_count: 0,
+                request_timeout_count: 0,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -2110,6 +2164,7 @@ mod tests {
         assert_eq!(status.protocol, IPC_PROTOCOL_VERSION);
         assert!(status.server_version.is_none());
         assert_eq!(status.reconnect_count, 0);
+        assert_eq!(status.request_timeout_count, 0);
     }
 
     #[test]

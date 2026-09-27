@@ -12,6 +12,7 @@ const baseInput = (): DiagnosticsInput => ({
     lastError: null,
     lastLatencyMs: 4,
     reconnectCount: 2,
+    requestTimeoutCount: 3,
   },
   bridgeError: null,
   capture: {
@@ -122,6 +123,7 @@ describe('runtime diagnostics snapshot', () => {
 
     expect(snapshot.bridge.health).toBe('healthy')
     expect(snapshot.bridge.reconnectCount).toBe(2)
+    expect(snapshot.bridge.requestTimeoutCount).toBe(3)
     expect(snapshot.capture.droppedTriggerCount).toBe(10)
     expect(snapshot.capture.eventLatencyP50Ms).toBe(18)
     expect(snapshot.capture.eventLatencyP95Ms).toBe(42)

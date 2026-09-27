@@ -26,6 +26,7 @@ describe('DiagnosticsPage', () => {
       lastError: null,
       lastLatencyMs: 5,
       reconnectCount: 1,
+      requestTimeoutCount: 3,
     }
     bridgeMocks.getBridgeStatus.mockResolvedValue(connectedBridge)
     bridgeMocks.pingBridge.mockResolvedValue(connectedBridge)
@@ -90,6 +91,8 @@ describe('DiagnosticsPage', () => {
     await waitFor(() => expect(bridgeMocks.getCurrentSelection).toHaveBeenCalledOnce())
     expect(screen.getAllByText('unhealthy').length).toBeGreaterThan(0)
     expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByText('Request timeouts')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.getAllByText('Error: request timed out').length).toBeGreaterThan(0)
     for (const heading of ['Harness', 'Bridge', 'Capture', 'Selection', 'Lens', 'Session']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()

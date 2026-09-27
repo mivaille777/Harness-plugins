@@ -119,6 +119,7 @@ export default function DiagnosticsPage({
     pipe: '管道',
     latency: '最近延迟',
     reconnects: '重连次数',
+    requestTimeouts: '请求超时数',
     lastError: '最近错误',
     currentProbe: '选区查询',
     provider: 'Provider',
@@ -186,6 +187,7 @@ export default function DiagnosticsPage({
     pipe: 'Pipe',
     latency: 'Recent latency',
     reconnects: 'Reconnect count',
+    requestTimeouts: 'Request timeouts',
     lastError: 'Last error',
     currentProbe: 'selection.current',
     provider: 'Provider',
@@ -346,6 +348,7 @@ export default function DiagnosticsPage({
           {row(labels.pipe, diagnostics?.bridge.pipe)}
           {row(labels.latency, diagnostics?.bridge.latencyMs === null || diagnostics?.bridge.latencyMs === undefined ? null : `${diagnostics.bridge.latencyMs} ms`)}
           {row(labels.reconnects, diagnostics?.bridge.reconnectCount)}
+          {row(labels.requestTimeouts, diagnostics?.bridge.requestTimeoutCount)}
           {errorRow(labels.lastError, diagnostics?.bridge.lastError ?? pageState?.input.bridgeError ?? null)}
           {errorRow(labels.currentProbe, diagnostics?.bridge.selectionCurrentError ?? null)}
         </dl>

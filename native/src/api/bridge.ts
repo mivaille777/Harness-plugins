@@ -41,6 +41,7 @@ export interface BridgeStatus {
   readonly lastError: string | null
   readonly lastLatencyMs: number | null
   readonly reconnectCount: number
+  readonly requestTimeoutCount: number
 }
 
 export interface CaptureMetrics {

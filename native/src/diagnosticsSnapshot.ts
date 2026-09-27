@@ -79,6 +79,7 @@ export function buildDiagnosticsSnapshot(
       pipe: input.bridge?.endpoint ?? null,
       latencyMs: input.bridge?.lastLatencyMs ?? null,
       reconnectCount: input.bridge?.reconnectCount ?? null,
+      requestTimeoutCount: input.bridge?.requestTimeoutCount ?? null,
       lastError: input.bridge?.lastError ?? input.bridgeError,
       selectionCurrentError: input.selectionError,
     },
