@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::bridge::BridgeRuntime;
+use crate::focus::FocusRuntime;
 use crate::interaction_guard::{CaptureGate, InteractionGuard};
 use crate::protocol::SelectionSnapshot;
 use crate::providers::registry::ProviderRegistry;
@@ -168,6 +169,7 @@ struct CaptureMetrics {
     deduplicated: u64,
     paused_drops: u64,
     guard_drops: u64,
+    focus_drops: u64,
     coalesced: u64,
     no_selection: u64,
     not_applicable: u64,
@@ -273,17 +275,23 @@ pub struct CaptureRuntime {
     state: Arc<Mutex<CaptureState>>,
     latest: Arc<LatestValue<PendingSelection>>,
     guard: InteractionGuard,
+    focus: FocusRuntime,
     threads: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl CaptureRuntime {
-    pub fn start(app: AppHandle, guard: InteractionGuard) -> Result<Self, String> {
+    pub fn start(
+        app: AppHandle,
+        guard: InteractionGuard,
+        focus: FocusRuntime,
+    ) -> Result<Self, String> {
         let config = CaptureConfig::from_environment()?;
         let runtime = Self {
             stop: Arc::new(AtomicBool::new(false)),
             state: Arc::new(Mutex::new(CaptureState::new())),
             latest: Arc::new(LatestValue::new()),
             guard,
+            focus,
             threads: Mutex::new(Vec::new()),
         };
 
@@ -291,7 +299,7 @@ impl CaptureRuntime {
         runtime.start_windows_capture(app, config)?;
 
         #[cfg(not(windows))]
-        let _ = (app, config, runtime.guard.clone());
+        let _ = (app, config, runtime.guard.clone(), runtime.focus.clone());
 
         Ok(runtime)
     }
@@ -349,6 +357,7 @@ impl CaptureRuntime {
         let worker_state = self.state.clone();
         let worker_latest = self.latest.clone();
         let worker_guard = self.guard.clone();
+        let worker_focus = self.focus.clone();
         let worker_thread = thread::Builder::new()
             .name("dsh-selection-capture-worker".to_owned())
             .spawn(move || {
@@ -394,7 +403,7 @@ impl CaptureRuntime {
                                 continue;
                             }
                             match result {
-                                Ok(ProviderCapture::Captured(snapshot)) => {
+                                Ok(ProviderCapture::Captured(mut snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
                                         increment(&worker_state, |metrics| {
@@ -417,6 +426,12 @@ impl CaptureRuntime {
                                     ) {
                                         increment(&worker_state, |metrics| {
                                             metrics.deduplicated += 1
+                                        });
+                                        continue;
+                                    }
+                                    if !worker_focus.bind_snapshot(&mut snapshot) {
+                                        increment(&worker_state, |metrics| {
+                                            metrics.focus_drops += 1
                                         });
                                         continue;
                                     }
@@ -468,7 +483,7 @@ impl CaptureRuntime {
                                 continue;
                             }
                             match result {
-                                Ok(ProviderCapture::Captured(snapshot)) => {
+                                Ok(ProviderCapture::Captured(mut snapshot)) => {
                                     let latency = started.elapsed().as_millis() as u64;
                                     if is_paused(&worker_state) {
                                         increment(&worker_state, |metrics| {
@@ -493,6 +508,13 @@ impl CaptureRuntime {
                                     if config.excludes(&snapshot) {
                                         transition(&worker_state, CapturePhase::Excluded, None);
                                         increment(&worker_state, |metrics| metrics.excluded += 1);
+                                        continue;
+                                    }
+
+                                    if !worker_focus.bind_snapshot(&mut snapshot) {
+                                        increment(&worker_state, |metrics| {
+                                            metrics.focus_drops += 1
+                                        });
                                         continue;
                                     }
 
@@ -607,6 +629,7 @@ impl CaptureRuntime {
 impl Drop for CaptureRuntime {
     fn drop(&mut self) {
         self.guard.shutdown();
+        self.focus.shutdown();
         self.stop.store(true, Ordering::Release);
         for thread in self
             .threads
@@ -766,6 +789,7 @@ mod tests {
                 process: Some("chrome.exe".to_owned()),
                 window_title: Some("Paper - Google Chrome".to_owned()),
             },
+            source_window_identity: None,
             document: None,
             context: SelectionContext {
                 before: None,
@@ -803,6 +827,7 @@ mod tests {
             state: Arc::new(Mutex::new(CaptureState::new())),
             latest: Arc::new(LatestValue::new()),
             guard: InteractionGuard::default(),
+            focus: FocusRuntime::default(),
             threads: Mutex::new(Vec::new()),
         };
         runtime.latest.replace(PendingSelection {

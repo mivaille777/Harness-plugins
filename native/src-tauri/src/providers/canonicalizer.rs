@@ -42,6 +42,7 @@ mod tests {
                 process: None,
                 window_title: None,
             },
+            source_window_identity: None,
             document: None,
             context: SelectionContext {
                 before: None,

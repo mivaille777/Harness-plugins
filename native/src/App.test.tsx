@@ -17,6 +17,7 @@ const api = vi.hoisted(() => {
     resumeCapture: vi.fn(),
     beginInteractionGuard: vi.fn(),
     endInteractionGuard: vi.fn(),
+    restoreSourceFocus: vi.fn(),
     submitSessionPrompt: vi.fn(),
     subscribeSession: vi.fn(),
     unsubscribeSession: vi.fn(),
@@ -58,7 +59,7 @@ function deepFreeze<T>(value: T): T {
   Object.freeze(value)
   return value
 }
-const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, guardDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
+const capture = { paused: false, phase: 'running', queueDepth: 0, lastTransitionAt: 1, lastError: null, metrics: { captured: 1, published: 1, deduplicated: 0, pausedDrops: 0, guardDrops: 0, focusDrops: 0, coalesced: 0, noSelection: 0, notApplicable: 0, excluded: 0, errors: 0, lastCaptureLatencyMs: 1 } }
 const selection = deepFreeze({ id: 's1', revision: 2, capturedAt: 1, selection: { text: '中文 selection 🚀' }, source: { kind: 'browser', app: 'Chrome' }, document: { title: 'Fixture page' }, context: { before: 'Before context', after: 'After context', sectionText: 'Section context', pageAvailable: false }, capabilities: { localContext: true, sectionContext: true, pageContext: false, screenshot: false }, provider: 'browser-accessibility', confidence: .5 })
 
 describe('selection lens', () => {
@@ -85,6 +86,7 @@ describe('selection lens', () => {
     api.resumeCapture.mockResolvedValue(capture)
     api.beginInteractionGuard.mockResolvedValue({ captureSuppressed: true, shuttingDown: false, generation: 1, activeRequests: 1, activeModes: ['lensInteraction'] })
     api.endInteractionGuard.mockResolvedValue({ captureSuppressed: false, shuttingDown: false, generation: 2, activeRequests: 0, activeModes: [] })
+    api.restoreSourceFocus.mockResolvedValue({ restored: true, reason: 'restored' })
     windowApi.isFocused.mockResolvedValue(false)
     windowApi.onFocusChanged.mockImplementation(async (handler: (event: { payload: boolean }) => void) => {
       windowApi.focusHandler = handler
@@ -121,6 +123,25 @@ describe('selection lens', () => {
     await waitFor(() => expect(api.beginInteractionGuard).toHaveBeenCalledWith('lensInteraction', 'lens-main-window-focus'))
     windowApi.focusHandler?.({ payload: false })
     await waitFor(() => expect(api.endInteractionGuard).toHaveBeenCalledWith('lensInteraction', 'lens-main-window-focus'))
+  })
+  it('requests source focus restoration only after the Lens has hidden', async () => {
+    api.getCurrentSelection.mockResolvedValueOnce(deepFreeze({
+      ...selection,
+      sourceWindowIdentity: {
+        processId: 1200,
+        windowHandle: '0xA001',
+        processName: 'chrome.exe',
+        windowTitle: 'Article - Google Chrome',
+        capturedAt: 1,
+        focusEpoch: 0,
+      },
+    }))
+    render(<App />)
+    await screen.findByTestId('selected-text')
+    fireEvent.click(screen.getByRole('button', { name: 'Close selection companion' }))
+
+    await waitFor(() => expect(api.restoreSourceFocus).toHaveBeenCalledWith('s1', 2))
+    expect(hide.mock.invocationCallOrder[0]).toBeLessThan(api.restoreSourceFocus.mock.invocationCallOrder[0])
   })
   it('reopens on the in-flight request material after Esc without cancelling it', async () => {
     render(<App />)
@@ -267,6 +288,17 @@ describe('selection lens', () => {
   it('does not submit while composing Chinese input and subscribes after composition completes', async () => { render(<App />); const input = await screen.findByLabelText('Ask about this selection'); fireEvent.change(input, { target: { value: '问题' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(api.submitSessionPrompt).not.toHaveBeenCalled(); fireEvent.keyDown(input, { key: 'Enter', isComposing: false }); await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledTimes(1)); await waitFor(() => expect(api.subscribeSession).toHaveBeenCalledWith('session-1', expect.any(String), 0)); expect(await screen.findByText(/Waiting for Harness session session-1/)).toBeInTheDocument() })
   it('hides on Escape and keeps pause separate from Lens close', async () => { render(<App />); await screen.findByTestId('selected-text'); fireEvent.keyDown(window, { key: 'Escape' }); expect(hide).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: 'Pause capture' })); await waitFor(() => expect(api.pauseCapture).toHaveBeenCalledTimes(1)) })
   it('renders correlated text and completes only on turn end', async () => {
+    api.getCurrentSelection.mockResolvedValueOnce(deepFreeze({
+      ...selection,
+      sourceWindowIdentity: {
+        processId: 1200,
+        windowHandle: '0xA001',
+        processName: 'chrome.exe',
+        windowTitle: 'Article - Google Chrome',
+        capturedAt: 1,
+        focusEpoch: 0,
+      },
+    }))
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
     await waitFor(() => expect(api.subscribeSession).toHaveBeenCalled())
@@ -279,6 +311,7 @@ describe('selection lens', () => {
     expect(screen.getByText('Receiving answer')).toBeInTheDocument()
     eventApi.handler?.({ payload: { sessionId: 'session-1', subscriptionId, requestId: 'request-1', event: { kind: 'status', data: { cursor: 5, persistent: true, value: { status: 'turn-end', turn: 1, reason: { kind: 'completed' } } } } } })
     expect(await screen.findByText('Answer complete')).toBeInTheDocument()
+    await waitFor(() => expect(api.restoreSourceFocus).toHaveBeenCalledWith('s1', 2))
   })
   it('requests cancellation and waits for the correlated aborted turn end', async () => {
     render(<App />)

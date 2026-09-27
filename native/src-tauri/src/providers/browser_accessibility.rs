@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{
     SelectionCapabilities, SelectionContext, SelectionDocument, SelectionGeometry,
-    SelectionSnapshot, SelectionSource, SelectionSourceKind, SelectionValue,
+    SelectionSnapshot, SelectionSource, SelectionSourceKind, SelectionValue, SourceWindowIdentity,
 };
 use crate::providers::{ProviderCapture, SelectionProvider};
 
@@ -188,9 +188,7 @@ mod windows_impl {
             };
 
             let mut visited = 0usize;
-            if let Some(selected) =
-                search_selected_range(&browser_window, &walker, &mut visited)
-            {
+            if let Some(selected) = search_selected_range(&browser_window, &walker, &mut visited) {
                 return build_snapshot(&browser_window, selected, &walker, context_chars)
                     .map(ProviderCapture::Captured);
             }
@@ -235,7 +233,31 @@ mod windows_impl {
         let geometry = enclosing.as_ref().and_then(element_geometry);
 
         let (app, process_name) = browser_identity(&window_title);
-        let process_id = browser_window.get_process_id().unwrap_or_default();
+        let process_id =
+            u32::try_from(browser_window.get_process_id().unwrap_or_default()).unwrap_or_default();
+        let captured_at = now_millis();
+        let window_handle = browser_window
+            .get_native_window_handle()
+            .ok()
+            .map(|handle| {
+                let handle: isize = handle.into();
+                format!("0x{:X}", handle as usize)
+            });
+        let source_window_title = clean_context(window_title.clone());
+        let source_process_name = process_name.map(str::to_owned);
+        let source_window_identity = match (process_id, window_handle) {
+            (process_id, Some(window_handle)) if process_id > 0 && window_handle != "0x0" => {
+                Some(SourceWindowIdentity {
+                    process_id,
+                    window_handle,
+                    process_name: source_process_name.clone(),
+                    window_title: source_window_title.clone(),
+                    captured_at,
+                    focus_epoch: 0,
+                })
+            }
+            _ => None,
+        };
         let local_context = before.is_some() || after.is_some();
         let section_context = paragraph.is_some() || heading.is_some();
         let confidence_value = confidence(
@@ -246,8 +268,6 @@ mod windows_impl {
             document_title.is_some(),
             geometry.is_some(),
         );
-        let captured_at = now_millis();
-
         let snapshot = SelectionSnapshot {
             id: format!("browser-uia-{process_id}-{captured_at}"),
             revision: 1,
@@ -259,9 +279,10 @@ mod windows_impl {
             source: SelectionSource {
                 kind: source_kind(url.as_deref()),
                 app: Some(app.to_owned()),
-                process: process_name.map(str::to_owned),
-                window_title: clean_context(window_title),
+                process: source_process_name,
+                window_title: source_window_title,
             },
+            source_window_identity,
             document: Some(SelectionDocument {
                 title: document_title,
                 url,

@@ -272,6 +272,7 @@ mod tests {
                 process: Some(process.to_owned()),
                 window_title: Some("Test Document".to_owned()),
             },
+            source_window_identity: None,
             document: rich.then(|| SelectionDocument {
                 title: Some("Document".to_owned()),
                 url: Some("https://example.test/doc".to_owned()),

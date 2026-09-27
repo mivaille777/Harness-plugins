@@ -1,5 +1,6 @@
 pub mod bridge;
 pub mod capture;
+pub mod focus;
 pub mod interaction_guard;
 pub mod native_messaging;
 pub mod protocol;
@@ -14,8 +15,14 @@ pub fn run() {
         .manage(bridge::BridgeRuntime::from_environment().expect("invalid bridge configuration"))
         .setup(|app| {
             let guard = interaction_guard::InteractionGuard::default();
-            let capture = capture::CaptureRuntime::start(app.handle().clone(), guard.clone())?;
+            let focus = focus::FocusRuntime::start()?;
+            let capture = capture::CaptureRuntime::start(
+                app.handle().clone(),
+                guard.clone(),
+                focus.clone(),
+            )?;
             app.manage(guard.clone());
+            app.manage(focus);
             app.manage(capture);
             guard.start_reaper(app.handle().clone());
             Ok(())
@@ -39,6 +46,7 @@ pub fn run() {
             capture::capture_resume,
             interaction_guard::interaction_guard_begin,
             interaction_guard::interaction_guard_end,
+            focus::restore_source_focus,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dsh-selection-companion native shell");

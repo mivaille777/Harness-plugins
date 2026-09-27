@@ -108,6 +108,68 @@ describe('IPC message validation', () => {
     })).toThrow(IpcProtocolError)
   })
 
+  it('preserves a validated native source identity and rejects a zero HWND', () => {
+    const sourceWindowIdentity = {
+      processId: 1200,
+      windowHandle: '0xA001',
+      processName: 'chrome.exe',
+      windowTitle: 'Article - Google Chrome',
+      capturedAt: 1_725_753_600_000,
+      focusEpoch: 4,
+    }
+    const parsed = parseIpcMessage({
+      protocol: IPC_PROTOCOL_VERSION,
+      id: 'selection-source-identity',
+      type: 'selection.update',
+      payload: {
+        snapshot: {
+          id: 'snapshot-focus',
+          revision: 1,
+          capturedAt: 1_725_753_600_000,
+          sourceWindowIdentity,
+          selection: { text: 'Focused selection' },
+          source: { kind: 'browser', app: 'Chrome' },
+          context: { pageAvailable: false },
+          capabilities: {
+            localContext: false,
+            sectionContext: false,
+            pageContext: false,
+            screenshot: false,
+          },
+          provider: 'browser-accessibility',
+          confidence: 0.8,
+        },
+      },
+    })
+    if (parsed.type !== 'selection.update') throw new Error('expected selection.update')
+    expect(parsed.payload.snapshot.sourceWindowIdentity).toEqual(sourceWindowIdentity)
+
+    expect(() => parseIpcMessage({
+      protocol: IPC_PROTOCOL_VERSION,
+      id: 'selection-invalid-hwnd',
+      type: 'selection.update',
+      payload: {
+        snapshot: {
+          id: 'snapshot-focus',
+          revision: 1,
+          capturedAt: 1,
+          sourceWindowIdentity: { ...sourceWindowIdentity, windowHandle: '0x0' },
+          selection: { text: 'Focused selection' },
+          source: { kind: 'browser' },
+          context: { pageAvailable: false },
+          capabilities: {
+            localContext: false,
+            sectionContext: false,
+            pageContext: false,
+            screenshot: false,
+          },
+          provider: 'browser-accessibility',
+          confidence: 0.8,
+        },
+      },
+    })).toThrow(IpcProtocolError)
+  })
+
   it('bounds history pages before a request reaches the session service', () => {
     expect(() => parseIpcMessage({
       protocol: IPC_PROTOCOL_VERSION,

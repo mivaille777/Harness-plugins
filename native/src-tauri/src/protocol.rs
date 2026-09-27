@@ -188,6 +188,8 @@ pub struct SelectionSnapshot {
     pub selection: SelectionValue,
     pub source: SelectionSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_window_identity: Option<SourceWindowIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document: Option<SelectionDocument>,
     pub context: SelectionContext,
     pub capabilities: SelectionCapabilities,
@@ -195,6 +197,20 @@ pub struct SelectionSnapshot {
     pub geometry: Option<SelectionGeometry>,
     pub provider: String,
     pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceWindowIdentity {
+    pub process_id: u32,
+    /// Hex-encoded HWND avoids lossy conversion through JavaScript numbers.
+    pub window_handle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_title: Option<String>,
+    pub captured_at: u64,
+    pub focus_epoch: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -815,6 +831,9 @@ impl SelectionSnapshot {
             ));
         }
         require_text(&self.provider, "provider")?;
+        if let Some(identity) = &self.source_window_identity {
+            identity.validate()?;
+        }
         if !self.confidence.is_finite() || !(0.0..=1.0).contains(&self.confidence) {
             return Err(ProtocolError::InvalidMessage(
                 "confidence must be between 0 and 1".into(),
@@ -832,6 +851,39 @@ impl SelectionSnapshot {
                     "invalid selection geometry".into(),
                 ));
             }
+        }
+        Ok(())
+    }
+}
+
+impl SourceWindowIdentity {
+    fn validate(&self) -> Result<(), ProtocolError> {
+        if self.process_id == 0 {
+            return Err(ProtocolError::InvalidMessage(
+                "sourceWindowIdentity.processId must be positive".into(),
+            ));
+        }
+        let Some(handle) = self
+            .window_handle
+            .strip_prefix("0x")
+            .or_else(|| self.window_handle.strip_prefix("0X"))
+        else {
+            return Err(ProtocolError::InvalidMessage(
+                "sourceWindowIdentity.windowHandle must be a hex HWND".into(),
+            ));
+        };
+        if handle.is_empty() || usize::from_str_radix(handle, 16).unwrap_or_default() == 0 {
+            return Err(ProtocolError::InvalidMessage(
+                "sourceWindowIdentity.windowHandle must be a non-zero hex HWND".into(),
+            ));
+        }
+        require_safe_integer(self.captured_at, "sourceWindowIdentity.capturedAt")?;
+        require_safe_integer(self.focus_epoch, "sourceWindowIdentity.focusEpoch")?;
+        if let Some(process_name) = &self.process_name {
+            require_text(process_name, "sourceWindowIdentity.processName")?;
+        }
+        if let Some(window_title) = &self.window_title {
+            require_text(window_title, "sourceWindowIdentity.windowTitle")?;
         }
         Ok(())
     }
@@ -1323,6 +1375,7 @@ mod tests {
                 process: None,
                 window_title: None,
             },
+            source_window_identity: None,
             document: Some(SelectionDocument {
                 title: Some("Fixture".into()),
                 url: Some("https://example.test".into()),
@@ -1370,6 +1423,7 @@ mod tests {
                 process: None,
                 window_title: None,
             },
+            source_window_identity: None,
             document: Some(SelectionDocument {
                 title: Some("Fixture".into()),
                 url: None,
@@ -1414,9 +1468,52 @@ mod tests {
         assert!(value.pointer("/context/pageText").is_none());
         assert!(value.pointer("/geometry/monitorId").is_none());
         assert_eq!(
-            value.pointer("/context/after").and_then(serde_json::Value::as_str),
+            value
+                .pointer("/context/after")
+                .and_then(serde_json::Value::as_str),
             Some("after")
         );
+    }
+
+    #[test]
+    fn source_window_identity_is_validated_and_excluded_from_model_material() {
+        let identity = SourceWindowIdentity {
+            process_id: 1200,
+            window_handle: "0xA001".into(),
+            process_name: Some("chrome.exe".into()),
+            window_title: Some("Article - Google Chrome".into()),
+            captured_at: 1_725_753_600_000,
+            focus_epoch: 4,
+        };
+        identity.validate().unwrap();
+
+        let snapshot: SelectionSnapshot = serde_json::from_value(serde_json::json!({
+            "id": "source-identity-snapshot",
+            "revision": 1,
+            "capturedAt": 1_725_753_600_000u64,
+            "selection": { "text": "Fixed selected material" },
+            "source": { "kind": "browser", "app": "Chrome" },
+            "sourceWindowIdentity": identity.clone(),
+            "context": { "pageAvailable": false },
+            "capabilities": {
+                "localContext": false,
+                "sectionContext": false,
+                "pageContext": false,
+                "screenshot": false
+            },
+            "provider": "browser-accessibility",
+            "confidence": 0.8
+        }))
+        .unwrap();
+        snapshot.validate().unwrap();
+        let material = serde_json::to_value(SelectionMaterial::from_snapshot(&snapshot)).unwrap();
+        assert!(material.get("sourceWindowIdentity").is_none());
+
+        let invalid = SourceWindowIdentity {
+            window_handle: "0x0".into(),
+            ..snapshot.source_window_identity.unwrap()
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

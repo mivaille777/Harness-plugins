@@ -209,6 +209,7 @@ mod tests {
                 process: Some("browser.exe".to_owned()),
                 window_title: Some("Test Document".to_owned()),
             },
+            source_window_identity: None,
             document: None,
             context: SelectionContext {
                 before: None,

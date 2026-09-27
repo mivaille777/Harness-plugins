@@ -40,6 +40,7 @@ const capture = {
     deduplicated: 0,
     pausedDrops: 0,
     guardDrops: 0,
+    focusDrops: 0,
     coalesced: 0,
     noSelection: 0,
     notApplicable: 0,

@@ -18,6 +18,7 @@ export interface CaptureMetrics {
   readonly deduplicated: number
   readonly pausedDrops: number
   readonly guardDrops: number
+  readonly focusDrops: number
   readonly coalesced: number
   readonly noSelection: number
   readonly notApplicable: number
@@ -43,6 +44,25 @@ export interface InteractionStatus {
   readonly generation: number
   readonly activeRequests: number
   readonly activeModes: readonly InteractionMode[]
+}
+
+export type FocusRestoreReason =
+  | 'restored'
+  | 'noSourceIdentity'
+  | 'sourceExpired'
+  | 'userChangedFocus'
+  | 'sourceWindowUnavailable'
+  | 'sourceProcessUnavailable'
+  | 'processMismatch'
+  | 'windowTitleChanged'
+  | 'windowMinimized'
+  | 'focusDenied'
+  | 'shuttingDown'
+  | 'unsupportedPlatform'
+
+export interface FocusRestoreResult {
+  readonly restored: boolean
+  readonly reason: FocusRestoreReason
 }
 
 export interface SessionSubmission {
@@ -159,6 +179,11 @@ export function endInteractionGuard(
   requestId: string,
 ): Promise<InteractionStatus> {
   return invoke<InteractionStatus>('interaction_guard_end', { mode, requestId })
+}
+
+/** Requests a safety-checked focus restore for a native-captured source snapshot. */
+export function restoreSourceFocus(snapshotId: string, revision: number): Promise<FocusRestoreResult> {
+  return invoke<FocusRestoreResult>('restore_source_focus', { snapshotId, revision })
 }
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {

@@ -13,6 +13,7 @@ import {
   pauseCapture,
   readSessionHistory,
   resumeCapture,
+  restoreSourceFocus,
   submitSessionPrompt,
   subscribeSession,
   SubmissionUnknownError,
@@ -65,6 +66,7 @@ const emptyCapture: CaptureStatus = {
     deduplicated: 0,
     pausedDrops: 0,
     guardDrops: 0,
+    focusDrops: 0,
     coalesced: 0,
     noSelection: 0,
     notApplicable: 0,
@@ -405,8 +407,12 @@ export default function App({ initiallyOpen = true }: AppProps) {
   }, [dispatchLensEvent, refresh])
 
   const closeLens = useCallback(async () => {
+    const pinned = snapshotRef.current
     dispatchLensEvent({ type: 'lens_close' })
     await getCurrentWindow().hide()
+    if (pinned?.sourceWindowIdentity !== undefined) {
+      await restoreSourceFocus(pinned.id, pinned.revision).catch(() => undefined)
+    }
   }, [dispatchLensEvent])
 
   useEffect(() => {
@@ -604,7 +610,16 @@ export default function App({ initiallyOpen = true }: AppProps) {
             if (delta !== null) dispatchLensEvent({ type: 'stream_delta', requestId: current.requestId, delta })
           }
           const outcome = payload.event.kind === 'status' ? streamOutcomeFromEvent(value) : null
-          if (outcome !== null) dispatchLensEvent({ type: 'stream_end', requestId: current.requestId, outcome })
+          if (outcome !== null) {
+            dispatchLensEvent({ type: 'stream_end', requestId: current.requestId, outcome })
+            const pinned = snapshotRef.current
+            const binding = lensStateRef.current.binding
+            if (
+              pinned?.sourceWindowIdentity !== undefined
+              && binding !== null
+              && sameLensSelection(binding, bindingForSelection(pinned))
+            ) void restoreSourceFocus(pinned.id, pinned.revision).catch(() => undefined)
+          }
         }
       }
       setProjection(previous => projectSessionEvent(previous, {

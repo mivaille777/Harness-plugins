@@ -2,10 +2,21 @@ export const SELECTION_SOURCE_KINDS = ['browser', 'pdf', 'word', 'desktop'] as c
 
 export type SelectionSourceKind = (typeof SELECTION_SOURCE_KINDS)[number]
 
+export interface SourceWindowIdentity {
+  readonly processId: number
+  /** Hex-encoded HWND; JavaScript numbers cannot safely carry native handles. */
+  readonly windowHandle: string
+  readonly processName?: string
+  readonly windowTitle?: string
+  readonly capturedAt: number
+  readonly focusEpoch: number
+}
+
 export interface SelectionSnapshot {
   readonly id: string
   readonly revision: number
   readonly capturedAt: number
+  readonly sourceWindowIdentity?: SourceWindowIdentity
 
   readonly selection: {
     readonly text: string
@@ -95,6 +106,9 @@ export function normalizeSelectionSnapshot(input: unknown): SelectionSnapshot {
     id,
     revision: requireNonNegativeInteger(root.revision, 'revision'),
     capturedAt: requireNonNegativeInteger(root.capturedAt, 'capturedAt'),
+    ...(root.sourceWindowIdentity === undefined
+      ? {}
+      : { sourceWindowIdentity: parseSourceWindowIdentity(root.sourceWindowIdentity) }),
     selection: {
       text: requireMeaningfulSelection(selection.text),
       ...optionalStringProperty(selection.language, 'selection.language', 'language'),
@@ -125,6 +139,29 @@ export function normalizeSelectionSnapshot(input: unknown): SelectionSnapshot {
   }
 
   return deepFreeze(snapshot)
+}
+
+function parseSourceWindowIdentity(value: unknown): SourceWindowIdentity {
+  const identity = requireRecord(value, 'sourceWindowIdentity')
+  const processId = requireNonNegativeInteger(identity.processId, 'sourceWindowIdentity.processId')
+  if (processId === 0 || processId > 0xffff_ffff) {
+    fail('sourceWindowIdentity.processId must be a positive 32-bit integer')
+  }
+  if (typeof identity.windowHandle !== 'string' || !/^0x[0-9a-f]+$/i.test(identity.windowHandle)) {
+    fail('sourceWindowIdentity.windowHandle must be a hexadecimal HWND')
+  }
+  if (/^0x0+$/i.test(identity.windowHandle)) fail('sourceWindowIdentity.windowHandle must not be zero')
+  if (identity.processName === '' || identity.windowTitle === '') {
+    fail('sourceWindowIdentity process and window names must not be empty when provided')
+  }
+  return {
+    processId,
+    windowHandle: identity.windowHandle,
+    ...optionalStringProperty(identity.processName, 'sourceWindowIdentity.processName', 'processName'),
+    ...optionalStringProperty(identity.windowTitle, 'sourceWindowIdentity.windowTitle', 'windowTitle'),
+    capturedAt: requireNonNegativeInteger(identity.capturedAt, 'sourceWindowIdentity.capturedAt'),
+    focusEpoch: requireNonNegativeInteger(identity.focusEpoch, 'sourceWindowIdentity.focusEpoch'),
+  }
 }
 
 function parseDocument(value: unknown): NonNullable<SelectionSnapshot['document']> {

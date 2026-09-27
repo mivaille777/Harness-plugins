@@ -257,6 +257,14 @@ const selectionSnapshotWireSchema = z.object({
   id: nonEmptyString.max(256),
   revision: nonNegativeSafeInteger,
   capturedAt: nonNegativeSafeInteger,
+  sourceWindowIdentity: z.object({
+    processId: positiveSafeInteger.max(0xffff_ffff),
+    windowHandle: z.string().regex(/^0x[0-9a-f]{1,16}$/i),
+    processName: nonEmptyString.optional(),
+    windowTitle: nonEmptyString.optional(),
+    capturedAt: nonNegativeSafeInteger,
+    focusEpoch: nonNegativeSafeInteger,
+  }).strict().optional(),
   selection: z.object({
     text: z.string(),
     language: z.string().optional(),
