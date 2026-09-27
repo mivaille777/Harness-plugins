@@ -28,9 +28,11 @@ pub fn run() {
         })
         .setup(|app| {
             let initial_window_count = app.webview_windows().len();
-            app.manage(window_lifecycle::WindowLifecycleMetrics::with_initial_windows(
-                initial_window_count,
-            ));
+            app.manage(
+                window_lifecycle::WindowLifecycleMetrics::with_initial_windows(
+                    initial_window_count,
+                ),
+            );
             #[cfg(windows)]
             {
                 let mut bridge_events = app.state::<bridge::BridgeRuntime>().subscribe_events();
@@ -67,6 +69,7 @@ pub fn run() {
             bridge::bridge_ping,
             bridge::bridge_disconnect,
             bridge::bridge_current_selection,
+            bridge::bridge_selection_cache_status,
             bridge::bridge_expand_selection,
             submission::bridge_submit_authorized_prompt,
             bridge::bridge_list_sessions,

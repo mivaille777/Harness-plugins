@@ -20,9 +20,10 @@ use tokio::sync::Mutex;
 const DEFAULT_BRIDGE_REQUEST_TIMEOUT_MS: u64 = 5_000;
 
 use crate::protocol::{
-    BridgeHelloResultPayload, IpcMessage, SelectionCurrentResultPayload, SelectionExpandedPayload,
-    SelectionMaterial, SelectionSnapshot, SessionCreatedPayload, SessionHistoryResultPayload,
-    SessionListResultPayload, IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
+    BridgeHelloResultPayload, IpcMessage, SelectionCacheStatusResultPayload,
+    SelectionCurrentResultPayload, SelectionExpandedPayload, SelectionMaterial, SelectionSnapshot,
+    SessionCreatedPayload, SessionHistoryResultPayload, SessionListResultPayload,
+    IPC_FRAME_HEADER_BYTES, IPC_MAX_FRAME_BYTES, IPC_PROTOCOL_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +42,13 @@ pub struct SessionUnsubscription {
     pub session_id: String,
     pub subscription_id: String,
     pub released: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionCacheStatus {
+    pub supported: bool,
+    pub size: Option<u64>,
 }
 
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\dsh-selection-companion-v4";
@@ -76,6 +84,7 @@ struct BridgeInner {
     has_connected: bool,
     reconnect_count: u64,
     request_timeout_count: u64,
+    cache_status_supported: bool,
     #[cfg(windows)]
     client: Option<Arc<NamedPipeConnection>>,
     #[cfg(windows)]
@@ -142,6 +151,7 @@ impl BridgeRuntime {
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,
+                cache_status_supported: false,
                 #[cfg(windows)]
                 client: None,
                 #[cfg(windows)]
@@ -322,6 +332,10 @@ impl BridgeRuntime {
         });
         let mut inner = self.inner.lock().await;
         inner.connected = true;
+        inner.cache_status_supported = hello_result
+            .capabilities
+            .iter()
+            .any(|capability| capability == "selection.cache.status");
         inner.server_version = Some(hello_result.server.version);
         inner.last_error = None;
         if inner.has_connected {
@@ -878,6 +892,57 @@ impl BridgeRuntime {
     }
 
     #[cfg(windows)]
+    async fn selection_cache_status(&self) -> Result<SelectionCacheStatus, String> {
+        let supported = {
+            let inner = self.inner.lock().await;
+            inner.connected && inner.cache_status_supported
+        };
+        if !supported {
+            return Ok(SelectionCacheStatus {
+                supported: false,
+                size: None,
+            });
+        }
+
+        let request_id = request_id("selection-cache-status");
+        let message = IpcMessage {
+            protocol: IPC_PROTOCOL_VERSION,
+            id: request_id.clone(),
+            type_name: "selection.cache.status".to_owned(),
+            payload: serde_json::json!({}),
+        };
+        let response = self.request_message(&message).await?;
+        ensure_response_id(&response, &request_id)?;
+        if response.type_name == "error.response" {
+            return Err(format!(
+                "Harness rejected selection cache status: {}",
+                response.payload
+            ));
+        }
+        if response.type_name != "selection.cache.status.result" {
+            return Err(format!(
+                "unexpected selection cache status response: {}",
+                response.type_name
+            ));
+        }
+        let payload: SelectionCacheStatusResultPayload =
+            serde_json::from_value(response.payload)
+                .map_err(|error| format!("invalid selection cache status payload: {error}"))?;
+        Ok(SelectionCacheStatus {
+            supported: true,
+            size: Some(payload.size),
+        })
+    }
+
+    #[cfg(not(windows))]
+    async fn selection_cache_status(&self) -> Result<SelectionCacheStatus, String> {
+        Ok(SelectionCacheStatus {
+            supported: false,
+            size: None,
+        })
+    }
+
+    #[cfg(windows)]
     async fn expand_selection(
         &self,
         snapshot_id: String,
@@ -1327,6 +1392,7 @@ impl BridgeRuntime {
             let mut inner = self.inner.lock().await;
             inner.connected = false;
             inner.server_version = None;
+            inner.cache_status_supported = false;
             inner.last_error = None;
             let connection = inner.client.take();
             inner.subscription_epoch = inner.subscription_epoch.wrapping_add(1);
@@ -1350,6 +1416,7 @@ impl BridgeRuntime {
             let mut inner = self.inner.lock().await;
             inner.connected = false;
             inner.server_version = None;
+            inner.cache_status_supported = false;
             inner.last_error = None;
         }
     }
@@ -1396,6 +1463,13 @@ pub async fn bridge_current_selection(
     state: State<'_, BridgeRuntime>,
 ) -> Result<Option<SelectionSnapshot>, String> {
     state.current_selection().await
+}
+
+#[tauri::command]
+pub async fn bridge_selection_cache_status(
+    state: State<'_, BridgeRuntime>,
+) -> Result<SelectionCacheStatus, String> {
+    state.selection_cache_status().await
 }
 
 #[tauri::command]
@@ -1776,6 +1850,7 @@ mod tests {
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
+                cache_status_supported: false,
                 client: Some(connection),
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -1860,6 +1935,7 @@ mod tests {
                 has_connected: true,
                 reconnect_count: 0,
                 request_timeout_count: 0,
+                cache_status_supported: false,
                 client: Some(connection),
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -1881,6 +1957,99 @@ mod tests {
             "unexpected request error: {error}"
         );
         assert_eq!(runtime.status().await.request_timeout_count, 1);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn skips_selection_cache_request_when_server_does_not_advertise_capability() {
+        let runtime = BridgeRuntime {
+            endpoint: "old-server-cache-status-test".to_owned(),
+            request_timeout: std::time::Duration::from_secs(1),
+            inner: Mutex::new(BridgeInner {
+                connected: true,
+                server_version: Some("old-server".to_owned()),
+                last_error: None,
+                last_latency_ms: None,
+                has_connected: true,
+                reconnect_count: 0,
+                request_timeout_count: 0,
+                cache_status_supported: false,
+                client: None,
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
+        };
+
+        let status = runtime.selection_cache_status().await.unwrap();
+
+        assert!(!status.supported);
+        assert_eq!(status.size, None);
+        assert!(runtime.status().await.last_error.is_none());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn reads_selection_cache_size_when_server_advertises_capability() {
+        use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+
+        async fn read_frame(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> IpcMessage {
+            let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
+            reader.read_exact(&mut header).await.unwrap();
+            let declared = u32::from_be_bytes(header) as usize;
+            let mut body = vec![0_u8; declared];
+            reader.read_exact(&mut body).await.unwrap();
+            let mut frame = Vec::with_capacity(IPC_FRAME_HEADER_BYTES + declared);
+            frame.extend_from_slice(&header);
+            frame.extend_from_slice(&body);
+            crate::protocol::decode_frame(&frame).unwrap()
+        }
+
+        let (client, mut server) = duplex(4096);
+        let connection = Arc::new(NamedPipeConnection::start(
+            client,
+            std::time::Duration::from_secs(1),
+        ));
+        let runtime = BridgeRuntime {
+            endpoint: "new-server-cache-status-test".to_owned(),
+            request_timeout: std::time::Duration::from_secs(1),
+            inner: Mutex::new(BridgeInner {
+                connected: true,
+                server_version: Some("new-server".to_owned()),
+                last_error: None,
+                last_latency_ms: None,
+                has_connected: true,
+                reconnect_count: 0,
+                request_timeout_count: 0,
+                cache_status_supported: true,
+                client: Some(connection),
+                subscriptions: HashMap::new(),
+                subscription_epoch: 0,
+            }),
+            connect_lock: Mutex::new(()),
+            events: broadcast::channel(64).0,
+        };
+        let server_task = tokio::spawn(async move {
+            let request = read_frame(&mut server).await;
+            assert_eq!(request.type_name, "selection.cache.status");
+            let response = IpcMessage {
+                protocol: IPC_PROTOCOL_VERSION,
+                id: request.id,
+                type_name: "selection.cache.status.result".to_owned(),
+                payload: serde_json::json!({ "size": 4 }),
+            };
+            server
+                .write_all(&crate::protocol::encode_frame(&response).unwrap())
+                .await
+                .unwrap();
+        });
+
+        let status = runtime.selection_cache_status().await.unwrap();
+        server_task.await.unwrap();
+
+        assert!(status.supported);
+        assert_eq!(status.size, Some(4));
     }
 
     #[cfg(windows)]
@@ -1945,6 +2114,7 @@ mod tests {
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,
+                cache_status_supported: false,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,
@@ -2126,6 +2296,7 @@ mod tests {
                 has_connected: false,
                 reconnect_count: 0,
                 request_timeout_count: 0,
+                cache_status_supported: false,
                 client: None,
                 subscriptions: HashMap::new(),
                 subscription_epoch: 0,

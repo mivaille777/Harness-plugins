@@ -11,6 +11,7 @@ const bridgeMocks = vi.hoisted(() => ({
   getCurrentSelection: vi.fn(),
   getInteractionGuardStatus: vi.fn(),
   getProcessMemoryStatus: vi.fn(),
+  getSelectionCacheStatus: vi.fn(),
   getWindowLifecycleStatus: vi.fn(),
   listSessions: vi.fn(),
   pingBridge: vi.fn(),
@@ -70,6 +71,7 @@ describe('DiagnosticsPage', () => {
       privateBytes: 67_108_864,
       error: null,
     })
+    bridgeMocks.getSelectionCacheStatus.mockResolvedValue({ supported: true, size: 1 })
     bridgeMocks.getWindowLifecycleStatus.mockResolvedValue({ createdCount: 2, destroyedCount: 0, activeCount: 2 })
     bridgeMocks.getCurrentSelection.mockRejectedValue(new Error('request timed out'))
     bridgeMocks.listSessions.mockResolvedValue([])
@@ -110,6 +112,8 @@ describe('DiagnosticsPage', () => {
     expect(screen.getByText('Windows created').parentElement).toHaveTextContent('2')
     expect(screen.getByText('Windows destroyed').parentElement).toHaveTextContent('0')
     expect(screen.getByText('Windows active').parentElement).toHaveTextContent('2')
+    expect(screen.getByText('Cache metric').parentElement).toHaveTextContent('available')
+    expect(screen.getByText('Cache entries').parentElement).toHaveTextContent('1')
     expect(screen.getAllByText('Error: request timed out').length).toBeGreaterThan(0)
     for (const heading of ['Harness', 'Bridge', 'Capture', 'Runtime', 'Selection', 'Lens', 'Session']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
@@ -117,6 +121,26 @@ describe('DiagnosticsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Back to Lens/ }))
     expect(onBack).toHaveBeenCalledOnce()
+  })
+
+  it('shows an older Harness cache metric as not provided without inventing a size', async () => {
+    bridgeMocks.getSelectionCacheStatus.mockResolvedValue({ supported: false, size: null })
+    render(
+      <DiagnosticsPage
+        locale="en-US"
+        lens={initialLensState}
+        lensPerformance={emptyLensPerformanceState()}
+        pinnedSnapshot={null}
+        sessionId={null}
+        requestId={null}
+        lastEventSequence={null}
+        subscriptionState="idle"
+        onBack={() => undefined}
+      />,
+    )
+
+    expect(await screen.findByText('Not provided')).toBeInTheDocument()
+    expect(screen.getByText('Cache entries').parentElement).toHaveTextContent('No data')
   })
 
   it('shows event and fallback capture latency percentiles separately', async () => {

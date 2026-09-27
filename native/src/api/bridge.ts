@@ -9,6 +9,7 @@ const nativeCommands = [
   'bridge_ping',
   'bridge_disconnect',
   'bridge_current_selection',
+  'bridge_selection_cache_status',
   'bridge_expand_selection',
   'bridge_submit_prompt',
   'bridge_list_sessions',
@@ -57,6 +58,11 @@ export interface WindowLifecycleStatus {
   readonly createdCount: number
   readonly destroyedCount: number
   readonly activeCount: number
+}
+
+export interface SelectionCacheStatus {
+  readonly supported: boolean
+  readonly size: number | null
 }
 
 export interface CaptureMetrics {
@@ -251,6 +257,10 @@ export function restoreSourceFocus(snapshotId: string, revision: number): Promis
 
 export function getCurrentSelection(): Promise<SelectionSnapshot | null> {
   return invokeNative<SelectionSnapshot | null>('bridge_current_selection')
+}
+
+export function getSelectionCacheStatus(): Promise<SelectionCacheStatus> {
+  return invokeNative<SelectionCacheStatus>('bridge_selection_cache_status')
 }
 
 /** Requests bounded context already captured for the selected snapshot. */

@@ -8,6 +8,7 @@ import {
 export const BRIDGE_CAPABILITIES = [
   'bridge.ping',
   'selection.current',
+  'selection.cache.status',
   'selection.update',
   'selection.expand',
   'session.list',
@@ -109,6 +110,13 @@ export class BridgeMessageRouter {
           id: message.id,
           type: 'selection.current.result',
           payload: { snapshot: this.selectionContext.current() ?? null },
+        }
+      case 'selection.cache.status':
+        return {
+          protocol: IPC_PROTOCOL_VERSION,
+          id: message.id,
+          type: 'selection.cache.status.result',
+          payload: { size: this.selectionContext.size },
         }
       case 'selection.expand': {
         try {

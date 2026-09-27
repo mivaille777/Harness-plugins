@@ -58,6 +58,8 @@ const baseInput = (): DiagnosticsInput => ({
   processMemoryError: null,
   windowLifecycleStatus: { createdCount: 2, destroyedCount: 1, activeCount: 1 },
   windowLifecycleError: null,
+  selectionCacheStatus: { supported: true, size: 4 },
+  selectionCacheError: null,
   selection: {
     id: 'snapshot-1',
     revision: 7,
@@ -153,6 +155,9 @@ describe('runtime diagnostics snapshot', () => {
     expect(snapshot.capture.fallbackLatencyP50Ms).toBe(7)
     expect(snapshot.capture.fallbackLatencyP95Ms).toBe(12)
     expect(snapshot.selection.cacheAgeMs).toBe(500)
+    expect(snapshot.selection.cacheMetricSupported).toBe(true)
+    expect(snapshot.selection.cacheSize).toBe(4)
+    expect(snapshot.selection.cacheError).toBeNull()
     expect(snapshot.session.lastEventSequence).toBe(12)
     expect(serialized).not.toContain('PRIVATE SELECTED TEXT')
     expect(serialized).not.toContain('Private nearby text')

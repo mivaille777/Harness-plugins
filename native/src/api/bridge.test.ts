@@ -10,6 +10,7 @@ import {
   createSession,
   expandSelection,
   getProcessMemoryStatus,
+  getSelectionCacheStatus,
   getWindowLifecycleStatus,
   listSessions,
   readSessionHistory,
@@ -145,6 +146,14 @@ describe('runtime diagnostics commands', () => {
 
     await expect(getWindowLifecycleStatus()).resolves.toEqual(status)
     expect(tauri.invoke).toHaveBeenCalledWith('runtime_window_lifecycle_status')
+  })
+
+  it('reads cache size through the typed native command', async () => {
+    const status = { supported: true, size: 4 }
+    tauri.invoke.mockResolvedValue(status)
+
+    await expect(getSelectionCacheStatus()).resolves.toEqual(status)
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_selection_cache_status')
   })
 })
 

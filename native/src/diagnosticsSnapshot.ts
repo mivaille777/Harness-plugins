@@ -3,6 +3,7 @@ import type {
   CaptureStatus,
   InteractionStatus,
   ProcessMemoryStatus,
+  SelectionCacheStatus,
   WindowLifecycleStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
@@ -22,6 +23,8 @@ export interface DiagnosticsInput {
   readonly processMemoryError: string | null
   readonly windowLifecycleStatus: WindowLifecycleStatus | null
   readonly windowLifecycleError: string | null
+  readonly selectionCacheStatus: SelectionCacheStatus | null
+  readonly selectionCacheError: string | null
   readonly selection: SelectionSnapshot | null
   readonly selectionError: string | null
   readonly sessionCount: number | null
@@ -117,6 +120,9 @@ export function buildDiagnosticsSnapshot(
       geometryPrecision: selection?.geometry?.precision ?? null,
       geometryAnchorType: selection?.geometry?.anchorType ?? null,
       cacheAgeMs: selection === null ? null : Math.max(0, input.generatedAt - selection.capturedAt),
+      cacheMetricSupported: input.selectionCacheStatus?.supported ?? false,
+      cacheSize: input.selectionCacheStatus?.size ?? null,
+      cacheError: input.selectionCacheError,
       error: input.selectionError,
     },
     lens: {

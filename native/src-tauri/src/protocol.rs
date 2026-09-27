@@ -20,6 +20,8 @@ pub const IPC_MESSAGE_TYPES: &[&str] = &[
     "selection.updated",
     "selection.current",
     "selection.current.result",
+    "selection.cache.status",
+    "selection.cache.status.result",
     "selection.expand",
     "selection.expanded",
     "session.list",
@@ -127,6 +129,12 @@ pub enum StaleRevisionReason {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionCurrentResultPayload {
     pub snapshot: Option<SelectionSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionCacheStatusResultPayload {
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -701,7 +709,7 @@ impl IpcMessage {
                 require_text(&payload.snapshot_id, "snapshotId")?;
                 require_safe_integer(payload.revision, "revision")?;
             }
-            "selection.current" | "session.list" => {
+            "selection.current" | "selection.cache.status" | "session.list" => {
                 let _: EmptyPayload = typed_payload(&self.payload)?;
             }
             "selection.current.result" => {
@@ -709,6 +717,10 @@ impl IpcMessage {
                 if let Some(snapshot) = payload.snapshot {
                     snapshot.validate()?;
                 }
+            }
+            "selection.cache.status.result" => {
+                let payload: SelectionCacheStatusResultPayload = typed_payload(&self.payload)?;
+                require_safe_integer(payload.size, "size")?;
             }
             "selection.expand" => {
                 let payload: SelectionExpandPayload = typed_payload(&self.payload)?;
@@ -1258,6 +1270,8 @@ mod tests {
         include_str!("../../../tests/protocol/session.history.response.json"),
         include_str!("../../../tests/protocol/agent.event.json"),
         include_str!("../../../tests/protocol/selection.expanded.response.json"),
+        include_str!("../../../tests/protocol/selection.cache.status.request.json"),
+        include_str!("../../../tests/protocol/selection.cache.status.response.json"),
         include_str!("../../../tests/protocol/error.response.json"),
     ];
     const INVALID_FIXTURES: &[&str] = &[

@@ -5,6 +5,7 @@ import {
   getCurrentSelection,
   getInteractionGuardStatus,
   getProcessMemoryStatus,
+  getSelectionCacheStatus,
   getWindowLifecycleStatus,
   listSessions,
   pingBridge,
@@ -12,6 +13,7 @@ import {
   type CaptureStatus,
   type InteractionStatus,
   type ProcessMemoryStatus,
+  type SelectionCacheStatus,
   type WindowLifecycleStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
@@ -101,6 +103,7 @@ export default function DiagnosticsPage({
     copyFailed: '无法访问剪贴板。',
     privacy: '快照不包含选区正文或对话历史。',
     unavailable: '暂无数据',
+    unsupported: '未提供',
     notReported: '宿主未提供',
     updated: '上次检查',
     harness: 'Harness',
@@ -151,6 +154,9 @@ export default function DiagnosticsPage({
     capabilities: '可用能力',
     geometry: '定位精度',
     cacheAge: '缓存时长',
+    cacheMetric: '缓存指标',
+    cacheSize: '缓存条目数',
+    cacheError: '缓存读取错误',
     lensState: 'Lens 状态',
     pinned: '固定选区',
     focusEpoch: '焦点版本',
@@ -178,6 +184,7 @@ export default function DiagnosticsPage({
     copyFailed: 'Clipboard is unavailable.',
     privacy: 'The snapshot excludes selected text and conversation history.',
     unavailable: 'No data',
+    unsupported: 'Not provided',
     notReported: 'Not reported by host',
     updated: 'Last checked',
     harness: 'Harness',
@@ -228,6 +235,9 @@ export default function DiagnosticsPage({
     capabilities: 'Capabilities',
     geometry: 'Geometry precision',
     cacheAge: 'Cache age',
+    cacheMetric: 'Cache metric',
+    cacheSize: 'Cache entries',
+    cacheError: 'Cache read error',
     lensState: 'Lens state',
     pinned: 'Pinned selection',
     focusEpoch: 'Focus epoch',
@@ -270,13 +280,16 @@ export default function DiagnosticsPage({
     const windowLifecycle: LoadResult<WindowLifecycleStatus> = readResult(windowLifecycleResult)
     let selection: LoadResult<SelectionSnapshot | null> = { value: null, error: null }
     let sessions: LoadResult<readonly unknown[]> = { value: null, error: null }
+    let selectionCache: LoadResult<SelectionCacheStatus> = { value: null, error: null }
     if (bridge.value?.connected) {
-      const [selectionResult, sessionsResult] = await Promise.allSettled([
+      const [selectionResult, sessionsResult, selectionCacheResult] = await Promise.allSettled([
         getCurrentSelection(),
         listSessions(),
+        getSelectionCacheStatus(),
       ])
       selection = readResult(selectionResult)
       sessions = readResult(sessionsResult)
+      selectionCache = readResult(selectionCacheResult)
     }
     const refreshedAt = Date.now()
     setPageState({
@@ -292,6 +305,8 @@ export default function DiagnosticsPage({
         processMemoryError: memory.error,
         windowLifecycleStatus: windowLifecycle.value,
         windowLifecycleError: windowLifecycle.error,
+        selectionCacheStatus: selectionCache.value,
+        selectionCacheError: selectionCache.error,
         selection: selection.value,
         selectionError: selection.error,
         sessionCount: sessions.value?.length ?? null,
@@ -423,6 +438,13 @@ export default function DiagnosticsPage({
           {row(labels.capabilities, capabilityList)}
           {row(labels.geometry, diagnostics?.selection.geometryPrecision)}
           {row(labels.cacheAge, diagnostics?.selection.cacheAgeMs === null || diagnostics?.selection.cacheAgeMs === undefined ? null : `${diagnostics.selection.cacheAgeMs} ms`)}
+          {row(labels.cacheMetric, statusLabel(locale, pageState?.input.selectionCacheError !== null && pageState?.input.selectionCacheError !== undefined
+            ? 'unknown'
+            : pageState?.input.bridge?.connected
+              ? pageState.input.selectionCacheStatus?.supported ? 'available' : labels.unsupported
+              : 'unavailable'))}
+          {row(labels.cacheSize, diagnostics?.selection.cacheSize)}
+          {errorRow(labels.cacheError, diagnostics?.selection.cacheError ?? null)}
           {errorRow(labels.lastError, diagnostics?.selection.error ?? null)}
         </dl>
       </section>

@@ -1,0 +1,6 @@
+{
+  "protocol": 4,
+  "id": "selection-cache-status-1",
+  "type": "selection.cache.status",
+  "payload": {}
+}

@@ -94,7 +94,7 @@ describe('BridgeMessageRouter', () => {
     expect(() => new SelectionCompanionBridgeService(clientContext, { maxClients: 0 })).toThrow('positive')
   })
 
-  it('negotiates Protocol V4 and advertises session capabilities', async () => {
+  it('negotiates Protocol V4 and advertises bridge capabilities', async () => {
     const { router } = setup()
     const response = await router.handle(parseIpcMessage({
       protocol: IPC_PROTOCOL_VERSION,
@@ -173,6 +173,26 @@ describe('BridgeMessageRouter', () => {
     if (response.type !== 'selection.current.result') throw new Error('unexpected response')
     expect(response.payload.snapshot?.id).toBe('selection-1')
     expect(Object.isFrozen(response.payload.snapshot)).toBe(true)
+  })
+
+  it('reports the live selection cache size through the negotiated diagnostic capability', async () => {
+    const { ctx, router } = setup()
+    await router.handle(selectionUpdate())
+    const response = await router.handle(parseIpcMessage({
+      protocol: IPC_PROTOCOL_VERSION,
+      id: 'cache-status-1',
+      type: 'selection.cache.status',
+      payload: {},
+    }))
+
+    expect(BRIDGE_CAPABILITIES).toContain('selection.cache.status')
+    expect(response).toEqual({
+      protocol: IPC_PROTOCOL_VERSION,
+      id: 'cache-status-1',
+      type: 'selection.cache.status.result',
+      payload: { size: 1 },
+    })
+    ctx.selectionContext.clear()
   })
 
   it('routes a bounded durable history page and keeps its raw cursor fields', async () => {

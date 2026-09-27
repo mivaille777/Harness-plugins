@@ -15,6 +15,8 @@ export const IPC_MESSAGE_TYPES = [
   'selection.updated',
   'selection.current',
   'selection.current.result',
+  'selection.cache.status',
+  'selection.cache.status.result',
   'selection.expand',
   'selection.expanded',
   'session.list',
@@ -183,6 +185,8 @@ export type IpcMessage =
     }>
   | IpcEnvelope<'selection.current', Record<string, never>>
   | IpcEnvelope<'selection.current.result', { readonly snapshot: SelectionSnapshot | null }>
+  | IpcEnvelope<'selection.cache.status', Record<string, never>>
+  | IpcEnvelope<'selection.cache.status.result', { readonly size: number }>
   | IpcEnvelope<'selection.expand', SelectionExpandPayload>
   | IpcEnvelope<'selection.expanded', SelectionExpandedPayload>
   | IpcEnvelope<'session.list', Record<string, never>>
@@ -433,12 +437,15 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         reason: z.literal('stale-revision').optional(),
       }).strict().parse(payload)
     case 'selection.current':
+    case 'selection.cache.status':
     case 'session.list':
       return emptyPayloadSchema.parse(payload)
     case 'selection.current.result': {
       const parsed = z.object({ snapshot: z.unknown().nullable() }).strict().parse(payload)
       return { snapshot: parsed.snapshot === null ? null : parseSelectionSnapshot(parsed.snapshot) }
     }
+    case 'selection.cache.status.result':
+      return z.object({ size: nonNegativeSafeInteger }).strict().parse(payload)
     case 'selection.expand':
       return z.object({ snapshotId: nonEmptyString, scope: scopeSchema }).strict().parse(payload)
     case 'selection.expanded':
