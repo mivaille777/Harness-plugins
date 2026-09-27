@@ -25,6 +25,7 @@ const nativeCommands = [
   'interaction_guard_status',
   'restore_source_focus',
   'runtime_memory_status',
+  'runtime_window_lifecycle_status',
 ] as const
 
 type NativeCommand = typeof nativeCommands[number]
@@ -50,6 +51,12 @@ export interface ProcessMemoryStatus {
   readonly workingSetBytes: number | null
   readonly privateBytes: number | null
   readonly error: string | null
+}
+
+export interface WindowLifecycleStatus {
+  readonly createdCount: number
+  readonly destroyedCount: number
+  readonly activeCount: number
 }
 
 export interface CaptureMetrics {
@@ -186,6 +193,10 @@ export function getBridgeStatus(): Promise<BridgeStatus> {
 
 export function getProcessMemoryStatus(): Promise<ProcessMemoryStatus> {
   return invokeNative<ProcessMemoryStatus>('runtime_memory_status')
+}
+
+export function getWindowLifecycleStatus(): Promise<WindowLifecycleStatus> {
+  return invokeNative<WindowLifecycleStatus>('runtime_window_lifecycle_status')
 }
 
 export function connectBridge(): Promise<BridgeStatus> {

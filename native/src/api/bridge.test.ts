@@ -10,6 +10,7 @@ import {
   createSession,
   expandSelection,
   getProcessMemoryStatus,
+  getWindowLifecycleStatus,
   listSessions,
   readSessionHistory,
   submitSessionPrompt,
@@ -136,6 +137,14 @@ describe('runtime diagnostics commands', () => {
 
     await expect(getProcessMemoryStatus()).resolves.toEqual(status)
     expect(tauri.invoke).toHaveBeenCalledWith('runtime_memory_status')
+  })
+
+  it('reads window lifecycle counters through the typed native command', async () => {
+    const status = { createdCount: 2, destroyedCount: 1, activeCount: 1 }
+    tauri.invoke.mockResolvedValue(status)
+
+    await expect(getWindowLifecycleStatus()).resolves.toEqual(status)
+    expect(tauri.invoke).toHaveBeenCalledWith('runtime_window_lifecycle_status')
   })
 })
 

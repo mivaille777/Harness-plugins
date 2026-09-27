@@ -3,6 +3,7 @@ import type {
   CaptureStatus,
   InteractionStatus,
   ProcessMemoryStatus,
+  WindowLifecycleStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
 import { emptyLensPerformanceState, type LensPerformanceState } from './lens/performance'
@@ -19,6 +20,8 @@ export interface DiagnosticsInput {
   readonly interactionError: string | null
   readonly processMemoryStatus: ProcessMemoryStatus | null
   readonly processMemoryError: string | null
+  readonly windowLifecycleStatus: WindowLifecycleStatus | null
+  readonly windowLifecycleError: string | null
   readonly selection: SelectionSnapshot | null
   readonly selectionError: string | null
   readonly sessionCount: number | null
@@ -138,6 +141,10 @@ export function buildDiagnosticsSnapshot(
       workingSetBytes: input.processMemoryStatus?.workingSetBytes ?? null,
       privateBytes: input.processMemoryStatus?.privateBytes ?? null,
       memoryError: input.processMemoryStatus?.error ?? input.processMemoryError,
+      windowCreatedCount: input.windowLifecycleStatus?.createdCount ?? null,
+      windowDestroyedCount: input.windowLifecycleStatus?.destroyedCount ?? null,
+      windowActiveCount: input.windowLifecycleStatus?.activeCount ?? null,
+      windowLifecycleError: input.windowLifecycleError,
     },
     session: {
       boundSessionId: input.sessionId,

@@ -11,6 +11,7 @@ const bridgeMocks = vi.hoisted(() => ({
   getCurrentSelection: vi.fn(),
   getInteractionGuardStatus: vi.fn(),
   getProcessMemoryStatus: vi.fn(),
+  getWindowLifecycleStatus: vi.fn(),
   listSessions: vi.fn(),
   pingBridge: vi.fn(),
 }))
@@ -69,6 +70,7 @@ describe('DiagnosticsPage', () => {
       privateBytes: 67_108_864,
       error: null,
     })
+    bridgeMocks.getWindowLifecycleStatus.mockResolvedValue({ createdCount: 2, destroyedCount: 0, activeCount: 2 })
     bridgeMocks.getCurrentSelection.mockRejectedValue(new Error('request timed out'))
     bridgeMocks.listSessions.mockResolvedValue([])
   })
@@ -105,6 +107,9 @@ describe('DiagnosticsPage', () => {
     expect(screen.getByText('50.0 MiB')).toBeInTheDocument()
     expect(screen.getByText('Private bytes')).toBeInTheDocument()
     expect(screen.getByText('64.0 MiB')).toBeInTheDocument()
+    expect(screen.getByText('Windows created').parentElement).toHaveTextContent('2')
+    expect(screen.getByText('Windows destroyed').parentElement).toHaveTextContent('0')
+    expect(screen.getByText('Windows active').parentElement).toHaveTextContent('2')
     expect(screen.getAllByText('Error: request timed out').length).toBeGreaterThan(0)
     for (const heading of ['Harness', 'Bridge', 'Capture', 'Runtime', 'Selection', 'Lens', 'Session']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()

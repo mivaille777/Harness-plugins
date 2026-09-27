@@ -5,12 +5,14 @@ import {
   getCurrentSelection,
   getInteractionGuardStatus,
   getProcessMemoryStatus,
+  getWindowLifecycleStatus,
   listSessions,
   pingBridge,
   type BridgeStatus,
   type CaptureStatus,
   type InteractionStatus,
   type ProcessMemoryStatus,
+  type WindowLifecycleStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
 import type { LensPerformanceState } from './lens/performance'
@@ -127,6 +129,10 @@ export default function DiagnosticsPage({
     memoryAvailable: '内存指标',
     workingSet: '工作集',
     privateBytes: '私有内存',
+    windowScope: '统计范围',
+    windowsCreated: '窗口创建数',
+    windowsDestroyed: '窗口销毁数',
+    windowsActive: '当前窗口数',
     lastError: '最近错误',
     currentProbe: '选区查询',
     provider: 'Provider',
@@ -200,6 +206,10 @@ export default function DiagnosticsPage({
     memoryAvailable: 'Memory metrics',
     workingSet: 'Working set',
     privateBytes: 'Private bytes',
+    windowScope: 'Window scope',
+    windowsCreated: 'Windows created',
+    windowsDestroyed: 'Windows destroyed',
+    windowsActive: 'Windows active',
     lastError: 'Last error',
     currentProbe: 'selection.current',
     provider: 'Provider',
@@ -241,11 +251,12 @@ export default function DiagnosticsPage({
     inFlight.current = true
     setLoading(true)
     setCopyResult(null)
-    const [pingResult, captureResult, interactionResult, memoryResult] = await Promise.allSettled([
+    const [pingResult, captureResult, interactionResult, memoryResult, windowLifecycleResult] = await Promise.allSettled([
       pingBridge(),
       getCaptureStatus(),
       getInteractionGuardStatus(),
       getProcessMemoryStatus(),
+      getWindowLifecycleStatus(),
     ])
     let bridge = readResult(pingResult)
     if (bridge.error !== null) {
@@ -256,6 +267,7 @@ export default function DiagnosticsPage({
     const capture = readResult(captureResult)
     const interaction = readResult(interactionResult)
     const memory: LoadResult<ProcessMemoryStatus> = readResult(memoryResult)
+    const windowLifecycle: LoadResult<WindowLifecycleStatus> = readResult(windowLifecycleResult)
     let selection: LoadResult<SelectionSnapshot | null> = { value: null, error: null }
     let sessions: LoadResult<readonly unknown[]> = { value: null, error: null }
     if (bridge.value?.connected) {
@@ -278,6 +290,8 @@ export default function DiagnosticsPage({
         interactionError: interaction.error,
         processMemoryStatus: memory.value,
         processMemoryError: memory.error,
+        windowLifecycleStatus: windowLifecycle.value,
+        windowLifecycleError: windowLifecycle.error,
         selection: selection.value,
         selectionError: selection.error,
         sessionCount: sessions.value?.length ?? null,
@@ -393,6 +407,11 @@ export default function DiagnosticsPage({
           {row(labels.workingSet, diagnostics?.runtime.workingSetBytes === null || diagnostics?.runtime.workingSetBytes === undefined ? null : `${(diagnostics.runtime.workingSetBytes / (1024 * 1024)).toFixed(1)} MiB`)}
           {row(labels.privateBytes, diagnostics?.runtime.privateBytes === null || diagnostics?.runtime.privateBytes === undefined ? null : `${(diagnostics.runtime.privateBytes / (1024 * 1024)).toFixed(1)} MiB`)}
           {errorRow(labels.lastError, diagnostics?.runtime.memoryError ?? null)}
+          {row(labels.windowScope, zh ? 'Tauri 配置窗口，自进程启动累计' : 'Tauri configured windows, counted since process start')}
+          {row(labels.windowsCreated, diagnostics?.runtime.windowCreatedCount)}
+          {row(labels.windowsDestroyed, diagnostics?.runtime.windowDestroyedCount)}
+          {row(labels.windowsActive, diagnostics?.runtime.windowActiveCount)}
+          {errorRow(labels.lastError, diagnostics?.runtime.windowLifecycleError ?? null)}
         </dl>
       </section>
       <section className="diagnostics-card">

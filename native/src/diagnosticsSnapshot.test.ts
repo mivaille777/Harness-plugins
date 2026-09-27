@@ -56,6 +56,8 @@ const baseInput = (): DiagnosticsInput => ({
     error: null,
   },
   processMemoryError: null,
+  windowLifecycleStatus: { createdCount: 2, destroyedCount: 1, activeCount: 1 },
+  windowLifecycleError: null,
   selection: {
     id: 'snapshot-1',
     revision: 7,
@@ -143,6 +145,10 @@ describe('runtime diagnostics snapshot', () => {
       workingSetBytes: 52_428_800,
       privateBytes: 67_108_864,
       memoryError: null,
+      windowCreatedCount: 2,
+      windowDestroyedCount: 1,
+      windowActiveCount: 1,
+      windowLifecycleError: null,
     })
     expect(snapshot.capture.fallbackLatencyP50Ms).toBe(7)
     expect(snapshot.capture.fallbackLatencyP95Ms).toBe(12)

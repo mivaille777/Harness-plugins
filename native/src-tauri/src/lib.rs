@@ -9,13 +9,28 @@ pub mod providers;
 pub mod runtime_diagnostics;
 pub mod submission;
 pub mod submission_material;
+pub mod window_lifecycle;
 
 use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
         .manage(bridge::BridgeRuntime::from_environment().expect("invalid bridge configuration"))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(metrics) = window
+                    .app_handle()
+                    .try_state::<window_lifecycle::WindowLifecycleMetrics>()
+                {
+                    metrics.record_destroyed();
+                }
+            }
+        })
         .setup(|app| {
+            let initial_window_count = app.webview_windows().len();
+            app.manage(window_lifecycle::WindowLifecycleMetrics::with_initial_windows(
+                initial_window_count,
+            ));
             #[cfg(windows)]
             {
                 let mut bridge_events = app.state::<bridge::BridgeRuntime>().subscribe_events();
@@ -68,6 +83,7 @@ pub fn run() {
             interaction_guard::interaction_guard_status,
             focus::restore_source_focus,
             runtime_diagnostics::runtime_memory_status,
+            window_lifecycle::runtime_window_lifecycle_status,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dsh-selection-companion native shell");
