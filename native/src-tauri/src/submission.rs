@@ -449,7 +449,27 @@ mod tests {
 
         assert_eq!(result.session_id, "session-ec05");
         assert_eq!(submitted.type_name, "session.submit");
-        assert_eq!(submitted.payload["material"], material_value);
+        assert_eq!(
+            submitted.payload["material"],
+            serde_json::json!({
+                "snapshotId": "snapshot-ec05",
+                "revision": 5,
+                "capturedAt": 5_000,
+                "selection": { "text": "fixed selection" },
+                "source": {
+                    "kind": "browser",
+                    "app": "Chrome"
+                },
+                "authorizedScope": "local",
+                "actualScope": "local",
+                "completeness": "partial",
+                "truncated": true,
+                "context": {
+                    "before": "EC05_AUTHORIZED_BEFORE",
+                    "after": "EC05_AUTHORIZED_AFTER"
+                }
+            })
+        );
         assert_eq!(submitted.payload["material"]["authorizedScope"], "local");
         assert_eq!(
             submitted.payload["material"]["context"]["before"],

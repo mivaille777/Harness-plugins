@@ -1644,19 +1644,14 @@ mod tests {
                 "snapshotId": "snapshot-submit",
                 "revision": 1,
                 "capturedAt": 1_000,
-                "selection": { "text": "fixed selected material", "language": null },
+                "selection": { "text": "fixed selected material" },
                 "source": {
                     "kind": "browser",
-                    "app": "Chrome",
-                    "process": null,
-                    "windowTitle": null
+                    "app": "Chrome"
                 },
                 "document": {
                     "title": "Fixed document",
-                    "url": "https://example.test/fixed",
-                    "filePath": null,
-                    "section": null,
-                    "frameUrl": null
+                    "url": "https://example.test/fixed"
                 },
                 "authorizedScope": "selection",
                 "actualScope": "selection",
