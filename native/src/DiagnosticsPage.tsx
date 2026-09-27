@@ -4,11 +4,13 @@ import {
   getCaptureStatus,
   getCurrentSelection,
   getInteractionGuardStatus,
+  getProcessMemoryStatus,
   listSessions,
   pingBridge,
   type BridgeStatus,
   type CaptureStatus,
   type InteractionStatus,
+  type ProcessMemoryStatus,
 } from './api/bridge'
 import type { LensState } from './lens/store'
 import type { LensPerformanceState } from './lens/performance'
@@ -105,6 +107,7 @@ export default function DiagnosticsPage({
     selection: '选区',
     lens: 'Lens',
     session: '会话',
+    runtime: '运行时',
     overall: '链路状态',
     version: 'Harness 版本',
     profile: 'Profile',
@@ -120,6 +123,10 @@ export default function DiagnosticsPage({
     latency: '最近延迟',
     reconnects: '重连次数',
     requestTimeouts: '请求超时数',
+    memoryScope: '采样进程',
+    memoryAvailable: '内存指标',
+    workingSet: '工作集',
+    privateBytes: '私有内存',
     lastError: '最近错误',
     currentProbe: '选区查询',
     provider: 'Provider',
@@ -173,6 +180,7 @@ export default function DiagnosticsPage({
     selection: 'Selection',
     lens: 'Lens',
     session: 'Session',
+    runtime: 'Runtime',
     overall: 'Overall health',
     version: 'Harness version',
     profile: 'Profile',
@@ -188,6 +196,10 @@ export default function DiagnosticsPage({
     latency: 'Recent latency',
     reconnects: 'Reconnect count',
     requestTimeouts: 'Request timeouts',
+    memoryScope: 'Sampled process',
+    memoryAvailable: 'Memory metrics',
+    workingSet: 'Working set',
+    privateBytes: 'Private bytes',
     lastError: 'Last error',
     currentProbe: 'selection.current',
     provider: 'Provider',
@@ -229,10 +241,11 @@ export default function DiagnosticsPage({
     inFlight.current = true
     setLoading(true)
     setCopyResult(null)
-    const [pingResult, captureResult, interactionResult] = await Promise.allSettled([
+    const [pingResult, captureResult, interactionResult, memoryResult] = await Promise.allSettled([
       pingBridge(),
       getCaptureStatus(),
       getInteractionGuardStatus(),
+      getProcessMemoryStatus(),
     ])
     let bridge = readResult(pingResult)
     if (bridge.error !== null) {
@@ -242,6 +255,7 @@ export default function DiagnosticsPage({
     }
     const capture = readResult(captureResult)
     const interaction = readResult(interactionResult)
+    const memory: LoadResult<ProcessMemoryStatus> = readResult(memoryResult)
     let selection: LoadResult<SelectionSnapshot | null> = { value: null, error: null }
     let sessions: LoadResult<readonly unknown[]> = { value: null, error: null }
     if (bridge.value?.connected) {
@@ -262,6 +276,8 @@ export default function DiagnosticsPage({
         captureError: capture.error,
         interaction: interaction.value,
         interactionError: interaction.error,
+        processMemoryStatus: memory.value,
+        processMemoryError: memory.error,
         selection: selection.value,
         selectionError: selection.error,
         sessionCount: sessions.value?.length ?? null,
@@ -367,6 +383,16 @@ export default function DiagnosticsPage({
           {row(labels.deduplicated, diagnostics?.capture.deduplicatedCount)}
           {row(labels.dropped, diagnostics?.capture.droppedTriggerCount)}
           {errorRow(labels.lastError, diagnostics?.capture.error ?? pageState?.input.captureError ?? null)}
+        </dl>
+      </section>
+      <section className="diagnostics-card">
+        <h2>{labels.runtime}</h2>
+        <dl>
+          {row(labels.memoryScope, zh ? 'Native Companion 进程' : 'Native Companion process')}
+          {row(labels.memoryAvailable, statusLabel(locale, diagnostics?.runtime.processMemoryAvailable ? 'available' : 'unavailable'))}
+          {row(labels.workingSet, diagnostics?.runtime.workingSetBytes === null || diagnostics?.runtime.workingSetBytes === undefined ? null : `${(diagnostics.runtime.workingSetBytes / (1024 * 1024)).toFixed(1)} MiB`)}
+          {row(labels.privateBytes, diagnostics?.runtime.privateBytes === null || diagnostics?.runtime.privateBytes === undefined ? null : `${(diagnostics.runtime.privateBytes / (1024 * 1024)).toFixed(1)} MiB`)}
+          {errorRow(labels.lastError, diagnostics?.runtime.memoryError ?? null)}
         </dl>
       </section>
       <section className="diagnostics-card">

@@ -11,6 +11,7 @@ const api = vi.hoisted(() => {
     getCurrentSelection: vi.fn(),
     getBridgeStatus: vi.fn(),
     getInteractionGuardStatus: vi.fn(),
+    getProcessMemoryStatus: vi.fn(),
     pingBridge: vi.fn(),
     listSessions: vi.fn(),
     createSession: vi.fn(),
@@ -86,6 +87,7 @@ describe('selection lens', () => {
     api.getCurrentSelection.mockResolvedValue(selection)
     api.getBridgeStatus.mockResolvedValue({ connected: true, endpoint: 'test-pipe', protocol: 4, serverVersion: '0.1.0', lastError: null, lastLatencyMs: 3, reconnectCount: 0, requestTimeoutCount: 0 })
     api.getInteractionGuardStatus.mockResolvedValue({ captureSuppressed: false, shuttingDown: false, generation: 0, activeRequests: 0, activeModes: [] })
+    api.getProcessMemoryStatus.mockResolvedValue({ available: true, workingSetBytes: 52_428_800, privateBytes: 67_108_864, error: null })
     api.pingBridge.mockResolvedValue({ connected: true, endpoint: 'test-pipe', protocol: 4, serverVersion: '0.1.0', lastError: null, lastLatencyMs: 3, reconnectCount: 0, requestTimeoutCount: 0 })
     api.listSessions.mockResolvedValue([])
     api.createSession.mockResolvedValue('session-new')

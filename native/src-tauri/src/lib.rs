@@ -6,6 +6,7 @@ pub mod native_messaging;
 pub mod pipe_connection;
 pub mod protocol;
 pub mod providers;
+pub mod runtime_diagnostics;
 pub mod submission;
 pub mod submission_material;
 
@@ -66,6 +67,7 @@ pub fn run() {
             interaction_guard::interaction_guard_end,
             interaction_guard::interaction_guard_status,
             focus::restore_source_focus,
+            runtime_diagnostics::runtime_memory_status,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dsh-selection-companion native shell");

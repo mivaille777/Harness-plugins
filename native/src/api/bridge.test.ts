@@ -9,6 +9,7 @@ import {
   SubmissionUnknownError,
   createSession,
   expandSelection,
+  getProcessMemoryStatus,
   listSessions,
   readSessionHistory,
   submitSessionPrompt,
@@ -118,6 +119,23 @@ describe('session bridge commands', () => {
     expect(tauri.invoke).toHaveBeenNthCalledWith(1, 'bridge_read_session_history', { sessionId: 'session-1', afterCursor: 4, limit: 5 })
     await expect(unsubscribeSession('session-1', 'sub-1')).resolves.toEqual({ sessionId: 'session-1', subscriptionId: 'sub-1', released: true })
     expect(tauri.invoke).toHaveBeenNthCalledWith(2, 'bridge_unsubscribe_session', { sessionId: 'session-1', subscriptionId: 'sub-1' })
+  })
+})
+
+describe('runtime diagnostics commands', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('reads current-process memory through the typed native command', async () => {
+    const status = {
+      available: true,
+      workingSetBytes: 52_428_800,
+      privateBytes: 67_108_864,
+      error: null,
+    }
+    tauri.invoke.mockResolvedValue(status)
+
+    await expect(getProcessMemoryStatus()).resolves.toEqual(status)
+    expect(tauri.invoke).toHaveBeenCalledWith('runtime_memory_status')
   })
 })
 

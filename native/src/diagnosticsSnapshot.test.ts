@@ -49,6 +49,13 @@ const baseInput = (): DiagnosticsInput => ({
     activeModes: [],
   },
   interactionError: null,
+  processMemoryStatus: {
+    available: true,
+    workingSetBytes: 52_428_800,
+    privateBytes: 67_108_864,
+    error: null,
+  },
+  processMemoryError: null,
   selection: {
     id: 'snapshot-1',
     revision: 7,
@@ -130,6 +137,13 @@ describe('runtime diagnostics snapshot', () => {
     expect(snapshot.lens.passiveEntryVisibleLatencyP50Ms).toBe(23.5)
     expect(snapshot.lens.lensInteractiveLatencyP95Ms).toBe(90)
     expect(snapshot.lens.passiveEntryVisibleSampleCount).toBe(1)
+    expect(snapshot.runtime).toEqual({
+      memoryScope: 'native-companion-process',
+      processMemoryAvailable: true,
+      workingSetBytes: 52_428_800,
+      privateBytes: 67_108_864,
+      memoryError: null,
+    })
     expect(snapshot.capture.fallbackLatencyP50Ms).toBe(7)
     expect(snapshot.capture.fallbackLatencyP95Ms).toBe(12)
     expect(snapshot.selection.cacheAgeMs).toBe(500)

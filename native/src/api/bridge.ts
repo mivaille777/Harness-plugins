@@ -24,6 +24,7 @@ const nativeCommands = [
   'interaction_guard_end',
   'interaction_guard_status',
   'restore_source_focus',
+  'runtime_memory_status',
 ] as const
 
 type NativeCommand = typeof nativeCommands[number]
@@ -42,6 +43,13 @@ export interface BridgeStatus {
   readonly lastLatencyMs: number | null
   readonly reconnectCount: number
   readonly requestTimeoutCount: number
+}
+
+export interface ProcessMemoryStatus {
+  readonly available: boolean
+  readonly workingSetBytes: number | null
+  readonly privateBytes: number | null
+  readonly error: string | null
 }
 
 export interface CaptureMetrics {
@@ -174,6 +182,10 @@ export interface SessionAgentEvent {
 
 export function getBridgeStatus(): Promise<BridgeStatus> {
   return invokeNative<BridgeStatus>('bridge_status')
+}
+
+export function getProcessMemoryStatus(): Promise<ProcessMemoryStatus> {
+  return invokeNative<ProcessMemoryStatus>('runtime_memory_status')
 }
 
 export function connectBridge(): Promise<BridgeStatus> {

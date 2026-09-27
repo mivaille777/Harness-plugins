@@ -10,6 +10,7 @@ const bridgeMocks = vi.hoisted(() => ({
   getCaptureStatus: vi.fn(),
   getCurrentSelection: vi.fn(),
   getInteractionGuardStatus: vi.fn(),
+  getProcessMemoryStatus: vi.fn(),
   listSessions: vi.fn(),
   pingBridge: vi.fn(),
 }))
@@ -62,6 +63,12 @@ describe('DiagnosticsPage', () => {
       activeRequests: 0,
       activeModes: [],
     })
+    bridgeMocks.getProcessMemoryStatus.mockResolvedValue({
+      available: true,
+      workingSetBytes: 52_428_800,
+      privateBytes: 67_108_864,
+      error: null,
+    })
     bridgeMocks.getCurrentSelection.mockRejectedValue(new Error('request timed out'))
     bridgeMocks.listSessions.mockResolvedValue([])
   })
@@ -93,8 +100,13 @@ describe('DiagnosticsPage', () => {
     expect(screen.getByText('Connected')).toBeInTheDocument()
     expect(screen.getByText('Request timeouts')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Runtime' })).toBeInTheDocument()
+    expect(screen.getByText('Working set')).toBeInTheDocument()
+    expect(screen.getByText('50.0 MiB')).toBeInTheDocument()
+    expect(screen.getByText('Private bytes')).toBeInTheDocument()
+    expect(screen.getByText('64.0 MiB')).toBeInTheDocument()
     expect(screen.getAllByText('Error: request timed out').length).toBeGreaterThan(0)
-    for (const heading of ['Harness', 'Bridge', 'Capture', 'Selection', 'Lens', 'Session']) {
+    for (const heading of ['Harness', 'Bridge', 'Capture', 'Runtime', 'Selection', 'Lens', 'Session']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
     }
 
