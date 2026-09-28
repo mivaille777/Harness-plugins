@@ -46,12 +46,13 @@ export default function PassiveEntry() {
       else unlisteners.push(unlisten)
     }
 
-    void register<SelectionCapturedEvent>('selection-captured', event => {
+    const presentSelection = (event: SelectionCapturedEvent) => {
       if (!validSelectionEvent(event)) return
       const readyAtMs = typeof event.readyAtMs === 'number' && Number.isSafeInteger(event.readyAtMs)
         ? event.readyAtMs
         : Date.now()
       const nextBinding = { snapshotId: event.snapshotId, revision: event.revision }
+      if (sameBinding(latest.current, nextBinding)) return
       latest.current = nextBinding
       setBinding(null)
       void getCurrentWindow().hide()
@@ -70,6 +71,13 @@ export default function PassiveEntry() {
           durationMs: Math.max(0, Date.now() - readyAtMs),
         })
       }).catch(() => undefined)
+    }
+
+    void register<SelectionCapturedEvent>('selection-captured', presentSelection).then(async () => {
+      if (disposed || latest.current !== null) return
+      const [snapshot, capture] = await Promise.all([getCurrentSelection(), getCaptureStatus()])
+      if (disposed || latest.current !== null || capture.paused || snapshot === null) return
+      presentSelection({ snapshotId: snapshot.id, revision: snapshot.revision })
     }).catch(() => undefined)
 
     void register<CaptureStatus>('capture-state-changed', status => {

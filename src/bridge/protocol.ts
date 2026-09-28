@@ -13,6 +13,7 @@ export const IPC_MESSAGE_TYPES = [
   'bridge.pong',
   'selection.update',
   'selection.updated',
+  'selection.event',
   'selection.current',
   'selection.current.result',
   'selection.cache.status',
@@ -183,6 +184,7 @@ export type IpcMessage =
       readonly revision: number
       readonly reason?: 'stale-revision'
     }>
+  | IpcEnvelope<'selection.event', { readonly snapshotId: string; readonly revision: number; readonly readyAtMs: number }>
   | IpcEnvelope<'selection.current', Record<string, never>>
   | IpcEnvelope<'selection.current.result', { readonly snapshot: SelectionSnapshot | null }>
   | IpcEnvelope<'selection.cache.status', Record<string, never>>
@@ -436,6 +438,8 @@ function parsePayload(type: IpcMessageType, payload: unknown): unknown {
         revision: nonNegativeSafeInteger,
         reason: z.literal('stale-revision').optional(),
       }).strict().parse(payload)
+    case 'selection.event':
+      return z.object({ snapshotId: nonEmptyString, revision: nonNegativeSafeInteger, readyAtMs: nonNegativeSafeInteger }).strict().parse(payload)
     case 'selection.current':
     case 'selection.cache.status':
     case 'session.list':

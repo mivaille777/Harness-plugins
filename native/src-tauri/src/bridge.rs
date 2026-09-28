@@ -285,7 +285,7 @@ impl BridgeRuntime {
             type_name: "bridge.hello".to_owned(),
             payload: serde_json::json!({
                 "client": {
-                    "name": "dsh-selection-companion-native",
+                    "name": "dsh-selection-companion-native-events",
                     "version": env!("CARGO_PKG_VERSION"),
                     "platform": "windows"
                 },

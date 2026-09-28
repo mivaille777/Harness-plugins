@@ -18,6 +18,7 @@ pub const IPC_MESSAGE_TYPES: &[&str] = &[
     "bridge.pong",
     "selection.update",
     "selection.updated",
+    "selection.event",
     "selection.current",
     "selection.current.result",
     "selection.cache.status",
@@ -117,6 +118,14 @@ pub struct SelectionUpdatedPayload {
     pub revision: u64,
     #[serde(default)]
     pub reason: Option<StaleRevisionReason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionEventPayload {
+    pub snapshot_id: String,
+    pub revision: u64,
+    pub ready_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -708,6 +717,12 @@ impl IpcMessage {
                 let payload: SelectionUpdatedPayload = typed_payload(&self.payload)?;
                 require_text(&payload.snapshot_id, "snapshotId")?;
                 require_safe_integer(payload.revision, "revision")?;
+            }
+            "selection.event" => {
+                let payload: SelectionEventPayload = typed_payload(&self.payload)?;
+                require_text(&payload.snapshot_id, "snapshotId")?;
+                require_safe_integer(payload.revision, "revision")?;
+                require_safe_integer(payload.ready_at_ms, "readyAtMs")?;
             }
             "selection.current" | "selection.cache.status" | "session.list" => {
                 let _: EmptyPayload = typed_payload(&self.payload)?;

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createServer, type Server, type Socket } from 'node:net'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { encodeIpcFrame, IpcFrameDecoder } from './frame.js'
@@ -49,6 +50,7 @@ export class SelectionCompanionBridgeService extends Service {
   private readonly maxClients: number
   private readonly maxPendingWriteBytes: number
   private readonly clients = new Set<Socket>()
+  private readonly selectionListeners = new Set<(message: IpcMessage) => void>()
   private readonly router: BridgeMessageRouter
   private server: Server | undefined
   private listening = false
@@ -157,6 +159,7 @@ export class SelectionCompanionBridgeService extends Service {
       })).finally(() => { pendingWriteBytes -= frame.byteLength })
       writes.catch(error => { socket.destroy(error) })
     }
+    let nativeSelectionListener = false
 
     const subscriptions: { dispose(): void }[] = []
     socket.on('data', chunk => {
@@ -179,6 +182,27 @@ export class SelectionCompanionBridgeService extends Service {
             write(response)
             responseWritten = true
             for (const event of queuedEvents) write(event)
+            if (message.type === 'bridge.hello'
+              && response.type === 'bridge.hello.result'
+              && message.payload.client.name === 'dsh-selection-companion-native-events') {
+              this.selectionListeners.add(write)
+              nativeSelectionListener = true
+            }
+            if (message.type === 'selection.update'
+              && response.type === 'selection.updated'
+              && response.payload.accepted) {
+              const event: IpcMessage = {
+                protocol: IPC_PROTOCOL_VERSION,
+                id: `selection-event-${randomUUID()}`,
+                type: 'selection.event',
+                payload: {
+                  snapshotId: response.payload.snapshotId,
+                  revision: response.payload.revision,
+                  readyAtMs: Date.now(),
+                },
+              }
+              for (const listener of this.selectionListeners) listener(event)
+            }
           }).catch(error => { write(this.errorResponse(error)) })
         }
       } catch (error) {
@@ -201,6 +225,7 @@ export class SelectionCompanionBridgeService extends Service {
 
     socket.once('close', () => {
       closed = true
+      if (nativeSelectionListener) this.selectionListeners.delete(write)
       decoder.reset()
       for (const subscription of subscriptions) subscription.dispose()
       this.clients.delete(socket)

@@ -10,6 +10,7 @@ export const BRIDGE_CAPABILITIES = [
   'selection.current',
   'selection.cache.status',
   'selection.update',
+  'selection.event',
   'selection.expand',
   'session.list',
   'session.history',

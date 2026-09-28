@@ -5,6 +5,8 @@ param(
 
     [string]$BinaryPath = '.\native\src-tauri\target\debug\dsh-selection-companion-host.exe',
 
+    [string]$ManifestDirectory = '',
+
     [ValidateSet('Chrome', 'Chromium', 'Edge', 'Both', 'All')]
     [string]$Browser = 'Both'
 )
@@ -12,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $nativeHostName = 'io.github.mivaille777.dsh_selection_companion'
 $resolvedBinary = (Resolve-Path $BinaryPath).Path
-$manifestDirectory = Join-Path $env:LOCALAPPDATA 'DeepSeekSelectionCompanion'
+$manifestDirectory = if ($ManifestDirectory -ne '') { $ManifestDirectory } else { Join-Path $env:LOCALAPPDATA 'DeepSeekSelectionCompanion' }
 $manifestPath = Join-Path $manifestDirectory 'native-messaging-host.json'
 New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
 

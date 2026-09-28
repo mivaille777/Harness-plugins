@@ -41,6 +41,22 @@ pub fn run() {
                     loop {
                         match bridge_events.recv().await {
                             Ok(event) => {
+                                if event.type_name == "selection.event" {
+                                    if let Ok(payload) =
+                                        serde_json::from_value::<protocol::SelectionEventPayload>(
+                                            event.payload.clone(),
+                                        )
+                                    {
+                                        let _ = event_app.emit(
+                                            "selection-captured",
+                                            serde_json::json!({
+                                                "snapshotId": payload.snapshot_id,
+                                                "revision": payload.revision,
+                                                "readyAtMs": payload.ready_at_ms,
+                                            }),
+                                        );
+                                    }
+                                }
                                 let _ = event_app.emit("native-bridge-event", event);
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {

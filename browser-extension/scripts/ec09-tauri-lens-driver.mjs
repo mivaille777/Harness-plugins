@@ -227,12 +227,13 @@ async function startFixtureServer() {
   }
 }
 
-async function registerNativeHost(extensionId, binaryPath, env) {
+async function registerNativeHost(extensionId, binaryPath, env, dirs) {
   const result = await runProcess('powershell.exe', [
     '-NoProfile', '-ExecutionPolicy', 'Bypass',
     '-File', join(repoRoot, 'scripts', 'register-native-host.ps1'),
     '-ExtensionId', extensionId,
     '-BinaryPath', binaryPath,
+    '-ManifestDirectory', join(dirs.root, 'native-host-manifest'),
     '-Browser', 'Chromium',
   ], { cwd: repoRoot, env, timeoutMs: 20_000 })
   if (result.code !== 0) throw new Error(`native host registration failed: ${redactOutput(result.stderr).trim()}`)
@@ -257,7 +258,7 @@ async function createRealBrowserSelection({ extensionDist, nativeHost, endpoint,
   if (worker === undefined) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 })
   const extensionId = worker.url().split('/')[2]
   if (extensionId === undefined || !/^[a-p]{32}$/.test(extensionId)) throw new Error(`unexpected extension id ${extensionId ?? 'missing'}`)
-  await registerNativeHost(extensionId, nativeHost, env)
+  await registerNativeHost(extensionId, nativeHost, env, dirs)
   const page = await context.newPage()
   await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#target')
@@ -340,6 +341,12 @@ function createWebDriver(base = 'http://127.0.0.1:4444') {
     },
     async execute(script, args = []) {
       return await request(`/session/${sessionId}/execute/sync`, 'POST', { script, args })
+    },
+    async windows() {
+      return await request(`/session/${sessionId}/window/handles`)
+    },
+    async switchWindow(handle) {
+      await request(`/session/${sessionId}/window`, 'POST', { handle })
     },
     async click(selector) {
       const id = await find(selector)
@@ -562,6 +569,32 @@ export async function runEc09TauriLensDriver(env = process.env) {
     await webdriver.attach(`127.0.0.1:${debugPort}`)
     report.realWindow = true
     report.diagnostics.webview2DebugPort = debugPort
+
+    const windows = await webdriver.windows()
+    const windowViews = await waitUntil(async () => {
+      const views = []
+      for (const handle of windows) {
+        await webdriver.switchWindow(handle)
+        views.push({
+          handle,
+          ...await webdriver.execute(`return {
+            title: document.title,
+            entry: !!document.querySelector('[data-testid="passive-entry"]'),
+            entryButton: !!document.querySelector('.passive-entry-button'),
+            lens: !!document.querySelector('[data-testid="selected-text"]'),
+          }`),
+        })
+      }
+      return views.some(view => view.entryButton) ? views : null
+    }, 'Tauri passive entry', 15_000)
+    report.diagnostics.windowViews = windowViews
+    const entryView = windowViews.find(view => view.entryButton)
+    if (entryView === undefined) throw new Error('Tauri passive entry did not appear for browser selection')
+    await webdriver.switchWindow(entryView.handle)
+    await webdriver.click('.passive-entry-button')
+    const mainView = windowViews.find(view => !view.entry)
+    if (mainView === undefined) throw new Error('Tauri Lens main window is unavailable')
+    await webdriver.switchWindow(mainView.handle)
 
     await waitUntil(async () => (await webdriver.execute(`return document.querySelector('[data-testid="selected-text"]')?.textContent || ''`)).includes(EC09_LENS_SELECTION), 'Tauri selected-text')
     const idlePath = join(screenshotDir, 'idle.png')
