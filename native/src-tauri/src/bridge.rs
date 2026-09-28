@@ -2289,10 +2289,12 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn selection_update_reconnects_after_harness_closes_an_idle_pipe() {
+    async fn selection_update_recovers_from_twenty_named_pipe_disconnects() {
         use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
         use tokio::net::windows::named_pipe::ServerOptions;
-        use tokio::sync::oneshot;
+        use tokio::sync::{mpsc, oneshot};
+
+        const RECONNECT_COUNT: usize = 20;
 
         async fn read_frame(reader: &mut (impl AsyncRead + Unpin)) -> IpcMessage {
             let mut header = [0_u8; IPC_FRAME_HEADER_BYTES];
@@ -2329,79 +2331,84 @@ mod tests {
             r"\\.\pipe\dsh-selection-companion-selection-reconnect-{}",
             uuid::Uuid::new_v4()
         );
-        let mut first_server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&endpoint)
-            .unwrap();
-        let second_endpoint = endpoint.clone();
-        let (second_ready_tx, second_ready_rx) = oneshot::channel();
+        let server_endpoint = endpoint.clone();
+        let (ready_tx, mut ready_rx) = mpsc::channel(1);
         let (finish_server_tx, finish_server_rx) = oneshot::channel();
-        let (update_tx, update_rx) = oneshot::channel();
+        let mut finish_server_rx = Some(finish_server_rx);
+        let (update_tx, mut update_rx) = mpsc::channel(1);
 
         let server_task = tokio::spawn(async move {
-            first_server.connect().await.unwrap();
-            let first_hello = read_frame(&mut first_server).await;
-            write_frame(&mut first_server, &hello_response(first_hello.id)).await;
+            for cycle in 0..=RECONNECT_COUNT {
+                let mut server = if cycle == 0 {
+                    ServerOptions::new()
+                        .first_pipe_instance(true)
+                        .create(&server_endpoint)
+                        .unwrap()
+                } else {
+                    ServerOptions::new().create(&server_endpoint).unwrap()
+                };
+                ready_tx.send(cycle).await.unwrap();
+                server.connect().await.unwrap();
 
-            // Reproduce Harness' idle-timeout behavior: the server side closes
-            // while Native still retains its apparently connected client handle.
-            drop(first_server);
+                let hello = read_frame(&mut server).await;
+                assert_eq!(hello.type_name, "bridge.hello");
+                write_frame(&mut server, &hello_response(hello.id)).await;
 
-            let mut second_server = ServerOptions::new().create(&second_endpoint).unwrap();
-            let _ = second_ready_tx.send(());
-            second_server.connect().await.unwrap();
+                let update = read_frame(&mut server).await;
+                assert_eq!(update.type_name, "selection.update");
+                write_frame(
+                    &mut server,
+                    &IpcMessage {
+                        protocol: IPC_PROTOCOL_VERSION,
+                        id: update.id.clone(),
+                        type_name: "selection.updated".to_owned(),
+                        payload: serde_json::json!({
+                            "accepted": true,
+                            "snapshotId": "snapshot-submit",
+                            "revision": 1
+                        }),
+                    },
+                )
+                .await;
+                update_tx.send(update).await.unwrap();
 
-            let second_hello = read_frame(&mut second_server).await;
-            write_frame(&mut second_server, &hello_response(second_hello.id)).await;
-
-            let update = read_frame(&mut second_server).await;
-            write_frame(
-                &mut second_server,
-                &IpcMessage {
-                    protocol: IPC_PROTOCOL_VERSION,
-                    id: update.id.clone(),
-                    type_name: "selection.updated".to_owned(),
-                    payload: serde_json::json!({
-                        "accepted": true,
-                        "snapshotId": "snapshot-submit",
-                        "revision": 1
-                    }),
-                },
-            )
-            .await;
-            let _ = update_tx.send(update.clone());
-
-            let current_request = read_frame(&mut second_server).await;
-            assert_eq!(current_request.type_name, "selection.current");
-            write_frame(
-                &mut second_server,
-                &IpcMessage {
-                    protocol: IPC_PROTOCOL_VERSION,
-                    id: current_request.id,
-                    type_name: "selection.current.result".to_owned(),
-                    payload: serde_json::json!({
-                        "snapshot": {
-                            "id": "snapshot-current",
-                            "revision": 1,
-                            "capturedAt": 1_000,
-                            "selection": { "text": "current selection" },
-                            "source": { "kind": "browser", "app": "Chrome" },
-                            "context": { "pageAvailable": false },
-                            "capabilities": {
-                                "localContext": false,
-                                "sectionContext": false,
-                                "pageContext": false,
-                                "screenshot": false
-                            },
-                            "provider": "test-provider",
-                            "confidence": 1.0
-                        }
-                    }),
-                },
-            )
-            .await;
-            let _ = finish_server_rx.await;
-            update
+                if cycle == RECONNECT_COUNT {
+                    let current_request = read_frame(&mut server).await;
+                    assert_eq!(current_request.type_name, "selection.current");
+                    write_frame(
+                        &mut server,
+                        &IpcMessage {
+                            protocol: IPC_PROTOCOL_VERSION,
+                            id: current_request.id,
+                            type_name: "selection.current.result".to_owned(),
+                            payload: serde_json::json!({
+                                "snapshot": {
+                                    "id": "snapshot-current",
+                                    "revision": 1,
+                                    "capturedAt": 1_000,
+                                    "selection": { "text": "current selection" },
+                                    "source": { "kind": "browser", "app": "Chrome" },
+                                    "context": { "pageAvailable": false },
+                                    "capabilities": {
+                                        "localContext": false,
+                                        "sectionContext": false,
+                                        "pageContext": false,
+                                        "screenshot": false
+                                    },
+                                    "provider": "test-provider",
+                                    "confidence": 1.0
+                                }
+                            }),
+                        },
+                    )
+                    .await;
+                    let _ = finish_server_rx.take().unwrap().await;
+                } else {
+                    // Closing the server instance reproduces an idle Harness
+                    // timeout; the next request must handshake on a new pipe.
+                    drop(server);
+                }
+            }
         });
 
         let runtime = BridgeRuntime {
@@ -2427,21 +2434,26 @@ mod tests {
             events: broadcast::channel(64).0,
         };
 
+        assert_eq!(ready_rx.recv().await, Some(0));
         runtime.connect().await.unwrap();
-        second_ready_rx.await.unwrap();
+        for cycle in 0..=RECONNECT_COUNT {
+            if cycle > 0 {
+                assert_eq!(ready_rx.recv().await, Some(cycle));
+            }
+            runtime.submit_selection(material_snapshot()).await.unwrap();
+            let update = update_rx.recv().await.unwrap();
+            assert_eq!(update.type_name, "selection.update");
+            assert_eq!(update.payload["snapshot"]["id"], "snapshot-submit");
+        }
 
-        runtime.submit_selection(material_snapshot()).await.unwrap();
-        let update = update_rx.await.unwrap();
-
-        assert_eq!(update.type_name, "selection.update");
-        assert_eq!(update.payload["snapshot"]["id"], "snapshot-submit");
         let current = runtime.current_selection().await.unwrap().unwrap();
         assert_eq!(current.id, "snapshot-current");
         assert_eq!(current.selection.text, "current selection");
         let status = runtime.status().await;
         assert!(status.connected);
         assert!(status.last_error.is_none());
-        assert_eq!(status.reconnect_count, 1);
+        assert_eq!(status.reconnect_count, RECONNECT_COUNT as u64);
+        assert_eq!(status.request_timeout_count, 0);
         let _ = finish_server_tx.send(());
         let _ = server_task.await.unwrap();
     }
