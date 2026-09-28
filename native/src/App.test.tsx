@@ -218,6 +218,37 @@ describe('selection lens', () => {
     expect(await screen.findByText('A newer visible selection')).toBeInTheDocument()
     expect(screen.getByText('Fixed material · revision 3')).toBeInTheDocument()
   })
+  it('does not retarget an open Lens during 100 selection notifications before an explicit switch', async () => {
+    const latest = deepFreeze({
+      ...selection,
+      id: 's101',
+      revision: 102,
+      selection: { text: 'Latest selection after 100 updates' },
+      source: { ...selection.source, app: 'Microsoft Edge' },
+    })
+    api.getCurrentSelection.mockResolvedValueOnce(selection).mockResolvedValueOnce(latest)
+    render(<App />)
+    await screen.findByTestId('selected-text')
+    await waitFor(() => expect(eventApi.selectionHandler).not.toBeNull())
+
+    act(() => {
+      for (let index = 1; index <= 100; index += 1) {
+        eventApi.selectionHandler?.({
+          payload: { snapshotId: `s${index + 1}`, revision: index + 2 },
+        })
+      }
+    })
+
+    expect(screen.getByTestId('selected-text')).toHaveTextContent('中文 selection 🚀')
+    expect(screen.queryByText('Latest selection after 100 updates')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use latest selection' })).toBeEnabled()
+    expect(api.getCurrentSelection).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use latest selection' }))
+    expect(await screen.findByText('Latest selection after 100 updates')).toBeInTheDocument()
+    expect(screen.getByText('Fixed material · revision 102')).toBeInTheDocument()
+    expect(api.getCurrentSelection).toHaveBeenCalledTimes(2)
+  })
   it('submits the pinned snapshot when a newer selection arrives', async () => {
     render(<App />)
     await screen.findByTestId('selected-text')
