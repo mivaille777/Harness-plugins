@@ -262,6 +262,9 @@ blockquote {
 .session-controls select { width: 100%; min-width: 0; height: 36px; padding: 0 10px; border-radius: 11px; font-size: 11px; text-overflow: ellipsis; }
 .new-session-button { min-height: 36px; padding: 0 11px; border-radius: 11px; font-size: 10px; font-weight: 620; white-space: nowrap; }
 .new-session-button span { margin-right: 3px; font-size: 14px; font-weight: 300; }
+.workspace-controls { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 7px; }
+.workspace-button { min-height: 30px; padding: 0 9px; border-radius: 9px; font-size: 9px; white-space: nowrap; }
+.workspace-path { min-width: 0; overflow: hidden; color: #8190a5; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .history-heading { color: #76869d; font-size: 8px; font-weight: 700; text-transform: uppercase; }
 .history-list { display: grid; max-height: 190px; gap: 6px; margin-top: 6px; overflow: auto; }
 .history-entry { padding: 7px 8px; border: 1px solid rgba(145,165,195,.12); border-radius: 8px; background: rgba(255,255,255,.025); }
@@ -414,6 +417,7 @@ footer { min-height: 32px; margin-top: auto; padding: 7px 3px 0; }
   .brand { font-size: 18px; }
   .session-controls { grid-template-columns: minmax(0,1fr); }
   .new-session-button { width: 100%; }
+  .workspace-controls { flex-wrap: wrap; }
   .ask-hero { min-height: 74px; }
   .context-controls { grid-template-columns: minmax(0,1fr); }
   .context-controls label { display: none; }

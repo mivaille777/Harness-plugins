@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: tauri.invoke }))
 
 import {
   SubmissionUnknownError,
+  chooseWorkspaceAndCreateSession,
   createSession,
   expandSelection,
   getProcessMemoryStatus,
@@ -100,6 +101,15 @@ describe('submitSessionPrompt', () => {
 
 describe('session bridge commands', () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it('requests a native-picked workspace without accepting a frontend path', async () => {
+    tauri.invoke.mockResolvedValue({ sessionId: 'workspace-session', cwd: 'D:\\Research Workspace' })
+    await expect(chooseWorkspaceAndCreateSession()).resolves.toEqual({
+      sessionId: 'workspace-session',
+      cwd: 'D:\\Research Workspace',
+    })
+    expect(tauri.invoke).toHaveBeenCalledWith('bridge_choose_workspace_and_create_session')
+  })
 
   it('lists sessions through the Rust command without rewriting fields', async () => {
     const sessions = [{ id: 'session-1', title: 'Fixed title', status: 'idle', createdAt: 12, live: true, persisted: true }]

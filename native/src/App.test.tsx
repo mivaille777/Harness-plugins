@@ -17,6 +17,7 @@ const api = vi.hoisted(() => {
     pingBridge: vi.fn(),
     listSessions: vi.fn(),
     createSession: vi.fn(),
+    chooseWorkspaceAndCreateSession: vi.fn(),
     expandSelection: vi.fn(),
     readSessionHistory: vi.fn(),
     pauseCapture: vi.fn(),
@@ -95,6 +96,7 @@ describe('selection lens', () => {
     api.pingBridge.mockResolvedValue({ connected: true, endpoint: 'test-pipe', protocol: 4, serverVersion: '0.1.0', lastError: null, lastLatencyMs: 3, latencyP50Ms: 3, latencyP95Ms: 3, latencySampleCount: 1, reconnectCount: 0, requestTimeoutCount: 0 })
     api.listSessions.mockResolvedValue([])
     api.createSession.mockResolvedValue('session-new')
+    api.chooseWorkspaceAndCreateSession.mockResolvedValue(null)
     api.expandSelection.mockResolvedValue({ snapshotId: 's1', scope: 'local', revision: 2, completeness: 'complete', truncated: false, context: { before: 'Loaded before', after: 'Loaded after' } })
     api.readSessionHistory.mockResolvedValue({ sessionId: 'session-1', capturedThroughCursor: 0, entries: [] })
     api.pauseCapture.mockResolvedValue({ ...capture, paused: true, phase: 'paused' })
@@ -335,6 +337,55 @@ describe('selection lens', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('durable log unavailable')
     expect(api.createSession).not.toHaveBeenCalled()
     expect(api.subscribeSession).not.toHaveBeenCalled()
+  })
+  it('uses an OS-picked workspace for a new Harness session and submits to that session', async () => {
+    const cwd = 'D:\\Research Workspace'
+    api.chooseWorkspaceAndCreateSession.mockResolvedValue({ sessionId: 'workspace-session', cwd })
+    api.listSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: 'workspace-session', title: 'Workspace session', status: 'idle', persisted: true },
+    ])
+    render(<App />)
+    const choose = await screen.findByRole('button', { name: 'Choose workspace for new session' })
+    await waitFor(() => expect(choose).toBeEnabled())
+    fireEvent.click(choose)
+
+    await waitFor(() => expect(api.chooseWorkspaceAndCreateSession).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.readSessionHistory).toHaveBeenCalledWith('workspace-session', 0))
+    expect(screen.getByTitle(cwd)).toHaveTextContent(`Workspace: ${cwd}`)
+    expect(api.createSession).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Ask about this selection'), { target: { value: 'Explain this text' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    await waitFor(() => expect(api.submitSessionPrompt).toHaveBeenCalledWith(
+      'workspace-session', expect.any(String), expect.any(String), selection, expect.any(Object),
+    ))
+  })
+  it('does not create or switch sessions when workspace selection is cancelled', async () => {
+    render(<App />)
+    const choose = await screen.findByRole('button', { name: 'Choose workspace for new session' })
+    await waitFor(() => expect(choose).toBeEnabled())
+    fireEvent.click(choose)
+
+    await waitFor(() => expect(api.chooseWorkspaceAndCreateSession).toHaveBeenCalledOnce())
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(api.readSessionHistory).not.toHaveBeenCalled()
+    expect(screen.getByRole('combobox', { name: 'Harness session' })).toHaveValue('')
+  })
+  it('holds session controls while the workspace picker is open', async () => {
+    let closePicker: () => void = () => undefined
+    api.chooseWorkspaceAndCreateSession.mockImplementation(() => new Promise<null>(resolve => {
+      closePicker = () => resolve(null)
+    }))
+    render(<App />)
+    const choose = await screen.findByRole('button', { name: 'Choose workspace for new session' })
+    await waitFor(() => expect(choose).toBeEnabled())
+    fireEvent.click(choose)
+
+    expect(screen.getByRole('button', { name: 'New session' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: 'Harness session' })).toBeDisabled()
+    await act(async () => closePicker())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Choose workspace for new session' })).toBeEnabled())
+    expect(api.createSession).not.toHaveBeenCalled()
   })
   it('releases the old session and restores its own draft when switching', async () => {
     api.listSessions.mockResolvedValueOnce([

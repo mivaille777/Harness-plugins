@@ -10,6 +10,10 @@ export interface AppCopy {
   readonly sessionTitle: string
   readonly sessionCaption: string
   readonly newSession: string
+  readonly chooseWorkspace: string
+  readonly choosingWorkspace: string
+  readonly workspaceLabel: string
+  readonly workspaceCreationFailed: string
   readonly noSession: string
   readonly untitledSession: string
   readonly sessionRunning: string
@@ -84,6 +88,10 @@ const english: AppCopy = {
   sessionTitle: 'Session',
   sessionCaption: 'Durable Harness history',
   newSession: 'New session',
+  chooseWorkspace: 'Choose workspace for new session',
+  choosingWorkspace: 'Choosing workspace…',
+  workspaceLabel: 'Workspace',
+  workspaceCreationFailed: 'Could not create a session in that workspace.',
   noSession: 'New session on first request',
   untitledSession: 'Untitled Harness session',
   sessionRunning: 'Running',
@@ -170,6 +178,10 @@ const simplifiedChinese: AppCopy = {
   sessionTitle: '会话',
   sessionCaption: 'Harness 持久历史',
   newSession: '新建会话',
+  chooseWorkspace: '选择工作区并新建会话',
+  choosingWorkspace: '正在选择工作区…',
+  workspaceLabel: '工作区',
+  workspaceCreationFailed: '无法在该工作区创建会话。',
   noSession: '首次请求时新建会话',
   untitledSession: '未命名 Harness 会话',
   sessionRunning: '运行中',

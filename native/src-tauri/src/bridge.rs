@@ -40,6 +40,13 @@ pub struct SessionSubmission {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceSession {
+    pub session_id: String,
+    pub cwd: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionUnsubscription {
     pub session_id: String,
     pub subscription_id: String,
@@ -1265,14 +1272,17 @@ impl BridgeRuntime {
     }
 
     #[cfg(windows)]
-    async fn create_session(&self) -> Result<String, String> {
+    async fn create_session(&self, cwd: Option<&str>) -> Result<String, String> {
         self.connect().await?;
         let request_id = request_id("session-create");
         let message = IpcMessage {
             protocol: IPC_PROTOCOL_VERSION,
             id: request_id.clone(),
             type_name: "session.create".to_owned(),
-            payload: serde_json::json!({}),
+            payload: match cwd {
+                Some(path) => serde_json::json!({ "cwd": path }),
+                None => serde_json::json!({}),
+            },
         };
         let response = match self.request_message(&message).await {
             Ok(response) => response,
@@ -1316,7 +1326,7 @@ impl BridgeRuntime {
     }
 
     #[cfg(not(windows))]
-    async fn create_session(&self) -> Result<String, String> {
+    async fn create_session(&self, _cwd: Option<&str>) -> Result<String, String> {
         self.connect().await?;
         unreachable!()
     }
@@ -1522,7 +1532,41 @@ pub async fn bridge_list_sessions(
 
 #[tauri::command]
 pub async fn bridge_create_session(state: State<'_, BridgeRuntime>) -> Result<String, String> {
-    state.create_session().await
+    state.create_session(None).await
+}
+
+#[tauri::command]
+#[cfg(windows)]
+pub async fn bridge_choose_workspace_and_create_session(
+    window: tauri::WebviewWindow,
+    state: State<'_, BridgeRuntime>,
+) -> Result<Option<WorkspaceSession>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new().set_parent(&window).pick_folder()
+    })
+    .await
+    .map_err(|error| format!("Workspace picker failed: {error}"))?;
+    let Some(path) = selected else {
+        return Ok(None);
+    };
+    if !path.is_absolute() || !path.is_dir() {
+        return Err("Selected workspace is not an accessible directory".to_owned());
+    }
+    let cwd = path
+        .to_str()
+        .ok_or_else(|| "Selected workspace path is not valid Unicode".to_owned())?
+        .to_owned();
+    let session_id = state.create_session(Some(&cwd)).await?;
+    Ok(Some(WorkspaceSession { session_id, cwd }))
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+pub async fn bridge_choose_workspace_and_create_session(
+    _window: tauri::WebviewWindow,
+    _state: State<'_, BridgeRuntime>,
+) -> Result<Option<WorkspaceSession>, String> {
+    Err("Workspace selection is available only on Windows".to_owned())
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   cancelSession,
   beginInteractionGuard,
+  chooseWorkspaceAndCreateSession,
   createSession,
   expandSelection,
   endInteractionGuard,
@@ -201,6 +202,8 @@ export default function App({ initiallyOpen = true }: AppProps) {
   const [notice, setNotice] = useState<string | null>(null)
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [workspaceChoosing, setWorkspaceChoosing] = useState(false)
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [history, setHistory] = useState<readonly SessionHistoryEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -216,6 +219,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
   const active = useRef<ActiveSession>({ sessionId: null, requestId: null, subscriptionId: null })
   const cursors = useRef(new Map<string, number>())
   const drafts = useRef(new Map<string, string>())
+  const workspacePaths = useRef(new Map<string, string>())
   const draftValue = useRef('')
   const sessionGeneration = useRef(0)
   const pendingSubmission = useRef<{
@@ -506,6 +510,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
       const loaded = await readCompleteHistory(nextSessionId)
       if (generation !== sessionGeneration.current || !viewActive.current) return
       setSessionId(nextSessionId)
+      setWorkspacePath(workspacePaths.current.get(nextSessionId) ?? null)
       setDraft(drafts.current.get(nextSessionId) ?? '')
       rememberSessionId(nextSessionId)
       setHistory(loaded.entries)
@@ -558,6 +563,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
     if (!viewActive.current || generation !== sessionGeneration.current) return
 
     setSessionId(result.sessionId)
+    setWorkspacePath(workspacePaths.current.get(result.sessionId) ?? null)
     setRequestId(result.requestId)
     if (previous.sessionId !== result.sessionId) setDraft(drafts.current.get(result.sessionId) ?? '')
     rememberSessionId(result.sessionId)
@@ -724,7 +730,7 @@ export default function App({ initiallyOpen = true }: AppProps) {
   }, [dispatchLensEvent])
 
   const createAndOpenSession = () => {
-    if (sessionsLoading || historyLoading) return
+    if (sessionsLoading || historyLoading || workspaceChoosing) return
     setNotice('Creating a new Harness session…')
     void createSession()
       .then(async createdId => {
@@ -802,6 +808,20 @@ export default function App({ initiallyOpen = true }: AppProps) {
         : previous)
       setNotice(null)
     })
+  }
+
+  const chooseWorkspaceAndOpenSession = () => {
+    if (sessionsLoading || historyLoading || workspaceChoosing || busy) return
+    setWorkspaceChoosing(true)
+    void chooseWorkspaceAndCreateSession()
+      .then(async selected => {
+        if (selected === null) return
+        workspacePaths.current.set(selected.sessionId, selected.cwd)
+        await refreshSessions().catch(() => undefined)
+        await openSession(selected.sessionId)
+      })
+      .catch(() => setNotice(copy.workspaceCreationFailed))
+      .finally(() => setWorkspaceChoosing(false))
   }
 
   const copyAnswer = () => {
@@ -1038,11 +1058,15 @@ export default function App({ initiallyOpen = true }: AppProps) {
         </details>
       </div>
       <div className="session-controls">
-        <select aria-label={copy.sessionSelectAriaLabel} value={sessionId ?? ''} disabled={sessionsLoading || historyLoading} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
+        <select aria-label={copy.sessionSelectAriaLabel} value={sessionId ?? ''} disabled={sessionsLoading || historyLoading || workspaceChoosing} onChange={event => { if (event.target.value !== '') void openSession(event.target.value) }}>
           {sessionId === null ? <option value="">{copy.noSession}</option> : null}
           {sessions.map((session, index) => <option value={session.id} key={session.id}>{sessionLabel(session, index, copy)} · {sessionStatusLabel(session, copy)}</option>)}
         </select>
-        <button type="button" className="secondary new-session-button" onClick={createAndOpenSession} disabled={sessionsLoading || historyLoading}><span aria-hidden="true">＋</span>{copy.newSession}</button>
+        <button type="button" className="secondary new-session-button" onClick={createAndOpenSession} disabled={sessionsLoading || historyLoading || workspaceChoosing}><span aria-hidden="true">＋</span>{copy.newSession}</button>
+      </div>
+      <div className="workspace-controls">
+        <button type="button" className="secondary workspace-button" onClick={chooseWorkspaceAndOpenSession} disabled={sessionsLoading || historyLoading || workspaceChoosing || busy}>{workspaceChoosing ? copy.choosingWorkspace : copy.chooseWorkspace}</button>
+        {workspacePath === null ? null : <span className="workspace-path" title={workspacePath}>{copy.workspaceLabel}: {workspacePath}</span>}
       </div>
       <p className="session-navigation-note sr-only" role="note">{copy.navigationUnavailable}</p>
     </section>

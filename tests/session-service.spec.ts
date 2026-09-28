@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import { resolve } from 'node:path'
 import { SessionId, snapshotJsonValue, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
 import { normalizeSelectionMaterial, registerSelectionTools } from '../src/session/material.js'
@@ -81,7 +82,10 @@ describe('SelectionCompanionSessionService', () => {
     }])
     const id = await service.create('D:/fixture')
     expect(id).toMatch(/^selection-companion-/)
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ setup: registerSelectionTools }))
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      meta: { cwd: resolve('D:/fixture') },
+      setup: registerSelectionTools,
+    }))
   })
 
   it('reads durable history in bounded pages without resuming a cold agent', async () => {

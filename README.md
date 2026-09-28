@@ -99,6 +99,8 @@ agent.event
 
 `session.history` 返回有界 durable history page，并带有原始日志的 `capturedThroughCursor`。Lens 按 `nextCursor` 读取后从该高水位订阅；Native 的 list/create/history 请求复用 request/reply 管道，事件订阅使用独立管道，切换时通过 `bridge_unsubscribe_session` 精确释放旧订阅。
 
+The Lens can create a new session in a user-chosen Windows workspace. **Choose workspace for new session** opens a native folder picker; the selected local directory is passed through the existing `session.create.cwd` field and becomes the Harness session's working directory. Cancelling the picker creates no session. A session created with **New session** or by the first request uses the Harness process's configured working directory. Choosing a workspace creates a new session and does not move an existing session.
+
 `BridgeRuntime::submit_selection(...)` is the single native path used to persist captured selections into Harness state.
 
 `BridgeRuntime::submit_prompt(...)` projects the exact Lens snapshot into the V3 `session.submit.payload.material` object. The native retry path preserves that same snapshot instead of reading the newest global capture. Harness persists the material with the normal `selection-companion` user-message source, so a later browser selection cannot replace the material associated with an earlier request.

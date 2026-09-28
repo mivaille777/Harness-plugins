@@ -14,6 +14,7 @@ const nativeCommands = [
   'bridge_submit_prompt',
   'bridge_list_sessions',
   'bridge_create_session',
+  'bridge_choose_workspace_and_create_session',
   'bridge_read_session_history',
   'bridge_subscribe_session',
   'bridge_unsubscribe_session',
@@ -200,6 +201,11 @@ export function getBridgeStatus(): Promise<BridgeStatus> {
   return invokeNative<BridgeStatus>('bridge_status')
 }
 
+export interface WorkspaceSession {
+  readonly sessionId: string
+  readonly cwd: string
+}
+
 export function getProcessMemoryStatus(): Promise<ProcessMemoryStatus> {
   return invokeNative<ProcessMemoryStatus>('runtime_memory_status')
 }
@@ -279,6 +285,11 @@ export function listSessions(): Promise<readonly SessionSummary[]> {
 /** Creates one Harness session in the host's configured working directory. */
 export function createSession(): Promise<string> {
   return invokeNative<string>('bridge_create_session')
+}
+
+/** Lets the native OS picker choose a folder before creating a Harness session in it. */
+export function chooseWorkspaceAndCreateSession(): Promise<WorkspaceSession | null> {
+  return invokeNative<WorkspaceSession | null>('bridge_choose_workspace_and_create_session')
 }
 
 /** Reads one bounded durable history page; callers follow nextCursor to load more. */

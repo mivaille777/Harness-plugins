@@ -25,6 +25,7 @@ new SelectionContextService(context)
 const listeners = new Set()
 let disposed = 0
 let submitted = 0
+let createdCwd = null
 const sessions = {
   async list() {
     return [{
@@ -46,7 +47,10 @@ const sessions = {
       ],
     }
   },
-  async create() { return 'session-integration' },
+  async create(cwd) {
+    createdCwd = cwd
+    return 'session-integration'
+  },
   async submit() {
     submitted += 1
     return { requestId: 'request-integration', messageId: 'message-integration', delivery: 'queued', duplicate: false }
@@ -108,6 +112,9 @@ try {
   if (exit.signal !== null) throw new Error(`Rust bridge probe ended by signal ${exit.signal}`)
   if (exit.code !== 0) throw new Error(`Rust bridge probe exited ${exit.code}`)
   if (submitted !== 1) throw new Error(`expected one submitted request, received ${submitted}`)
+  if (createdCwd !== 'D:/integration-fixture') {
+    throw new Error(`session.create did not retain the requested workspace: ${createdCwd}`)
+  }
   if (disposed !== 1 || listeners.size !== 0) {
     throw new Error(`subscription cleanup failed: disposed=${disposed}, listeners=${listeners.size}`)
   }

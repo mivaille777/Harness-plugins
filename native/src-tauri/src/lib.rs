@@ -74,6 +74,7 @@ pub fn run() {
             submission::bridge_submit_authorized_prompt,
             bridge::bridge_list_sessions,
             bridge::bridge_create_session,
+            bridge::bridge_choose_workspace_and_create_session,
             bridge::bridge_read_session_history,
             bridge::bridge_subscribe_session,
             bridge::bridge_unsubscribe_session,
