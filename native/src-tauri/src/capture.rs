@@ -455,24 +455,19 @@ impl CaptureRuntime {
                                         continue;
                                     }
                                     last_capture = Some((signature, now));
-                                    let replaced = worker_latest.replace(PendingSelection {
-                                        snapshot,
-                                        generation: trigger.generation,
-                                        ready_at_ms: now_millis(),
-                                    });
-                                    let _ = ready_tx.try_send(());
-                                    transition(&worker_state, CapturePhase::Publishing, None);
-                                    record_capture_latency(
+                                    queue_pending_selection(
                                         &worker_state,
+                                        &worker_latest,
+                                        PendingSelection {
+                                            snapshot,
+                                            generation: trigger.generation,
+                                            ready_at_ms: now_millis(),
+                                        },
                                         provider_latency,
                                         Some(event_latency),
                                     );
-                                    increment(&worker_state, |metrics| {
-                                        metrics.captured += 1;
-                                        if replaced {
-                                            metrics.coalesced += 1;
-                                        }
-                                    });
+                                    let _ = ready_tx.try_send(());
+                                    transition(&worker_state, CapturePhase::Publishing, None);
                                 }
                                 Ok(ProviderCapture::NoSelection) => {
                                     transition(&worker_state, CapturePhase::NoSelection, None);
@@ -542,21 +537,20 @@ impl CaptureRuntime {
                                         continue;
                                     }
 
-                                    let replaced = worker_latest.replace(PendingSelection {
-                                        snapshot,
-                                        generation: gate.generation,
-                                        ready_at_ms: now_millis(),
-                                    });
+                                    queue_pending_selection(
+                                        &worker_state,
+                                        &worker_latest,
+                                        PendingSelection {
+                                            snapshot,
+                                            generation: gate.generation,
+                                            ready_at_ms: now_millis(),
+                                        },
+                                        latency,
+                                        None,
+                                    );
                                     let _ = ready_tx.try_send(());
                                     last_capture = Some((signature, Instant::now()));
                                     transition(&worker_state, CapturePhase::Publishing, None);
-                                    record_capture_latency(&worker_state, latency, None);
-                                    increment(&worker_state, |metrics| {
-                                        metrics.captured += 1;
-                                        if replaced {
-                                            metrics.coalesced += 1;
-                                        }
-                                    });
                                 }
                                 Ok(ProviderCapture::NoSelection) => {
                                     // Clearing these fingerprints allows an identical later selection
@@ -707,6 +701,23 @@ fn record_capture_latency(
         state.metrics.fallback_capture_latency_p50_ms = p50;
         state.metrics.fallback_capture_latency_p95_ms = p95;
     }
+}
+
+fn queue_pending_selection(
+    state: &Mutex<CaptureState>,
+    latest: &LatestValue<PendingSelection>,
+    pending: PendingSelection,
+    provider_latency_ms: u64,
+    event_latency_ms: Option<u64>,
+) {
+    let replaced = latest.replace(pending);
+    record_capture_latency(state, provider_latency_ms, event_latency_ms);
+    increment(state, |metrics| {
+        metrics.captured += 1;
+        if replaced {
+            metrics.coalesced += 1;
+        }
+    });
 }
 
 fn push_latency_sample(samples: &mut VecDeque<u64>, latency_ms: u64) -> (Option<u64>, Option<u64>) {
@@ -945,6 +956,76 @@ mod tests {
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.take().unwrap().selection.text, "B");
         assert_eq!(queue.len(), 0);
+    }
+
+    #[test]
+    fn synthetic_continuous_selection_workload_processes_500_bounded_updates() {
+        let state = Mutex::new(CaptureState::new());
+        let latest = LatestValue::new();
+
+        for sequence in 1..=500 {
+            let text = format!("continuous-{sequence}");
+            queue_pending_selection(
+                &state,
+                &latest,
+                PendingSelection {
+                    snapshot: snapshot(&text),
+                    generation: 1,
+                    ready_at_ms: sequence,
+                },
+                sequence,
+                Some(sequence),
+            );
+
+            assert_eq!(latest.len(), 1);
+            assert_eq!(
+                latest.take().unwrap().snapshot.selection.text,
+                text,
+                "the drained value should be the current selection"
+            );
+        }
+
+        let state = state.lock().expect("capture state poisoned");
+        assert_eq!(state.metrics.captured, 500);
+        assert_eq!(state.metrics.coalesced, 0);
+        assert_eq!(
+            state.recent_event_capture_latencies_ms.len(),
+            CAPTURE_LATENCY_SAMPLE_WINDOW
+        );
+        assert_eq!(state.metrics.event_capture_latency_p50_ms, Some(372));
+        assert_eq!(state.metrics.event_capture_latency_p95_ms, Some(488));
+        assert_eq!(latest.len(), 0);
+    }
+
+    #[test]
+    fn synthetic_rapid_selection_burst_of_100_coalesces_to_latest_value() {
+        let state = Mutex::new(CaptureState::new());
+        let latest = LatestValue::new();
+
+        for sequence in 1..=100 {
+            let text = format!("rapid-{sequence}");
+            queue_pending_selection(
+                &state,
+                &latest,
+                PendingSelection {
+                    snapshot: snapshot(&text),
+                    generation: 1,
+                    ready_at_ms: sequence,
+                },
+                sequence,
+                Some(sequence),
+            );
+        }
+
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.take().unwrap().snapshot.selection.text, "rapid-100");
+        let state = state.lock().expect("capture state poisoned");
+        assert_eq!(state.metrics.captured, 100);
+        assert_eq!(state.metrics.coalesced, 99);
+        assert_eq!(state.recent_event_capture_latencies_ms.len(), 100);
+        assert_eq!(state.metrics.event_capture_latency_p50_ms, Some(50));
+        assert_eq!(state.metrics.event_capture_latency_p95_ms, Some(95));
+        assert_eq!(latest.len(), 0);
     }
 
     #[test]
